@@ -9,11 +9,21 @@ Use this skill to install open-core skills into a local Codex skills directory.
 
 ## Commands
 
+One-command install:
+
+```bash
+python3 install.py
+```
+
+Dry run:
+
+```bash
+python3 install.py --dry-run
+```
+
 ```bash
 python3 skills/core/skill-installation-governor/scripts/install_skills.py \
-  --source . \
-  --target ~/.codex/skills/codex-engineering-skills \
-  --dry-run
+  --source .
 ```
 
 ```bash
@@ -25,6 +35,7 @@ python3 skills/core/skill-installation-governor/scripts/install_skills.py \
 ## Rules
 
 - Install only `skills/core` and `skills/templates` by default.
+- Default target is `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 - Refuse to overwrite a non-empty target unless `--force` is provided.
 - Validate that copied skill folders contain `SKILL.md`.
 - Never install examples, tests, `.git`, private overlays, generated artifacts, or local caches.

@@ -30,6 +30,11 @@ def test_install_skills_dry_run_counts_core_and_templates() -> None:
         assert "core/spec-governor" in result["planned_skills"]
 
 
+def test_default_target_uses_codex_skills_dir() -> None:
+    target = install_skills.default_target().as_posix()
+    assert target.endswith(".codex/skills/codex-engineering-skills") or target.endswith("skills/codex-engineering-skills")
+
+
 def test_install_skills_copies_to_empty_target() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "skills"
@@ -55,6 +60,7 @@ def test_prompt_pack_validates_standard_prompts() -> None:
 
 def run_all() -> None:
     test_install_skills_dry_run_counts_core_and_templates()
+    test_default_target_uses_codex_skills_dir()
     test_install_skills_copies_to_empty_target()
     test_artifact_schema_inventory_has_many_schemas()
     test_prompt_pack_validates_standard_prompts()

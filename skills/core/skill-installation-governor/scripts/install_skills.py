@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,11 @@ from typing import Any
 
 SCHEMA = "codex-skill-installation-v1"
 LAYERS = ("core", "templates")
+
+
+def default_target() -> Path:
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    return codex_home / "skills" / "codex-engineering-skills"
 
 
 def discover(source: Path, layers: list[str]) -> list[Path]:
@@ -70,7 +76,7 @@ def result(decision: str, target: Path, planned: list[str], copied: list[str], b
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install open-core Codex engineering skills")
     parser.add_argument("--source", default=".")
-    parser.add_argument("--target", required=True)
+    parser.add_argument("--target", default=str(default_target()))
     parser.add_argument("--layers", default="core,templates")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")

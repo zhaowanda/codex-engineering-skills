@@ -24,6 +24,7 @@ It intentionally does not include private company project skills, generated code
 
 ```text
 codex-engineering-skills/
+  install.py
   config/
     framework.example.yaml
     private-patterns.example.yaml
@@ -82,6 +83,20 @@ python3 scripts/privacy_scan.py \
 The scanner blocks absolute user paths, private project names, internal workspace names, and configurable sensitive patterns.
 
 ## Start Here
+
+Install all skills:
+
+```bash
+python3 install.py
+```
+
+Preview install without writing:
+
+```bash
+python3 install.py --dry-run
+```
+
+Default target: `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 
 - [Getting Started](docs/getting-started.md): run the synthetic workflow end to end.
 - [Workflow Guide](docs/workflow-guide.md): understand the gates, allowed implementation conditions, release conditions, and private overlay boundary.

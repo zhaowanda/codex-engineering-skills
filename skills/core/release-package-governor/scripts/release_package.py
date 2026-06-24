@@ -10,6 +10,7 @@ from typing import Any
 
 SCHEMA = "codex-release-package-v1"
 REQUIRED_PATHS = [
+    "install.py",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",

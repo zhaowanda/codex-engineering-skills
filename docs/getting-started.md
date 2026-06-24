@@ -2,7 +2,27 @@
 
 This guide runs the open-core workflow with the synthetic example.
 
-## 1. Validate The Repository
+## 1. Install All Skills
+
+```bash
+python3 install.py
+```
+
+Preview install without writing:
+
+```bash
+python3 install.py --dry-run
+```
+
+By default, skills are installed to `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
+
+Alternative CLI form:
+
+```bash
+python3 scripts/codex_eng.py run install-all --dry-run
+```
+
+## 2. Validate The Repository
 
 ```bash
 python3 tests/test_privacy_scan.py
@@ -16,15 +36,6 @@ python3 scripts/codex_eng.py synthetic-e2e --out-dir /tmp/codex-synthetic
 python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 ```
 
-Install dry run:
-
-```bash
-python3 scripts/codex_eng.py run install-skills \
-  --source . \
-  --target /tmp/codex-engineering-skills-install \
-  --dry-run
-```
-
 Prompt pack and schema checks:
 
 ```bash
@@ -32,7 +43,7 @@ python3 scripts/codex_eng.py run prompt-pack --root . --validate
 python3 scripts/codex_eng.py run artifact-schema --root .
 ```
 
-## 2. Ingest Requirement
+## 3. Ingest Requirement
 
 ```bash
 python3 skills/core/requirement-document-ingestor/scripts/ingest_requirement.py \
@@ -41,7 +52,7 @@ python3 skills/core/requirement-document-ingestor/scripts/ingest_requirement.py 
   --out-dir /tmp/codex-synthetic
 ```
 
-## 3. Normalize Spec
+## 4. Normalize Spec
 
 ```bash
 python3 skills/core/spec-governor/scripts/spec_governor.py normalize \
@@ -59,7 +70,7 @@ python3 skills/core/requirement-question-governor/scripts/question_governor.py g
   --out /tmp/codex-synthetic/open_questions.json
 ```
 
-## 4. Generate Designs
+## 5. Generate Designs
 
 ```bash
 python3 skills/core/technical-design-governor/scripts/technical_design.py \
@@ -72,7 +83,7 @@ python3 skills/core/architecture-design-governor/scripts/architecture_design.py 
   --out /tmp/codex-synthetic/architecture_design.json
 ```
 
-## 5. Generate Test And Specialist Reviews
+## 6. Generate Test And Specialist Reviews
 
 ```bash
 python3 skills/core/test-design-governor/scripts/test_design.py render \
