@@ -22,7 +22,7 @@ Alternative CLI form:
 python3 scripts/codex_eng.py run install-all --dry-run
 ```
 
-If you want this repository to be the only maintenance source for open-core skills, sync local skills as symlinks:
+If you want to install this repository into the local Codex skills directory:
 
 ```bash
 python3 scripts/codex_eng.py run sync-local-skills --dry-run

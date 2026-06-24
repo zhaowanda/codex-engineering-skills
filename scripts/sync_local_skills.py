@@ -31,18 +31,23 @@ def backup_path(skills_root: Path, category: str, name: str, stamp: str) -> Path
     return skills_root / ".backup" / "codex-engineering-skills-sync" / stamp / category / name
 
 
-def same_symlink(path: Path, target: Path) -> bool:
-    if not path.is_symlink():
+def same_tree(path: Path, target: Path, mode: str) -> bool:
+    if mode == "symlink":
+        if not path.is_symlink():
+            return False
+        try:
+            return path.resolve() == target.resolve()
+        except OSError:
+            return False
+    marker = path / ".codex-engineering-skills-source"
+    if not marker.exists():
         return False
-    try:
-        return path.resolve() == target.resolve()
-    except OSError:
-        return False
+    return marker.read_text(encoding="utf-8", errors="ignore").strip() == str(target.resolve())
 
 
-def replace_with_symlink(path: Path, target: Path, backup: Path, dry_run: bool, force: bool) -> tuple[str, str | None]:
-    if same_symlink(path, target):
-        return "already_linked", None
+def replace_skill(path: Path, target: Path, backup: Path, dry_run: bool, force: bool, mode: str) -> tuple[str, str | None]:
+    if same_tree(path, target, mode):
+        return "already_installed" if mode == "copy" else "already_linked", None
     if path.exists() or path.is_symlink():
         if not force:
             return "blocked", "destination exists; use --force to backup and replace"
@@ -52,10 +57,13 @@ def replace_with_symlink(path: Path, target: Path, backup: Path, dry_run: bool, 
                 path.unlink()
             else:
                 shutil.move(str(path), str(backup))
-    if not dry_run:
+    if not dry_run and mode == "symlink":
         path.parent.mkdir(parents=True, exist_ok=True)
         path.symlink_to(target, target_is_directory=True)
-    return "linked", None
+    if not dry_run and mode == "copy":
+        shutil.copytree(target, path, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))
+        (path / ".codex-engineering-skills-source").write_text(str(target.resolve()) + "\n", encoding="utf-8")
+    return "installed" if mode == "copy" else "linked", None
 
 
 def sync(
@@ -63,6 +71,7 @@ def sync(
     skills_root: Path,
     dry_run: bool,
     force: bool,
+    mode: str = "copy",
     overlay_category: str = DEFAULT_OVERLAY_CATEGORY,
     open_category: str = DEFAULT_OPEN_CATEGORY,
     template_category: str = DEFAULT_TEMPLATE_CATEGORY,
@@ -74,6 +83,8 @@ def sync(
     stamp = datetime.now().strftime("%Y%m%d%H%M%S")
     actions: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
+    if mode not in {"copy", "symlink"}:
+        blockers.append({"source": "mode", "message": "mode must be copy or symlink"})
 
     if not core:
         blockers.append({"source": str(repo / "skills/core"), "message": "no core skills found"})
@@ -89,7 +100,7 @@ def sync(
         else:
             dest = skills_root / open_category / name
             category = open_category
-        status, reason = replace_with_symlink(dest, source, backup_path(skills_root, category, name, stamp), dry_run, force)
+        status, reason = replace_skill(dest, source, backup_path(skills_root, category, name, stamp), dry_run, force, mode)
         action = {
             "skill": name,
             "layer": "core",
@@ -105,7 +116,7 @@ def sync(
 
     for name, source in templates.items():
         dest = skills_root / template_category / name
-        status, reason = replace_with_symlink(dest, source, backup_path(skills_root, template_category, name, stamp), dry_run, force)
+        status, reason = replace_skill(dest, source, backup_path(skills_root, template_category, name, stamp), dry_run, force, mode)
         action = {
             "skill": name,
             "layer": "templates",
@@ -125,11 +136,13 @@ def sync(
         "decision": decision,
         "skills_root": display_path(skills_root),
         "repo": str(repo),
-        "mode": "symlink",
+        "mode": mode,
         "force": force,
         "dry_run": dry_run,
         "action_count": len(actions),
+        "installed_count": sum(1 for item in actions if item["status"] == "installed"),
         "linked_count": sum(1 for item in actions if item["status"] == "linked"),
+        "already_installed_count": sum(1 for item in actions if item["status"] == "already_installed"),
         "already_linked_count": sum(1 for item in actions if item["status"] == "already_linked"),
         "blockers": blockers,
         "actions": actions,
@@ -146,9 +159,10 @@ def display_path(path: Path) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Sync local Codex skills to this open repository as the maintenance source")
+    parser = argparse.ArgumentParser(description="Install local Codex skills from this open repository")
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--skills-root", default=str(codex_skills_root()))
+    parser.add_argument("--mode", choices=["copy", "symlink"], default="copy")
     parser.add_argument("--overlay-category", default=DEFAULT_OVERLAY_CATEGORY)
     parser.add_argument("--open-category", default=DEFAULT_OPEN_CATEGORY)
     parser.add_argument("--template-category", default=DEFAULT_TEMPLATE_CATEGORY)
@@ -160,6 +174,7 @@ def main() -> int:
         Path(args.skills_root),
         args.dry_run,
         args.force,
+        args.mode,
         args.overlay_category,
         args.open_category,
         args.template_category,
