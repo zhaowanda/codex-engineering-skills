@@ -18,6 +18,7 @@ def test_render_github_contains_validation_steps() -> None:
     assert "py_compile" in content
     assert "tests/test_*.py" in content or "glob('test_*.py')" in content
     assert "privacy_scan.py" in content
+    assert "skill_health.py" in content
 
 
 def test_render_gitlab_contains_validation_steps() -> None:
@@ -25,6 +26,7 @@ def test_render_gitlab_contains_validation_steps() -> None:
     assert "image: python:3.11" in content
     assert "py_compile" in content
     assert "privacy_scan.py" in content
+    assert "skill_health.py" in content
     assert "merge_request_event" in content
 
 

@@ -24,6 +24,7 @@ print(f"ran {len(tests)} test files")
 PY"""
 
 PRIVACY_SCAN = "python3 scripts/privacy_scan.py --root . --patterns config/private-patterns.example.yaml"
+SKILL_HEALTH = "python3 skills/core/skill-health/scripts/skill_health.py --root ."
 
 
 def github_template() -> str:
@@ -52,6 +53,8 @@ jobs:
 {indent(RUN_TESTS, 10)}
       - name: Privacy scan
         run: {PRIVACY_SCAN}
+      - name: Skill health
+        run: {SKILL_HEALTH}
 """
 
 
@@ -68,6 +71,7 @@ validate:
     - |
 {indent(RUN_TESTS, 6)}
     - {PRIVACY_SCAN}
+    - {SKILL_HEALTH}
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'

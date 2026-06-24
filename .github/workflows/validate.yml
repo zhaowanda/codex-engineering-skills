@@ -1,0 +1,41 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile Python
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import py_compile
+          paths = [p for p in Path('.').rglob('*.py') if '.git' not in p.parts and '__pycache__' not in p.parts]
+          for path in paths:
+              py_compile.compile(str(path), doraise=True)
+          print(f"compiled {len(paths)} python files")
+          PY
+      - name: Run tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          tests = sorted(Path('tests').glob('test_*.py'))
+          for test in tests:
+              subprocess.run(['python3', str(test)], check=True)
+          print(f"ran {len(tests)} test files")
+          PY
+      - name: Privacy scan
+        run: python3 scripts/privacy_scan.py --root . --patterns config/private-patterns.example.yaml
+      - name: Skill health
+        run: python3 skills/core/skill-health/scripts/skill_health.py --root .
