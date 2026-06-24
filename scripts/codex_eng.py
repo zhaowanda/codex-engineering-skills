@@ -23,6 +23,12 @@ COMMANDS = {
     "install-skills": ["python3", "skills/core/skill-installation-governor/scripts/install_skills.py"],
     "artifact-schema": ["python3", "skills/core/artifact-schema-governor/scripts/artifact_schema.py"],
     "prompt-pack": ["python3", "skills/core/prompt-pack-governor/scripts/prompt_pack.py"],
+    "contribution": ["python3", "skills/core/contribution-governor/scripts/contribution.py"],
+    "security-policy": ["python3", "skills/core/security-policy-governor/scripts/security_policy.py"],
+    "docs-site": ["python3", "skills/core/docs-site-governor/scripts/docs_site.py", "validate"],
+    "compatibility": ["python3", "skills/core/compatibility-governor/scripts/compatibility.py"],
+    "mcp-integration": ["python3", "skills/core/mcp-integration-governor/scripts/mcp_integration.py"],
+    "benchmark": ["python3", "skills/core/benchmark-governor/scripts/benchmark.py"],
 }
 
 

@@ -34,6 +34,7 @@ requirement source
 -> delivery-case-capture
 -> issue-pr-governor / version-release-governor / dependency-license-governor for open-source publication
 -> artifact-schema-governor / prompt-pack-governor / skill-installation-governor for distribution readiness
+-> contribution-governor / security-policy-governor / docs-site-governor / compatibility-governor / mcp-integration-governor / benchmark-governor for open-source maturity
 -> skill-health / forward-test-runner before publishing
 ```
 
@@ -74,6 +75,10 @@ Private overlay contains:
 
 Never publish private overlay artifacts in this repository.
 
+## MCP Integration Guidance
+
+MCP usage must stay inside the current task boundary and must produce evidence that can be reviewed without relying on private tool state. Browser or Chrome DevTools MCP evidence is expected for UI acceptance, GitHub MCP evidence is useful for issue and PR workflows, and filesystem or knowledge MCP outputs must avoid private overlays. If an MCP server is unavailable, fall back to repository scripts, local artifacts, or manual evidence and record the fallback in the gate output.
+
 ## Token Strategy
 
 - Use `delivery-runner` first to identify the current stage.
@@ -88,4 +93,5 @@ Never publish private overlay artifacts in this repository.
 - Run `artifact-schema-governor` after adding gate scripts so machine-readable contracts stay discoverable.
 - Run `prompt-pack-governor` before publishing user-facing prompt examples.
 - Run `skill-installation-governor` to verify installability before release.
+- Run contribution, security policy, docs-site, compatibility, MCP integration, and benchmark governors before external releases.
 - Run `skill-health` and `forward-test-runner` before publishing open-core changes.

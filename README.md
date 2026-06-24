@@ -85,6 +85,9 @@ The scanner blocks absolute user paths, private project names, internal workspac
 
 - [Getting Started](docs/getting-started.md): run the synthetic workflow end to end.
 - [Workflow Guide](docs/workflow-guide.md): understand the gates, allowed implementation conditions, release conditions, and private overlay boundary.
+- [Skill Catalog](docs/skill-catalog.md): browse generated skill inventory.
+- [Scenario Guide](docs/scenario-guide.md): browse synthetic example scenarios.
+- [FAQ](docs/faq.md): common open-core usage and boundary questions.
 
 Unified CLI:
 
@@ -121,6 +124,12 @@ python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 - `skills/core/skill-installation-governor`: installs or dry-runs open-core skills into a local Codex skills directory with overwrite-safe validation.
 - `skills/core/artifact-schema-governor`: inventories emitted JSON artifact schemas and flags missing or unstable machine-readable contracts.
 - `skills/core/prompt-pack-governor`: validates reusable prompt packs for one-line requests, long PRDs, bugfixes, code review, release readiness, and low-rework implementation.
+- `skills/core/contribution-governor`: validates CONTRIBUTING, contribution support files, PR expectations, tests, privacy scan, and skill-health guidance.
+- `skills/core/security-policy-governor`: validates SECURITY policy coverage for vulnerability reporting, supported versions, private data, secrets, dependency review, and response process.
+- `skills/core/docs-site-governor`: generates and validates public docs navigation, skill catalog, scenario guide, FAQ, and local Markdown links.
+- `skills/core/compatibility-governor`: reviews skill, schema, and CLI command compatibility risks against a base Git ref.
+- `skills/core/mcp-integration-governor`: validates generic MCP guidance and evidence expectations for browser, GitHub, and workflow integrations.
+- `skills/core/benchmark-governor`: generates quality metrics for skills, scripts, schemas, prompts, scenarios, tests, privacy, and skill health.
 - `skills/core/implementation-completion-gate`: validates real diff evidence, delivery-plan scope alignment, changed files, and implementation summary before review/testing.
 - `skills/core/evidence-auto-collector`: creates conservative evidence gap summaries from diff impact and command logs.
 - `skills/core/environment-promotion-governor`: validates DEV/SIT/UAT/PRE/PROD promotion evidence, entry/exit criteria, configuration differences, approvers, and rollback readiness.
@@ -159,6 +168,12 @@ python3 skills/core/example-scenario-runner/scripts/example_scenario.py --root .
 python3 skills/core/artifact-schema-governor/scripts/artifact_schema.py --root .
 python3 skills/core/prompt-pack-governor/scripts/prompt_pack.py --root . --validate
 python3 skills/core/skill-installation-governor/scripts/install_skills.py --source . --target /tmp/codex-skills --dry-run
+python3 scripts/codex_eng.py run contribution --root .
+python3 scripts/codex_eng.py run security-policy --root .
+python3 scripts/codex_eng.py run docs-site --root .
+python3 scripts/codex_eng.py run compatibility --root .
+python3 scripts/codex_eng.py run mcp-integration --root .
+python3 scripts/codex_eng.py run benchmark --root .
 ```
 
 ## Migration Strategy

@@ -39,3 +39,11 @@ jobs:
         run: python3 scripts/privacy_scan.py --root . --patterns config/private-patterns.example.yaml
       - name: Skill health
         run: python3 skills/core/skill-health/scripts/skill_health.py --root .
+      - name: Open-source maturity checks
+        run: |
+          python3 scripts/codex_eng.py run contribution --root .
+          python3 scripts/codex_eng.py run security-policy --root .
+          python3 scripts/codex_eng.py run docs-site --root .
+          python3 scripts/codex_eng.py run compatibility --root .
+          python3 scripts/codex_eng.py run mcp-integration --root .
+          python3 scripts/codex_eng.py run benchmark --root .

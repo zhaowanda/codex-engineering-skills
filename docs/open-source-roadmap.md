@@ -76,6 +76,12 @@
 - Skill installation governor. `done`
 - Artifact schema governor. `done`
 - Prompt pack governor. `done`
+- Contribution governor. `done`
+- Security policy governor. `done`
+- Docs site governor. `done`
+- Compatibility governor. `done`
+- MCP integration governor. `done`
+- Benchmark governor. `done`
 
 ## v1.1
 
