@@ -20,6 +20,9 @@ COMMANDS = {
     "test-design": ["python3", "skills/core/test-design-governor/scripts/test_design.py", "render"],
     "diff-impact": ["python3", "skills/core/diff-impact-analyzer/scripts/diff_impact.py"],
     "collect-evidence": ["python3", "skills/core/evidence-auto-collector/scripts/evidence_collect.py"],
+    "install-skills": ["python3", "skills/core/skill-installation-governor/scripts/install_skills.py"],
+    "artifact-schema": ["python3", "skills/core/artifact-schema-governor/scripts/artifact_schema.py"],
+    "prompt-pack": ["python3", "skills/core/prompt-pack-governor/scripts/prompt_pack.py"],
 }
 
 

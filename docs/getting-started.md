@@ -16,6 +16,22 @@ python3 scripts/codex_eng.py synthetic-e2e --out-dir /tmp/codex-synthetic
 python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 ```
 
+Install dry run:
+
+```bash
+python3 scripts/codex_eng.py run install-skills \
+  --source . \
+  --target /tmp/codex-engineering-skills-install \
+  --dry-run
+```
+
+Prompt pack and schema checks:
+
+```bash
+python3 scripts/codex_eng.py run prompt-pack --root . --validate
+python3 scripts/codex_eng.py run artifact-schema --root .
+```
+
 ## 2. Ingest Requirement
 
 ```bash

@@ -47,6 +47,13 @@ codex-engineering-skills/
   scripts/
     codex_eng.py
     privacy_scan.py
+  prompts/
+    one-line-request.md
+    long-prd.md
+    bugfix.md
+    code-review.md
+    release-readiness.md
+    low-rework-implementation.md
   skills/
     core/
     templates/
@@ -111,6 +118,9 @@ python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 - `skills/core/version-release-governor`: checks SemVer, `pyproject.toml`, `CHANGELOG.md`, release notes, breaking changes, and migration notes before tagging.
 - `skills/core/dependency-license-governor`: checks open-source license presence, project license metadata, dependency manifests, and high-risk license signals.
 - `skills/core/example-scenario-runner`: runs synthetic bugfix, small feature, configuration, and frontend scenarios to demonstrate framework behavior.
+- `skills/core/skill-installation-governor`: installs or dry-runs open-core skills into a local Codex skills directory with overwrite-safe validation.
+- `skills/core/artifact-schema-governor`: inventories emitted JSON artifact schemas and flags missing or unstable machine-readable contracts.
+- `skills/core/prompt-pack-governor`: validates reusable prompt packs for one-line requests, long PRDs, bugfixes, code review, release readiness, and low-rework implementation.
 - `skills/core/implementation-completion-gate`: validates real diff evidence, delivery-plan scope alignment, changed files, and implementation summary before review/testing.
 - `skills/core/evidence-auto-collector`: creates conservative evidence gap summaries from diff impact and command logs.
 - `skills/core/environment-promotion-governor`: validates DEV/SIT/UAT/PRE/PROD promotion evidence, entry/exit criteria, configuration differences, approvers, and rollback readiness.
@@ -146,6 +156,9 @@ python3 skills/core/issue-pr-governor/scripts/issue_pr.py --pr-file .github/pull
 python3 skills/core/version-release-governor/scripts/version_release.py --root . --version 0.1.0
 python3 skills/core/dependency-license-governor/scripts/dependency_license.py --root .
 python3 skills/core/example-scenario-runner/scripts/example_scenario.py --root . --out /tmp/codex-example-scenarios
+python3 skills/core/artifact-schema-governor/scripts/artifact_schema.py --root .
+python3 skills/core/prompt-pack-governor/scripts/prompt_pack.py --root . --validate
+python3 skills/core/skill-installation-governor/scripts/install_skills.py --source . --target /tmp/codex-skills --dry-run
 ```
 
 ## Migration Strategy

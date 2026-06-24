@@ -73,6 +73,9 @@
 - Version release governor. `done`
 - Dependency license governor. `done`
 - Example scenario runner. `done`
+- Skill installation governor. `done`
+- Artifact schema governor. `done`
+- Prompt pack governor. `done`
 
 ## v1.1
 

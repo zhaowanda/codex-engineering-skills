@@ -33,6 +33,7 @@ requirement source
 -> post-release-observer
 -> delivery-case-capture
 -> issue-pr-governor / version-release-governor / dependency-license-governor for open-source publication
+-> artifact-schema-governor / prompt-pack-governor / skill-installation-governor for distribution readiness
 -> skill-health / forward-test-runner before publishing
 ```
 
@@ -84,4 +85,7 @@ Never publish private overlay artifacts in this repository.
 - Capture repeated blockers with `delivery-case-capture`.
 - Run `issue-pr-governor`, `version-release-governor`, and `dependency-license-governor` before open-source release or external contribution merge.
 - Run `example-scenario-runner` to verify bugfix, feature, configuration, and frontend example paths remain demonstrable.
+- Run `artifact-schema-governor` after adding gate scripts so machine-readable contracts stay discoverable.
+- Run `prompt-pack-governor` before publishing user-facing prompt examples.
+- Run `skill-installation-governor` to verify installability before release.
 - Run `skill-health` and `forward-test-runner` before publishing open-core changes.

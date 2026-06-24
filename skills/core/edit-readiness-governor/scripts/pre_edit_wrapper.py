@@ -10,6 +10,7 @@ from typing import Any
 
 
 EDIT_READINESS = Path(__file__).with_name("edit_readiness.py")
+SCHEMA = "codex-pre-edit-wrapper-v1"
 
 
 def run_json(cmd: list[str]) -> dict[str, Any]:
@@ -64,6 +65,7 @@ def main() -> int:
     verification = verify["json"]
     if verification.get("decision") != "ready":
         print(json.dumps({
+            "schema": SCHEMA,
             "decision": "blocked",
             "permit_verification": verification,
             "stderr": verify["stderr"],
@@ -73,6 +75,7 @@ def main() -> int:
 
     if args.dry_run:
         print(json.dumps({
+            "schema": SCHEMA,
             "decision": "ready",
             "dry_run": True,
             "permit_verification": verification,
@@ -82,6 +85,7 @@ def main() -> int:
 
     proc = subprocess.run(command, text=True)
     print(json.dumps({
+        "schema": SCHEMA,
         "decision": "executed" if proc.returncode == 0 else "command_failed",
         "permit_verification": verification,
         "command": command,
