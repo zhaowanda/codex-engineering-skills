@@ -16,6 +16,8 @@
 - Real project skills.
 - Generated code indexes.
 - Project baseline docs reconstructed from source.
+- Project understanding dossiers generated from real repositories.
+- Real API, route, config, dependency, Git hot-file, and code-index surfaces.
 - Requirement dossiers and release evidence.
 - Business semantic maps.
 - Internal endpoint maps, table maps, MQ topics, payment provider config, and customer workflows.
@@ -25,3 +27,4 @@
 
 The open-source repository must be runnable with example data only. A user should bring their own private overlay to connect the framework to real projects.
 
+Generated analysis for real repositories must be written to a private overlay or external artifact directory. Only synthetic fixtures under `examples/` may be committed here.

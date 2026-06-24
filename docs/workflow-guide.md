@@ -4,6 +4,7 @@
 
 ```text
 requirement source
+-> project-understanding-runner when existing repositories or legacy code must be understood
 -> requirement-document-ingestor
 -> spec-governor
 -> requirement-question-governor
@@ -70,6 +71,8 @@ Private overlay contains:
 - project-specific skills
 - generated code indexes
 - baseline docs
+- project understanding dossiers
+- API/config/dependency/git surfaces from real repositories
 - delivery docs
 - business semantic maps
 - real cases
@@ -83,7 +86,9 @@ MCP usage must stay inside the current task boundary and must produce evidence t
 ## Token Strategy
 
 - Use `delivery-runner` first to identify the current stage.
+- Use `project-understanding-runner` once per relevant repository before long requirement design or legacy maintenance.
 - Use `code-index-lookup` before reading source broadly.
+- Reuse generated repository/API/config/dependency/baseline JSON as compact context instead of re-reading whole repositories.
 - Use generated JSON artifacts as compact context.
 - Keep human-readable documents separate from machine gate JSON.
 - Run `traceability-governor` to prove acceptance coverage and task/file scope before implementation or release.

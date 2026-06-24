@@ -35,6 +35,13 @@ COMMANDS = {
     "roadmap": ["python3", "skills/core/roadmap-governor/scripts/roadmap.py"],
     "docs-readability": ["python3", "skills/core/docs-readability-governor/scripts/docs_readability.py"],
     "prompt-effectiveness": ["python3", "skills/core/prompt-effectiveness-governor/scripts/prompt_effectiveness.py"],
+    "repository-analyze": ["python3", "skills/core/repository-analyzer/scripts/repository_analyzer.py"],
+    "api-surface": ["python3", "skills/core/api-surface-extractor/scripts/api_surface.py"],
+    "config-surface": ["python3", "skills/core/config-surface-extractor/scripts/config_surface.py"],
+    "dependency-surface": ["python3", "skills/core/dependency-surface-analyzer/scripts/dependency_surface.py"],
+    "git-history": ["python3", "skills/core/git-history-miner/scripts/git_history.py"],
+    "baseline-quality": ["python3", "skills/core/baseline-quality-governor/scripts/baseline_quality.py"],
+    "project-understand": ["python3", "skills/core/project-understanding-runner/scripts/project_understand.py"],
 }
 
 

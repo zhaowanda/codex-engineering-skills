@@ -43,7 +43,32 @@ python3 scripts/codex_eng.py run prompt-pack --root . --validate
 python3 scripts/codex_eng.py run artifact-schema --root .
 ```
 
-## 3. Ingest Requirement
+## 3. Understand An Existing Repository
+
+Before designing against a legacy or unfamiliar codebase, generate a project understanding dossier:
+
+```bash
+python3 scripts/codex_eng.py run project-understand \
+  --repo examples/synthetic-repos/basic-web-service \
+  --project basic-web-service \
+  --out /tmp/codex-project-understanding
+```
+
+Expected outputs:
+
+- `repository_analysis.json`: language, structure, entrypoint, build, test, and CI hints.
+- `api_surface.json`: extracted API and route hints.
+- `config_surface.json`: configuration file paths and key names only.
+- `dependency_surface.json`: dependency ecosystems and build/test hints.
+- `git_history.json`: recent commits and hot files when Git history is available.
+- `code_index.json`: compact source index for targeted lookup.
+- `baseline.json`: machine-readable inferred baseline.
+- `baseline_quality.json`: baseline completeness review.
+- `human_baseline.md`: readable project summary for maintainers.
+
+For real repositories, write outputs to a private overlay or temporary artifact directory. Do not commit generated real project baselines, indexes, endpoint maps, or config surfaces to this open-source repository.
+
+## 4. Ingest Requirement
 
 ```bash
 python3 skills/core/requirement-document-ingestor/scripts/ingest_requirement.py \
@@ -52,7 +77,7 @@ python3 skills/core/requirement-document-ingestor/scripts/ingest_requirement.py 
   --out-dir /tmp/codex-synthetic
 ```
 
-## 4. Normalize Spec
+## 5. Normalize Spec
 
 ```bash
 python3 skills/core/spec-governor/scripts/spec_governor.py normalize \
@@ -70,7 +95,7 @@ python3 skills/core/requirement-question-governor/scripts/question_governor.py g
   --out /tmp/codex-synthetic/open_questions.json
 ```
 
-## 5. Generate Designs
+## 6. Generate Designs
 
 ```bash
 python3 skills/core/technical-design-governor/scripts/technical_design.py \
@@ -83,7 +108,7 @@ python3 skills/core/architecture-design-governor/scripts/architecture_design.py 
   --out /tmp/codex-synthetic/architecture_design.json
 ```
 
-## 6. Generate Test And Specialist Reviews
+## 7. Generate Test And Specialist Reviews
 
 ```bash
 python3 skills/core/test-design-governor/scripts/test_design.py render \
@@ -105,7 +130,7 @@ python3 skills/core/data-security-governor/scripts/data_security.py design \
   --out /tmp/codex-synthetic/data_security_review.json || true
 ```
 
-## 6. Inspect Workflow Status
+## 8. Inspect Workflow Status
 
 ```bash
 python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect \
@@ -114,7 +139,7 @@ python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect \
 
 The runner tells you the current stage, missing artifacts, blockers, next command, and whether implementation or release is allowed.
 
-## 7. Connect A Private Overlay
+## 9. Connect A Private Overlay
 
 Use `project-onboard`, `code-index-builder`, and `docs-governor` in a private repository:
 

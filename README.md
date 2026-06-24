@@ -112,6 +112,17 @@ python3 scripts/codex_eng.py synthetic-e2e --out-dir /tmp/codex-synthetic
 python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 ```
 
+Analyze an existing repository before requirement design:
+
+```bash
+python3 scripts/codex_eng.py run project-understand \
+  --repo examples/synthetic-repos/basic-web-service \
+  --project basic-web-service \
+  --out /tmp/codex-project-understanding
+```
+
+The runner emits machine JSON plus `human_baseline.md`. For real projects, write these outputs to a private overlay or temporary artifact directory, not to this open-source repository.
+
 ## Available Core Skills
 
 - `skills/core/requirement-document-ingestor`: ingests Markdown, text, JSON, copied docs, and PDF placeholders into normalized requirement text and source manifest.
@@ -129,6 +140,13 @@ python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 - `skills/core/project-onboard`: creates a private overlay project skill skeleton and project registry entry for a new repository.
 - `skills/core/docs-governor`: initializes and validates a long-lived delivery docs repository layout that separates human docs from machine artifacts.
 - `skills/core/project-baseline-reverser`: generates inferred baseline documentation from source structure and Git history for projects without existing docs.
+- `skills/core/repository-analyzer`: summarizes repository structure, languages, entrypoints, build files, config files, tests, CI, and framework hints before design or maintenance work.
+- `skills/core/api-surface-extractor`: extracts API, route, controller, and frontend route hints from common frameworks without requiring private project knowledge.
+- `skills/core/config-surface-extractor`: extracts configuration files and key names only, avoiding values, for environment and runtime readiness analysis.
+- `skills/core/dependency-surface-analyzer`: summarizes dependency manifests, ecosystems, and likely build/test commands.
+- `skills/core/git-history-miner`: mines recent Git history, hot files, and hot directories without exposing author emails.
+- `skills/core/baseline-quality-governor`: checks whether inferred baseline documentation has enough overview, module, API, config, dependency, test, risk, and follow-up coverage.
+- `skills/core/project-understanding-runner`: orchestrates repository, API, config, dependency, Git, code index, baseline, and baseline-quality analysis into one project understanding dossier.
 - `skills/core/delivery-case-capture`: captures completed, blocked, or confusing delivery runs as anonymized reusable learning cases.
 - `skills/core/diff-impact-analyzer`: classifies git diff impact areas and required evidence across API, database, configuration, permission, performance, frontend, tests, and docs.
 - `skills/core/traceability-governor`: builds requirement-to-delivery traceability across acceptance criteria, design, tasks, implementation, tests, and evidence.

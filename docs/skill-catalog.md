@@ -1,7 +1,9 @@
 # Skill Catalog
 
+- `skills/core/api-surface-extractor`: api-surface-extractor
 - `skills/core/architecture-design-governor`: architecture-design-governor
 - `skills/core/artifact-schema-governor`: artifact-schema-governor
+- `skills/core/baseline-quality-governor`: baseline-quality-governor
 - `skills/core/benchmark-governor`: benchmark-governor
 - `skills/core/change-risk-governor`: change-risk-governor
 - `skills/core/code-design-quality-reviewer`: code-design-quality-reviewer
@@ -9,6 +11,7 @@
 - `skills/core/code-index-lookup`: code-index-lookup
 - `skills/core/code-review-gate`: code-review-gate
 - `skills/core/compatibility-governor`: compatibility-governor
+- `skills/core/config-surface-extractor`: config-surface-extractor
 - `skills/core/configuration-governor`: configuration-governor
 - `skills/core/contribution-governor`: contribution-governor
 - `skills/core/data-security-governor`: data-security-governor
@@ -16,6 +19,7 @@
 - `skills/core/delivery-runner`: delivery-runner
 - `skills/core/delivery-state-governor`: delivery-state-governor
 - `skills/core/dependency-license-governor`: dependency-license-governor
+- `skills/core/dependency-surface-analyzer`: dependency-surface-analyzer
 - `skills/core/deprecation-governor`: deprecation-governor
 - `skills/core/design-architecture-reviewer`: design-architecture-reviewer
 - `skills/core/diff-impact-analyzer`: diff-impact-analyzer
@@ -29,6 +33,7 @@
 - `skills/core/forward-test-runner`: forward-test-runner
 - `skills/core/framework-config-governor`: framework-config-governor
 - `skills/core/frontend-acceptance-runner`: frontend-acceptance-runner
+- `skills/core/git-history-miner`: git-history-miner
 - `skills/core/git-worktree-governor`: git-worktree-governor
 - `skills/core/human-doc-reviewer`: human-doc-reviewer
 - `skills/core/implementation-completion-gate`: implementation-completion-gate
@@ -39,11 +44,13 @@
 - `skills/core/post-release-observer`: post-release-observer
 - `skills/core/project-baseline-reverser`: project-baseline-reverser
 - `skills/core/project-onboard`: project-onboard
+- `skills/core/project-understanding-runner`: project-understanding-runner
 - `skills/core/prompt-effectiveness-governor`: prompt-effectiveness-governor
 - `skills/core/prompt-pack-governor`: prompt-pack-governor
 - `skills/core/release-change-governor`: release-change-governor
 - `skills/core/release-evidence-binder`: release-evidence-binder
 - `skills/core/release-package-governor`: release-package-governor
+- `skills/core/repository-analyzer`: repository-analyzer
 - `skills/core/requirement-document-ingestor`: requirement-document-ingestor
 - `skills/core/requirement-question-governor`: requirement-question-governor
 - `skills/core/roadmap-governor`: roadmap-governor

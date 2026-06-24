@@ -1,0 +1,6 @@
+import os
+
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+PAYMENT_PROVIDER = os.getenv("PAYMENT_PROVIDER")
+FEATURE_ORDER_CAPTURE = os.getenv("FEATURE_ORDER_CAPTURE", "false")

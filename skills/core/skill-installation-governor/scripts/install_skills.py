@@ -64,13 +64,20 @@ def result(decision: str, target: Path, planned: list[str], copied: list[str], b
     return {
         "schema": SCHEMA,
         "decision": decision,
-        "target": str(target),
+        "target": display_path(target),
         "planned_count": len(planned),
         "copied_count": len(copied),
         "planned_skills": planned,
         "copied_skills": copied,
         "blockers": blockers,
     }
+
+
+def display_path(path: Path) -> str:
+    try:
+        return "~/" + path.expanduser().resolve().relative_to(Path.home()).as_posix()
+    except Exception:
+        return str(path)
 
 
 def main() -> int:

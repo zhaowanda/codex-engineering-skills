@@ -1,0 +1,12 @@
+[project]
+name = "synthetic-basic-web-service"
+version = "0.1.0"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+]

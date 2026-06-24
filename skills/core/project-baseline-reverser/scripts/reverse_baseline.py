@@ -43,16 +43,25 @@ def git_log(repo: Path) -> list[str]:
 
 def reverse(repo: Path, project: str) -> dict[str, Any]:
     suffixes = files_by_suffix(repo)
+    modules = [{"module": name, "reason": "top-level directory"} for name in top_dirs(repo)]
+    tests = [path.as_posix() for path in repo.rglob("*test*") if path.is_file() and not any(part in SKIP for part in path.parts)][:50]
+    configs = [path.as_posix() for path in repo.rglob("*") if path.is_file() and path.suffix.lower() in {".yaml", ".yml", ".toml", ".properties", ".env"} and not any(part in SKIP for part in path.parts)][:50]
     return {
         "schema": "codex-project-baseline-v1",
         "project": project,
         "repo_root": str(repo),
+        "overview": f"{project} baseline inferred from repository structure, file types, tests, config files, and recent git history.",
         "top_level_directories": top_dirs(repo),
         "file_type_summary": suffixes,
-        "module_hints": [{"module": name, "reason": "top-level directory"} for name in top_dirs(repo)],
-        "test_hints": [path.as_posix() for path in repo.rglob("*test*") if path.is_file() and not any(part in SKIP for part in path.parts)][:50],
-        "config_hints": [path.as_posix() for path in repo.rglob("*") if path.is_file() and path.suffix.lower() in {".yaml", ".yml", ".toml", ".properties", ".env"} and not any(part in SKIP for part in path.parts)][:50],
+        "module_hints": modules,
+        "api_surface_ref": "api_surface.json",
+        "config_surface_ref": "config_surface.json",
+        "dependency_surface_ref": "dependency_surface.json",
+        "test_hints": tests,
+        "config_hints": configs,
+        "risk_hints": ["Baseline is heuristic; verify module ownership, runtime behavior, API contracts, and configuration semantics with maintainers."],
         "recent_git_changes": git_log(repo),
+        "human_followups": ["Confirm module boundaries.", "Confirm runtime entrypoints.", "Confirm critical configuration and deployment flow.", "Confirm test command coverage."],
         "limitations": ["Generated baseline is inferred from code and git history; owner review is required."],
     }
 

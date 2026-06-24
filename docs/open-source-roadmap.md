@@ -49,6 +49,13 @@
 - Project onboarding. `done`
 - Docs governor. `done`
 - Project baseline reverser. `done`
+- Repository analyzer. `done`
+- API surface extractor. `done`
+- Configuration surface extractor. `done`
+- Dependency surface analyzer. `done`
+- Git history miner. `done`
+- Baseline quality governor. `done`
+- Project understanding runner. `done`
 - Requirement document ingestor. `done`
 - Requirement question governor. `done`
 - Delivery case capture. `done`

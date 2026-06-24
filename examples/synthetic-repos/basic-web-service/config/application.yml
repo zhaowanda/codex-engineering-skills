@@ -1,0 +1,8 @@
+service:
+  name: synthetic-orders
+database:
+  url: ${DATABASE_URL}
+payment:
+  provider: ${PAYMENT_PROVIDER}
+features:
+  order_capture: ${FEATURE_ORDER_CAPTURE}
