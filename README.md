@@ -87,7 +87,7 @@ The scanner blocks absolute user paths, private project names, internal workspac
 Install all skills:
 
 ```bash
-python3 install.py
+python3 install.py --force
 ```
 
 Preview install without writing:

@@ -5,7 +5,7 @@ This guide runs the open-core workflow with the synthetic example.
 ## 1. Install All Skills
 
 ```bash
-python3 install.py
+python3 install.py --force
 ```
 
 Preview install without writing:

@@ -46,7 +46,7 @@ def same_tree(path: Path, target: Path, mode: str) -> bool:
 
 
 def replace_skill(path: Path, target: Path, backup: Path, dry_run: bool, force: bool, mode: str) -> tuple[str, str | None]:
-    if same_tree(path, target, mode):
+    if same_tree(path, target, mode) and not force:
         return "already_installed" if mode == "copy" else "already_linked", None
     if path.exists() or path.is_symlink():
         if not force:

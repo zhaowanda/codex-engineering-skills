@@ -54,6 +54,10 @@ def test_sync_copies_open_repo_and_preserves_private_overlay() -> None:
         assert second["decision"] == "plan"
         assert second["already_installed_count"] == 3
 
+        forced = sync_local.sync(repo, skills_root, dry_run=True, force=True, mode="copy")
+        assert forced["decision"] == "plan"
+        assert forced["installed_count"] == 3
+
 
 def run_all() -> None:
     test_sync_copies_open_repo_and_preserves_private_overlay()

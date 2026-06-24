@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -81,10 +83,86 @@ def test_project_understanding_runner_writes_artifacts() -> None:
         assert json.loads((out / "baseline_quality.json").read_text(encoding="utf-8"))["decision"] in {"pass", "warn"}
 
 
+def test_project_understanding_runner_works_after_install_layout() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        installed = root / "skills/codex-engineering-skills"
+        for name in [
+            "repository-analyzer",
+            "api-surface-extractor",
+            "config-surface-extractor",
+            "dependency-surface-analyzer",
+            "git-history-miner",
+            "code-index-builder",
+            "project-baseline-reverser",
+            "baseline-quality-governor",
+            "project-understanding-runner",
+        ]:
+            shutil.copytree(ROOT / "skills/core" / name, installed / "core" / name)
+        out = root / "out"
+        proc = subprocess.run(
+            [
+                "python3",
+                str(installed / "core/project-understanding-runner/scripts/project_understand.py"),
+                "--repo",
+                str(FIXTURE),
+                "--project",
+                "basic-web-service",
+                "--out",
+                str(out),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert (out / "human_baseline.md").exists()
+
+
+def test_project_understanding_runner_works_with_overlay_category_layout() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        installed = root / "skills"
+        open_core = installed / "open-core"
+        company = installed / "company"
+        for name in [
+            "repository-analyzer",
+            "api-surface-extractor",
+            "config-surface-extractor",
+            "dependency-surface-analyzer",
+            "git-history-miner",
+            "project-baseline-reverser",
+            "baseline-quality-governor",
+            "project-understanding-runner",
+        ]:
+            shutil.copytree(ROOT / "skills/core" / name, open_core / name)
+        shutil.copytree(ROOT / "skills/core/code-index-builder", company / "code-index-builder")
+        out = root / "out"
+        proc = subprocess.run(
+            [
+                "python3",
+                str(open_core / "project-understanding-runner/scripts/project_understand.py"),
+                "--repo",
+                str(FIXTURE),
+                "--project",
+                "basic-web-service",
+                "--out",
+                str(out),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert (out / "human_baseline.md").exists()
+
+
 def run_all() -> None:
     test_repository_analyzer_detects_structure()
     test_api_config_dependency_and_git_extractors()
     test_project_understanding_runner_writes_artifacts()
+    test_project_understanding_runner_works_after_install_layout()
+    test_project_understanding_runner_works_with_overlay_category_layout()
 
 
 if __name__ == "__main__":

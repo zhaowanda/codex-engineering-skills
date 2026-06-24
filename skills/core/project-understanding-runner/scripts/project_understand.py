@@ -9,7 +9,20 @@ from typing import Any
 
 
 SCHEMA = "codex-project-understanding-run-v1"
-ROOT = Path(__file__).resolve().parents[4]
+HERE = Path(__file__).resolve()
+
+
+def skill_script(skill: str, script: str) -> Path:
+    candidates = [
+        HERE.parents[4] / "skills/core" / skill / "scripts" / script,
+        HERE.parents[2] / skill / "scripts" / script,
+        HERE.parents[2].parent / "open-core" / skill / "scripts" / script,
+        HERE.parents[2].parent / "company" / skill / "scripts" / script,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    raise FileNotFoundError(f"cannot locate installed skill script: {skill}/scripts/{script}")
 
 
 def load_module(name: str, path: Path):
@@ -20,14 +33,14 @@ def load_module(name: str, path: Path):
     return module
 
 
-repository_analyzer = load_module("repository_analyzer", ROOT / "skills/core/repository-analyzer/scripts/repository_analyzer.py")
-api_surface = load_module("api_surface", ROOT / "skills/core/api-surface-extractor/scripts/api_surface.py")
-config_surface = load_module("config_surface", ROOT / "skills/core/config-surface-extractor/scripts/config_surface.py")
-dependency_surface = load_module("dependency_surface", ROOT / "skills/core/dependency-surface-analyzer/scripts/dependency_surface.py")
-git_history = load_module("git_history", ROOT / "skills/core/git-history-miner/scripts/git_history.py")
-code_index = load_module("code_index", ROOT / "skills/core/code-index-builder/scripts/build_index.py")
-baseline = load_module("baseline", ROOT / "skills/core/project-baseline-reverser/scripts/reverse_baseline.py")
-baseline_quality = load_module("baseline_quality", ROOT / "skills/core/baseline-quality-governor/scripts/baseline_quality.py")
+repository_analyzer = load_module("repository_analyzer", skill_script("repository-analyzer", "repository_analyzer.py"))
+api_surface = load_module("api_surface", skill_script("api-surface-extractor", "api_surface.py"))
+config_surface = load_module("config_surface", skill_script("config-surface-extractor", "config_surface.py"))
+dependency_surface = load_module("dependency_surface", skill_script("dependency-surface-analyzer", "dependency_surface.py"))
+git_history = load_module("git_history", skill_script("git-history-miner", "git_history.py"))
+code_index = load_module("code_index", skill_script("code-index-builder", "build_index.py"))
+baseline = load_module("baseline", skill_script("project-baseline-reverser", "reverse_baseline.py"))
+baseline_quality = load_module("baseline_quality", skill_script("baseline-quality-governor", "baseline_quality.py"))
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
