@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.codex-artifacts/
+.codex-sandbox/
+*.pyc
+*.log
+

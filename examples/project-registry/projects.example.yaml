@@ -1,0 +1,26 @@
+schema: codex-project-registry-v1
+
+projects:
+  - name: example-frontend
+    root: /path/to/example-frontend
+    type: frontend
+    default_branch: main
+    git_remote: git@example.com:org/example-frontend.git
+    skill: example-frontend
+    roles:
+      - frontend
+    related_projects:
+      - example-api
+    test_strategy: npm
+
+  - name: example-api
+    root: /path/to/example-api
+    type: backend
+    default_branch: main
+    git_remote: git@example.com:org/example-api.git
+    skill: example-api
+    roles:
+      - api
+    related_projects: []
+    test_strategy: maven
+

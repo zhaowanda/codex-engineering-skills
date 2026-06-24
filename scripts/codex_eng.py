@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+COMMANDS = {
+    "inspect": ["python3", "skills/core/delivery-runner/scripts/delivery_runner.py", "inspect"],
+    "ingest": ["python3", "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py"],
+    "spec": ["python3", "skills/core/spec-governor/scripts/spec_governor.py", "normalize"],
+    "technical-design": ["python3", "skills/core/technical-design-governor/scripts/technical_design.py"],
+    "architecture-design": ["python3", "skills/core/architecture-design-governor/scripts/architecture_design.py"],
+    "test-design": ["python3", "skills/core/test-design-governor/scripts/test_design.py", "render"],
+    "diff-impact": ["python3", "skills/core/diff-impact-analyzer/scripts/diff_impact.py"],
+    "collect-evidence": ["python3", "skills/core/evidence-auto-collector/scripts/evidence_collect.py"],
+}
+
+
+def run_command(args: list[str]) -> int:
+    proc = subprocess.run(args, cwd=ROOT)
+    return proc.returncode
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Unified CLI for Codex engineering skills")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p_inspect = sub.add_parser("inspect")
+    p_inspect.add_argument("--artifact-dir", required=True)
+    p_e2e = sub.add_parser("synthetic-e2e")
+    p_e2e.add_argument("--out-dir", required=True)
+    p_passthrough = sub.add_parser("run")
+    p_passthrough.add_argument("tool", choices=sorted(COMMANDS))
+    p_passthrough.add_argument("args", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+
+    if args.cmd == "inspect":
+        return run_command(COMMANDS["inspect"] + ["--artifact-dir", args.artifact_dir])
+    if args.cmd == "synthetic-e2e":
+        return run_command(["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", args.out_dir])
+    if args.cmd == "run":
+        return run_command(COMMANDS[args.tool] + args.args)
+    print(json.dumps({"error": "unknown command"}))
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

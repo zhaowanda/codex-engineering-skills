@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import importlib.util
+import tempfile
+from pathlib import Path
+
+
+SCRIPT = Path(__file__).resolve().parents[1] / "skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py"
+spec = importlib.util.spec_from_file_location("frontend_acceptance", SCRIPT)
+frontend_acceptance = importlib.util.module_from_spec(spec)
+assert spec.loader
+spec.loader.exec_module(frontend_acceptance)
+
+
+def test_template_contains_page_specific_fields() -> None:
+    result = frontend_acceptance.template("form", "http://localhost:3000/orders/new")
+    assert result["schema"] == "codex-frontend-acceptance-v1"
+    assert result["page_type"] == "form"
+    assert "form_checks" in result
+    assert "console_errors" in result
+
+
+def test_validate_passes_list_evidence_with_clean_browser_state() -> None:
+    evidence = frontend_acceptance.template("list", "http://localhost:3000/orders")
+    evidence.update(
+        {
+            "pass": True,
+            "page_load": {"loaded": True, "final_url": "http://localhost:3000/orders", "title": "Orders"},
+            "dom_evidence": [{"selector": "table", "text": "Order ID"}],
+            "network_requests": [{"url": "/api/orders", "status": 200}],
+            "failed_requests": [],
+            "console_errors": [],
+        }
+    )
+    evidence["list_checks"]["columns_checked"] = ["Order ID", "Status"]
+    evidence["list_checks"]["filters_checked"] = ["Status"]
+    result = frontend_acceptance.validate_evidence(evidence)
+    assert result["decision"] == "pass"
+    assert result["pass"] is True
+
+
+def test_validate_blocks_console_and_failed_requests() -> None:
+    evidence = frontend_acceptance.template("detail", "http://localhost:3000/orders/1")
+    evidence.update(
+        {
+            "page_load": {"loaded": True},
+            "screenshot_evidence": [{"path": "artifacts/order-detail.png"}],
+            "console_errors": ["TypeError"],
+            "failed_requests": [{"url": "/api/orders/1", "status": 500}],
+        }
+    )
+    result = frontend_acceptance.validate_evidence(evidence)
+    assert result["decision"] == "block"
+    messages = " ".join(item["message"] for item in result["blockers"])
+    assert "console errors" in messages
+    assert "failed network requests" in messages
+
+
+def test_validate_blocks_thin_form_evidence() -> None:
+    evidence = frontend_acceptance.template("form", "http://localhost:3000/orders/new")
+    evidence.update(
+        {
+            "page_load": {"loaded": True},
+            "interaction_evidence": [{"step": "open page"}],
+        }
+    )
+    result = frontend_acceptance.validate_evidence(evidence)
+    assert result["decision"] == "block"
+    assert any(item["source"] == "form" for item in result["blockers"])
+
+
+def test_validate_blocks_export_without_output() -> None:
+    evidence = frontend_acceptance.template("export", "http://localhost:3000/orders")
+    evidence.update(
+        {
+            "page_load": {"loaded": True},
+            "interaction_evidence": [{"step": "click export"}],
+        }
+    )
+    evidence["export_checks"]["trigger_checked"] = True
+    result = frontend_acceptance.validate_evidence(evidence)
+    assert result["decision"] == "block"
+    assert any("export output" in item["message"] for item in result["blockers"])
+
+
+def test_cli_template_writes_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp)
+        result = frontend_acceptance.template("dashboard", "http://localhost:3000/dashboard")
+        frontend_acceptance.write_json(path / "frontend_acceptance.json", result)
+        loaded = frontend_acceptance.load_json(path / "frontend_acceptance.json")
+        assert loaded["page_type"] == "dashboard"
+
+
+def run_all() -> None:
+    test_template_contains_page_specific_fields()
+    test_validate_passes_list_evidence_with_clean_browser_state()
+    test_validate_blocks_console_and_failed_requests()
+    test_validate_blocks_thin_form_evidence()
+    test_validate_blocks_export_without_output()
+    test_cli_template_writes_file()
+
+
+if __name__ == "__main__":
+    run_all()
+    print("PASS frontend_acceptance_runner tests")

@@ -1,0 +1,29 @@
+schema: codex-engineering-skills-private-patterns-v1
+
+blocked_literals:
+  - "/Users/"
+  - "hl-workspace"
+  - "company-delivery-artifacts"
+  - "company-baseline-artifacts"
+
+blocked_regex:
+  - "(?i)password\\s*[:=]\\s*['\\\"][^'\\\"]+"
+  - "(?i)secret\\s*[:=]\\s*['\\\"][^'\\\"]+"
+  - "(?i)token\\s*[:=]\\s*['\\\"][^'\\\"]+"
+  - "AKIA[0-9A-Z]{16}"
+  - "sk-[A-Za-z0-9_-]{20,}"
+  - "jdbc:[^\\s'\\\"]+"
+
+blocked_terms:
+  - "internal-project-name"
+  - "private-customer-name"
+  - "private-domain-keyword"
+
+allowed_paths:
+  - ".git/"
+  - ".venv/"
+  - "__pycache__/"
+
+allowed_files:
+  - "config/private-patterns.example.yaml"
+  - "tests/test_privacy_scan.py"

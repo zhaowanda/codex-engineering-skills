@@ -1,0 +1,56 @@
+schema: codex-engineering-skills-framework-v1
+
+paths:
+  skills_root: "${CODEX_ENGINEERING_SKILLS_ROOT}/skills"
+  docs_repo: "${CODEX_DELIVERY_DOCS_REPO}"
+  artifact_root: "${CODEX_DELIVERY_ARTIFACT_ROOT:-./.codex-artifacts}"
+  sandbox_root: "${CODEX_SANDBOX_ROOT:-./.codex-sandbox}"
+
+delivery:
+  default_branch_candidates:
+    - main
+    - master
+  branch_prefixes:
+    feature: feature
+    bugfix: fix
+    hotfix: hotfix
+  required_gates:
+    standard_requirement:
+      - doc_id
+      - spec
+      - technical_design
+      - architecture_design
+      - delivery_plan
+      - docs_quality
+      - design_review
+      - git
+      - edit_permit
+      - implementation
+      - review
+      - test
+      - release
+    bugfix:
+      - doc_id
+      - reproduction
+      - git
+      - edit_permit
+      - implementation
+      - review
+      - test
+    hotfix:
+      - doc_id
+      - git
+      - implementation
+      - review
+      - test
+      - release
+
+quality:
+  design_minimum_score: 85
+  design_expert_score: 90
+  block_on_active_high_findings: true
+  require_frontend_browser_evidence: true
+
+privacy:
+  pattern_file: config/private-patterns.example.yaml
+
