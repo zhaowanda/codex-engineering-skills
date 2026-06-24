@@ -35,6 +35,7 @@ requirement source
 -> issue-pr-governor / version-release-governor / dependency-license-governor for open-source publication
 -> artifact-schema-governor / prompt-pack-governor / skill-installation-governor for distribution readiness
 -> contribution-governor / security-policy-governor / docs-site-governor / compatibility-governor / mcp-integration-governor / benchmark-governor for open-source maturity
+-> release-package-governor / deprecation-governor / roadmap-governor / docs-readability-governor / prompt-effectiveness-governor for release evolution
 -> skill-health / forward-test-runner before publishing
 ```
 
@@ -94,4 +95,5 @@ MCP usage must stay inside the current task boundary and must produce evidence t
 - Run `prompt-pack-governor` before publishing user-facing prompt examples.
 - Run `skill-installation-governor` to verify installability before release.
 - Run contribution, security policy, docs-site, compatibility, MCP integration, and benchmark governors before external releases.
+- Run release package, deprecation, roadmap, docs readability, and prompt effectiveness governors before tagging or publishing open-core releases.
 - Run `skill-health` and `forward-test-runner` before publishing open-core changes.

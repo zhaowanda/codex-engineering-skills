@@ -88,6 +88,7 @@ The scanner blocks absolute user paths, private project names, internal workspac
 - [Skill Catalog](docs/skill-catalog.md): browse generated skill inventory.
 - [Scenario Guide](docs/scenario-guide.md): browse synthetic example scenarios.
 - [FAQ](docs/faq.md): common open-core usage and boundary questions.
+- [Deprecation Policy](docs/deprecation-policy.md): public contract deprecation and migration rules.
 
 Unified CLI:
 
@@ -130,6 +131,11 @@ python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 - `skills/core/compatibility-governor`: reviews skill, schema, and CLI command compatibility risks against a base Git ref.
 - `skills/core/mcp-integration-governor`: validates generic MCP guidance and evidence expectations for browser, GitHub, and workflow integrations.
 - `skills/core/benchmark-governor`: generates quality metrics for skills, scripts, schemas, prompts, scenarios, tests, privacy, and skill health.
+- `skills/core/release-package-governor`: validates release package readiness, required paths, version consistency, changelog entry, and dry-run manifest.
+- `skills/core/deprecation-governor`: validates deprecation policy, migration guidance, compatibility window, and removal rules.
+- `skills/core/roadmap-governor`: checks roadmap consistency against actual skills, README, and generated skill catalog.
+- `skills/core/docs-readability-governor`: checks public documentation readability, onboarding path, boundary explanation, maintenance commands, and local path safety.
+- `skills/core/prompt-effectiveness-governor`: evaluates prompt packs for design-first behavior, boundaries, Git readiness, tests, evidence, stop conditions, and token/source-reading controls.
 - `skills/core/implementation-completion-gate`: validates real diff evidence, delivery-plan scope alignment, changed files, and implementation summary before review/testing.
 - `skills/core/evidence-auto-collector`: creates conservative evidence gap summaries from diff impact and command logs.
 - `skills/core/environment-promotion-governor`: validates DEV/SIT/UAT/PRE/PROD promotion evidence, entry/exit criteria, configuration differences, approvers, and rollback readiness.
@@ -174,6 +180,11 @@ python3 scripts/codex_eng.py run docs-site --root .
 python3 scripts/codex_eng.py run compatibility --root .
 python3 scripts/codex_eng.py run mcp-integration --root .
 python3 scripts/codex_eng.py run benchmark --root .
+python3 scripts/codex_eng.py run release-package --root .
+python3 scripts/codex_eng.py run deprecation --root .
+python3 scripts/codex_eng.py run roadmap --root .
+python3 scripts/codex_eng.py run docs-readability --root .
+python3 scripts/codex_eng.py run prompt-effectiveness --root .
 ```
 
 ## Migration Strategy

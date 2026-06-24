@@ -47,3 +47,8 @@ jobs:
           python3 scripts/codex_eng.py run compatibility --root .
           python3 scripts/codex_eng.py run mcp-integration --root .
           python3 scripts/codex_eng.py run benchmark --root .
+          python3 scripts/codex_eng.py run release-package --root .
+          python3 scripts/codex_eng.py run deprecation --root .
+          python3 scripts/codex_eng.py run roadmap --root .
+          python3 scripts/codex_eng.py run docs-readability --root .
+          python3 scripts/codex_eng.py run prompt-effectiveness --root .

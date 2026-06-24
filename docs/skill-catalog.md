@@ -16,9 +16,11 @@
 - `skills/core/delivery-runner`: delivery-runner
 - `skills/core/delivery-state-governor`: delivery-state-governor
 - `skills/core/dependency-license-governor`: dependency-license-governor
+- `skills/core/deprecation-governor`: deprecation-governor
 - `skills/core/design-architecture-reviewer`: design-architecture-reviewer
 - `skills/core/diff-impact-analyzer`: diff-impact-analyzer
 - `skills/core/docs-governor`: docs-governor
+- `skills/core/docs-readability-governor`: docs-readability-governor
 - `skills/core/docs-site-governor`: docs-site-governor
 - `skills/core/edit-readiness-governor`: edit-readiness-governor
 - `skills/core/environment-promotion-governor`: environment-promotion-governor
@@ -37,11 +39,14 @@
 - `skills/core/post-release-observer`: post-release-observer
 - `skills/core/project-baseline-reverser`: project-baseline-reverser
 - `skills/core/project-onboard`: project-onboard
+- `skills/core/prompt-effectiveness-governor`: prompt-effectiveness-governor
 - `skills/core/prompt-pack-governor`: prompt-pack-governor
 - `skills/core/release-change-governor`: release-change-governor
 - `skills/core/release-evidence-binder`: release-evidence-binder
+- `skills/core/release-package-governor`: release-package-governor
 - `skills/core/requirement-document-ingestor`: requirement-document-ingestor
 - `skills/core/requirement-question-governor`: requirement-question-governor
+- `skills/core/roadmap-governor`: roadmap-governor
 - `skills/core/security-policy-governor`: security-policy-governor
 - `skills/core/skill-health`: skill-health
 - `skills/core/skill-installation-governor`: skill-installation-governor

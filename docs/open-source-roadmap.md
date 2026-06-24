@@ -82,7 +82,13 @@
 - Compatibility governor. `done`
 - MCP integration governor. `done`
 - Benchmark governor. `done`
+- Release package governor. `done`
+- Deprecation governor. `done`
+- Roadmap governor. `done`
+- Docs readability governor. `done`
+- Prompt effectiveness governor. `done`
 
 ## v1.1
 
-- Open issues and forward-testing improvements.
+- Forward-test release evolution governors with real open-source pull requests. `planned`
+- Add deeper cross-scenario examples for long PRDs, rollback drills, and private overlay adoption. `planned`

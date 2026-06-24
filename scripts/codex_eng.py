@@ -29,6 +29,11 @@ COMMANDS = {
     "compatibility": ["python3", "skills/core/compatibility-governor/scripts/compatibility.py"],
     "mcp-integration": ["python3", "skills/core/mcp-integration-governor/scripts/mcp_integration.py"],
     "benchmark": ["python3", "skills/core/benchmark-governor/scripts/benchmark.py"],
+    "release-package": ["python3", "skills/core/release-package-governor/scripts/release_package.py"],
+    "deprecation": ["python3", "skills/core/deprecation-governor/scripts/deprecation.py"],
+    "roadmap": ["python3", "skills/core/roadmap-governor/scripts/roadmap.py"],
+    "docs-readability": ["python3", "skills/core/docs-readability-governor/scripts/docs_readability.py"],
+    "prompt-effectiveness": ["python3", "skills/core/prompt-effectiveness-governor/scripts/prompt_effectiveness.py"],
 }
 
 
