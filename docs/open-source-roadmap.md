@@ -69,6 +69,10 @@
 - Forward test runner. `done`
 - Traceability governor. `done`
 - Change risk governor. `done`
+- Issue and PR governor. `done`
+- Version release governor. `done`
+- Dependency license governor. `done`
+- Example scenario runner. `done`
 
 ## v1.1
 

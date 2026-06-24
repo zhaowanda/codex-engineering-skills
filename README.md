@@ -37,6 +37,11 @@ codex-engineering-skills/
   examples/
     project-registry/
       projects.example.yaml
+    scenarios/
+      bugfix/
+      small-feature/
+      config-change/
+      frontend-change/
     synthetic-e2e-case/
       requirement.md
   scripts/
@@ -102,6 +107,10 @@ python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 - `skills/core/diff-impact-analyzer`: classifies git diff impact areas and required evidence across API, database, configuration, permission, performance, frontend, tests, and docs.
 - `skills/core/traceability-governor`: builds requirement-to-delivery traceability across acceptance criteria, design, tasks, implementation, tests, and evidence.
 - `skills/core/change-risk-governor`: classifies change risk and required controls from diff impact, cross-repo scope, security, performance, and configuration signals.
+- `skills/core/issue-pr-governor`: validates open-source issue and PR templates for linked issue, scope, tests, evidence, risk, rollback, and release notes.
+- `skills/core/version-release-governor`: checks SemVer, `pyproject.toml`, `CHANGELOG.md`, release notes, breaking changes, and migration notes before tagging.
+- `skills/core/dependency-license-governor`: checks open-source license presence, project license metadata, dependency manifests, and high-risk license signals.
+- `skills/core/example-scenario-runner`: runs synthetic bugfix, small feature, configuration, and frontend scenarios to demonstrate framework behavior.
 - `skills/core/implementation-completion-gate`: validates real diff evidence, delivery-plan scope alignment, changed files, and implementation summary before review/testing.
 - `skills/core/evidence-auto-collector`: creates conservative evidence gap summaries from diff impact and command logs.
 - `skills/core/environment-promotion-governor`: validates DEV/SIT/UAT/PRE/PROD promotion evidence, entry/exit criteria, configuration differences, approvers, and rollback readiness.
@@ -128,6 +137,16 @@ python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 - `skills/templates/artifact-splitter`: separates machine-readable gate JSON from human-readable Markdown summaries with local path sanitization by default.
 - `skills/templates/ci-templates`: renders GitHub Actions or GitLab CI validation templates for compile, test, and privacy scan checks.
 - `skills/templates/synthetic-e2e-runner`: runs the synthetic example through the open-core workflow and emits an execution summary.
+
+## Open-Source Maintenance Checks
+
+```bash
+python3 skills/core/issue-pr-governor/scripts/issue_pr.py --root .
+python3 skills/core/issue-pr-governor/scripts/issue_pr.py --pr-file .github/pull_request_template.md
+python3 skills/core/version-release-governor/scripts/version_release.py --root . --version 0.1.0
+python3 skills/core/dependency-license-governor/scripts/dependency_license.py --root .
+python3 skills/core/example-scenario-runner/scripts/example_scenario.py --root . --out /tmp/codex-example-scenarios
+```
 
 ## Migration Strategy
 

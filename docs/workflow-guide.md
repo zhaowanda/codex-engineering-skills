@@ -32,6 +32,7 @@ requirement source
 -> release-evidence-binder
 -> post-release-observer
 -> delivery-case-capture
+-> issue-pr-governor / version-release-governor / dependency-license-governor for open-source publication
 -> skill-health / forward-test-runner before publishing
 ```
 
@@ -81,4 +82,6 @@ Never publish private overlay artifacts in this repository.
 - Run `traceability-governor` to prove acceptance coverage and task/file scope before implementation or release.
 - Run `change-risk-governor` after diff analysis to choose lightweight, standard, heavy, or critical controls.
 - Capture repeated blockers with `delivery-case-capture`.
+- Run `issue-pr-governor`, `version-release-governor`, and `dependency-license-governor` before open-source release or external contribution merge.
+- Run `example-scenario-runner` to verify bugfix, feature, configuration, and frontend example paths remain demonstrable.
 - Run `skill-health` and `forward-test-runner` before publishing open-core changes.
