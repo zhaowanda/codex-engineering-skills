@@ -22,6 +22,15 @@ Alternative CLI form:
 python3 scripts/codex_eng.py run install-all --dry-run
 ```
 
+If you want this repository to be the only maintenance source for open-core skills, sync local skills as symlinks:
+
+```bash
+python3 scripts/codex_eng.py run sync-local-skills --dry-run
+python3 scripts/codex_eng.py run sync-local-skills --force
+```
+
+Private overlay skills that do not overlap open-core names are preserved. Overlapping local copies are backed up under `${CODEX_HOME:-~/.codex}/skills/.backup/codex-engineering-skills-sync/`.
+
 ## 2. Validate The Repository
 
 ```bash

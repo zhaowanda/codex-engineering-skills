@@ -42,6 +42,7 @@ COMMANDS = {
     "git-history": ["python3", "skills/core/git-history-miner/scripts/git_history.py"],
     "baseline-quality": ["python3", "skills/core/baseline-quality-governor/scripts/baseline_quality.py"],
     "project-understand": ["python3", "skills/core/project-understanding-runner/scripts/project_understand.py"],
+    "sync-local-skills": ["python3", "scripts/sync_local_skills.py"],
 }
 
 

@@ -65,6 +65,12 @@ requirement source
 
 Open core contains generic skills, scripts, templates, tests, and synthetic examples.
 
+For local development, treat this repository as the maintenance source and sync open-core skills into the Codex skills directory as symlinks:
+
+```bash
+python3 scripts/codex_eng.py run sync-local-skills --force
+```
+
 Private overlay contains:
 
 - real project registry
