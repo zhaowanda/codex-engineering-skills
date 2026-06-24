@@ -41,14 +41,14 @@ def test_sync_copies_open_repo_and_preserves_private_overlay() -> None:
 
         result = sync_local.sync(repo, skills_root, dry_run=False, force=True, mode="copy")
         assert result["decision"] == "pass"
-        assert not (skills_root / "company/git-worktree-governor").is_symlink()
-        assert not (skills_root / "open-core/new-open-skill").is_symlink()
-        assert not (skills_root / "open-core-templates/design-doc-templates").is_symlink()
-        assert (skills_root / "company/git-worktree-governor/.codex-engineering-skills-source").exists()
-        assert (skills_root / "open-core/new-open-skill/SKILL.md").exists()
-        assert (skills_root / "open-core-templates/design-doc-templates/SKILL.md").exists()
+        assert not (skills_root / "codex-engineering-skills/git-worktree-governor").is_symlink()
+        assert not (skills_root / "codex-engineering-skills/new-open-skill").is_symlink()
+        assert not (skills_root / "codex-engineering-skills/design-doc-templates").is_symlink()
+        assert (skills_root / "codex-engineering-skills/git-worktree-governor/.codex-engineering-skills-source").exists()
+        assert (skills_root / "codex-engineering-skills/new-open-skill/SKILL.md").exists()
+        assert (skills_root / "codex-engineering-skills/design-doc-templates/SKILL.md").exists()
         assert (skills_root / "company/private-project/SKILL.md").exists()
-        assert (skills_root / ".backup").exists()
+        assert not (skills_root / ".backup").exists()
 
         second = sync_local.sync(repo, skills_root, dry_run=True, force=False, mode="copy")
         assert second["decision"] == "plan"
@@ -59,8 +59,34 @@ def test_sync_copies_open_repo_and_preserves_private_overlay() -> None:
         assert forced["installed_count"] == 3
 
 
+def test_prune_legacy_archives_non_open_source_entries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        skills_root = Path(tmp) / "skills"
+        write_skill(skills_root / ".system/skill-creator", "skill-creator")
+        write_skill(skills_root / "codex-engineering-skills/core/spec-governor", "spec-governor")
+        write_skill(skills_root / "company/private-project", "private-project")
+        write_skill(skills_root / "sme-ai-delivery/prd-composer", "prd-composer")
+        write_skill(skills_root / "open-core/spec-governor", "spec-governor")
+        (skills_root / "product-skills-index.md").write_text("legacy\n", encoding="utf-8")
+
+        plan = sync_local.prune_legacy(skills_root, dry_run=True, force=False)
+        assert plan["decision"] == "plan"
+        assert any(item["status"] == "would_archive" for item in plan["actions"])
+
+        result = sync_local.prune_legacy(skills_root, dry_run=False, force=True)
+        assert result["decision"] == "pass"
+        assert (skills_root / ".system/skill-creator/SKILL.md").exists()
+        assert (skills_root / "codex-engineering-skills/core/spec-governor/SKILL.md").exists()
+        assert not (skills_root / "company").exists()
+        assert not (skills_root / "sme-ai-delivery").exists()
+        assert not (skills_root / "open-core").exists()
+        assert not (skills_root / "product-skills-index.md").exists()
+        assert (skills_root / ".backup/codex-engineering-skills-prune").exists()
+
+
 def run_all() -> None:
     test_sync_copies_open_repo_and_preserves_private_overlay()
+    test_prune_legacy_archives_non_open_source_entries()
 
 
 if __name__ == "__main__":

@@ -105,7 +105,14 @@ python3 scripts/codex_eng.py run sync-local-skills --dry-run
 python3 scripts/codex_eng.py run sync-local-skills --force
 ```
 
-This copies open-core skills from the repository into `${CODEX_HOME:-~/.codex}/skills`. Open-core skills with the same name as existing local overlay skills are backed up and replaced by copied directories; private project-only skills remain untouched.
+This copies open-core skills from the repository into `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
+
+If this open-source repository should be the only non-system local skill source, archive legacy local skill folders:
+
+```bash
+python3 scripts/codex_eng.py run sync-local-skills --prune-legacy --dry-run
+python3 scripts/codex_eng.py run sync-local-skills --prune-legacy --force
+```
 
 - [Getting Started](docs/getting-started.md): run the synthetic workflow end to end.
 - [Workflow Guide](docs/workflow-guide.md): understand the gates, allowed implementation conditions, release conditions, and private overlay boundary.

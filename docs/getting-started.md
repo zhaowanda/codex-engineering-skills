@@ -29,7 +29,14 @@ python3 scripts/codex_eng.py run sync-local-skills --dry-run
 python3 scripts/codex_eng.py run sync-local-skills --force
 ```
 
-Private overlay skills that do not overlap open-core names are preserved. Overlapping local copies are backed up under `${CODEX_HOME:-~/.codex}/skills/.backup/codex-engineering-skills-sync/`.
+Skills are copied into `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
+
+If you no longer want legacy local skill folders, archive everything except `.system/`, `.backup/`, and `codex-engineering-skills/`:
+
+```bash
+python3 scripts/codex_eng.py run sync-local-skills --prune-legacy --dry-run
+python3 scripts/codex_eng.py run sync-local-skills --prune-legacy --force
+```
 
 ## 2. Validate The Repository
 

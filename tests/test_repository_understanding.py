@@ -119,6 +119,42 @@ def test_project_understanding_runner_works_after_install_layout() -> None:
         assert (out / "human_baseline.md").exists()
 
 
+def test_project_understanding_runner_works_after_flat_install_layout() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        installed = root / "skills/codex-engineering-skills"
+        for name in [
+            "repository-analyzer",
+            "api-surface-extractor",
+            "config-surface-extractor",
+            "dependency-surface-analyzer",
+            "git-history-miner",
+            "code-index-builder",
+            "project-baseline-reverser",
+            "baseline-quality-governor",
+            "project-understanding-runner",
+        ]:
+            shutil.copytree(ROOT / "skills/core" / name, installed / name)
+        out = root / "out-flat"
+        proc = subprocess.run(
+            [
+                "python3",
+                str(installed / "project-understanding-runner/scripts/project_understand.py"),
+                "--repo",
+                str(FIXTURE),
+                "--project",
+                "basic-web-service",
+                "--out",
+                str(out),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert (out / "human_baseline.md").exists()
+
+
 def test_project_understanding_runner_works_with_overlay_category_layout() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -162,6 +198,7 @@ def run_all() -> None:
     test_api_config_dependency_and_git_extractors()
     test_project_understanding_runner_writes_artifacts()
     test_project_understanding_runner_works_after_install_layout()
+    test_project_understanding_runner_works_after_flat_install_layout()
     test_project_understanding_runner_works_with_overlay_category_layout()
 
 

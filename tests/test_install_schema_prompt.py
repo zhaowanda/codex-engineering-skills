@@ -40,7 +40,8 @@ def test_install_skills_copies_to_empty_target() -> None:
         target = Path(tmp) / "skills"
         result = install_skills.install(ROOT, target, ["core"], dry_run=False)
         assert result["decision"] == "pass"
-        assert (target / "core/spec-governor/SKILL.md").exists()
+        assert (target / "spec-governor/SKILL.md").exists()
+        assert not (target / "core/spec-governor/SKILL.md").exists()
 
 
 def test_artifact_schema_inventory_has_many_schemas() -> None:

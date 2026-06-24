@@ -31,6 +31,10 @@ def relative_skill(path: Path, source: Path) -> Path:
     return path.relative_to(source / "skills")
 
 
+def installed_skill_name(path: Path) -> str:
+    return path.name
+
+
 def install(source: Path, target: Path, layers: list[str], dry_run: bool = False, force: bool = False) -> dict[str, Any]:
     source = source.resolve()
     skills = discover(source, layers)
@@ -46,13 +50,19 @@ def install(source: Path, target: Path, layers: list[str], dry_run: bool = False
         planned.append(rel.as_posix())
         if not (skill / "SKILL.md").exists():
             blockers.append({"source": rel.as_posix(), "message": "SKILL.md missing"})
+    names = [installed_skill_name(skill) for skill in skills]
+    duplicate_names = sorted({name for name in names if names.count(name) > 1})
+    for name in duplicate_names:
+        blockers.append({"source": name, "message": "duplicate installed skill name"})
     if blockers:
         return result("block", target, planned, copied, blockers)
     if not dry_run:
+        if target.exists() and force:
+            shutil.rmtree(target)
         target.mkdir(parents=True, exist_ok=True)
         for skill in skills:
             rel = relative_skill(skill, source)
-            dest = target / rel
+            dest = target / installed_skill_name(skill)
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.copytree(skill, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))

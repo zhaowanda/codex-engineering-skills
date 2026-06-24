@@ -15,6 +15,7 @@ HERE = Path(__file__).resolve()
 def skill_script(skill: str, script: str) -> Path:
     candidates = [
         HERE.parents[4] / "skills/core" / skill / "scripts" / script,
+        HERE.parents[2].parent / skill / "scripts" / script,
         HERE.parents[2] / skill / "scripts" / script,
         HERE.parents[2].parent / "open-core" / skill / "scripts" / script,
         HERE.parents[2].parent / "company" / skill / "scripts" / script,
