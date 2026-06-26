@@ -1,5 +1,6 @@
 # Skill Catalog
 
+- `skills/core/auto-runner`: auto-runner
 - `skills/core/api-surface-extractor`: api-surface-extractor
 - `skills/core/architecture-design-governor`: architecture-design-governor
 - `skills/core/artifact-schema-governor`: artifact-schema-governor

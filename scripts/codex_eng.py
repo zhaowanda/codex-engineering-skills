@@ -54,6 +54,14 @@ def run_command(args: list[str]) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Unified CLI for Codex engineering skills")
     sub = parser.add_subparsers(dest="cmd", required=True)
+    p_auto = sub.add_parser("auto")
+    p_auto.add_argument("--input", required=True)
+    p_auto.add_argument("--doc-id")
+    p_auto.add_argument("--title")
+    p_auto.add_argument("--repo")
+    p_auto.add_argument("--project")
+    p_auto.add_argument("--out")
+    p_auto.add_argument("--force", action="store_true")
     p_inspect = sub.add_parser("inspect")
     p_inspect.add_argument("--artifact-dir", required=True)
     p_e2e = sub.add_parser("synthetic-e2e")
@@ -63,6 +71,15 @@ def main() -> int:
     p_passthrough.add_argument("args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
+    if args.cmd == "auto":
+        command = ["python3", "skills/core/auto-runner/scripts/auto_runner.py", "--input", args.input]
+        for flag in ["doc_id", "title", "repo", "project", "out"]:
+            value = getattr(args, flag)
+            if value:
+                command.extend([f"--{flag.replace('_', '-')}", value])
+        if args.force:
+            command.append("--force")
+        return run_command(command)
     if args.cmd == "inspect":
         return run_command(COMMANDS["inspect"] + ["--artifact-dir", args.artifact_dir])
     if args.cmd == "synthetic-e2e":

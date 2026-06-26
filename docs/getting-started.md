@@ -2,6 +2,30 @@
 
 This guide runs the open-core workflow with the synthetic example.
 
+## 0. One-Command Path
+
+For normal use, start with the auto runner:
+
+```bash
+python3 scripts/codex_eng.py auto \
+  --input examples/synthetic-e2e-case/requirement.md \
+  --out /tmp/codex-auto-demo
+```
+
+With repository understanding:
+
+```bash
+python3 scripts/codex_eng.py auto \
+  --input examples/synthetic-e2e-case/requirement.md \
+  --repo examples/synthetic-repos/basic-web-service \
+  --project basic-web-service \
+  --out /tmp/codex-auto-demo
+```
+
+The runner decides which artifacts are missing, skips existing artifacts unless `--force` is provided, and writes `auto_run_summary.json` with next stage, next command, blockers, and implementation/release readiness.
+
+The manual steps below are mainly for debugging individual gates.
+
 ## 1. Install All Skills
 
 ```bash

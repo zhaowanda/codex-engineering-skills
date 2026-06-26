@@ -129,7 +129,7 @@ def test_skill_quality_distribution_is_all_a_level() -> None:
         score = score_skill_doc(text, len(list((path.parent / "scripts").glob("*.py"))), len(schemas), test_refs)
         level = "A" if score >= 90 else "B+" if score >= 82 else "B" if score >= 75 else "C+" if score >= 68 else "C"
         levels[level].append(path.relative_to(ROOT).as_posix())
-    assert len(levels["A"]) == 70
+    assert len(levels["A"]) == 71
     assert levels["B+"] == []
     assert levels["B"] == []
     assert levels["C+"] == []

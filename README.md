@@ -93,6 +93,16 @@ The scanner blocks absolute user paths, private project names, internal workspac
 
 ## Start Here
 
+Run the safe one-command workflow:
+
+```bash
+python3 scripts/codex_eng.py auto \
+  --input examples/synthetic-e2e-case/requirement.md \
+  --out /tmp/codex-auto-demo
+```
+
+The auto runner ingests the requirement, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
+
 Install all skills:
 
 ```bash
@@ -133,6 +143,7 @@ python3 scripts/codex_eng.py run sync-local-skills --prune-legacy --force
 Unified CLI:
 
 ```bash
+python3 scripts/codex_eng.py auto --input examples/synthetic-e2e-case/requirement.md
 python3 scripts/codex_eng.py synthetic-e2e --out-dir /tmp/codex-synthetic
 python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
 ```
@@ -158,6 +169,7 @@ The runner emits machine JSON plus `human_baseline.md`. For real projects, write
 
 ## Available Core Skills
 
+- `skills/core/auto-runner`: one-command safe workflow runner that ingests a requirement, optionally understands a repository, generates artifacts, inspects status, and reports the next action.
 - `skills/core/requirement-document-ingestor`: ingests Markdown, text, JSON, copied docs, and PDF placeholders into normalized requirement text and source manifest.
 - `skills/core/spec-governor`: normalizes one-line requests or long requirement text into `spec.json` with scope, acceptance criteria, rules, risks, and open questions.
 - `skills/core/requirement-question-governor`: generates and validates focused open questions so unresolved ambiguity blocks design or implementation instead of being guessed.
