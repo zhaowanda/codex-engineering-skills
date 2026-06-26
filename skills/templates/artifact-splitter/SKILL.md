@@ -30,7 +30,7 @@ Do not mix them into one file.
 Generate human docs from artifacts:
 
 ```bash
-python3 skills/templates/artifact-splitter/scripts/split_artifacts.py \
+python3 scripts/split_artifacts.py \
   --doc-id REQ-001-checkout \
   --title "Checkout discount display" \
   --technical-design artifacts/design/technical_design.json \
@@ -43,7 +43,7 @@ python3 skills/templates/artifact-splitter/scripts/split_artifacts.py \
 Include absolute paths only for private internal use:
 
 ```bash
-python3 skills/templates/artifact-splitter/scripts/split_artifacts.py \
+python3 scripts/split_artifacts.py \
   --doc-id REQ-001-checkout \
   --title "Checkout discount display" \
   --delivery-plan artifacts/delivery_plan.json \

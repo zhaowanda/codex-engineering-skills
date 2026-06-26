@@ -10,7 +10,7 @@ Use this skill after editing prompt packs.
 ## Command
 
 ```bash
-python3 skills/core/prompt-effectiveness-governor/scripts/prompt_effectiveness.py --root .
+python3 scripts/prompt_effectiveness.py --root .
 ```
 
 ## Rules

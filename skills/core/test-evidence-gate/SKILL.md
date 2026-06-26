@@ -30,7 +30,7 @@ This gate does not advance delivery state automatically. If the result passes, r
 ## Command
 
 ```bash
-python3 skills/core/test-evidence-gate/scripts/test_evidence_gate.py \
+python3 scripts/test_evidence_gate.py \
   --artifact-dir artifacts/review \
   --out artifacts/review/test_evidence_gate.json
 ```
@@ -38,7 +38,7 @@ python3 skills/core/test-evidence-gate/scripts/test_evidence_gate.py \
 Require frontend browser evidence:
 
 ```bash
-python3 skills/core/test-evidence-gate/scripts/test_evidence_gate.py \
+python3 scripts/test_evidence_gate.py \
   --artifact-dir artifacts/review \
   --require-frontend \
   --out artifacts/review/test_evidence_gate.json

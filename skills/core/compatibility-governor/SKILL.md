@@ -10,7 +10,7 @@ Use this skill before merging breaking changes or publishing a release.
 ## Command
 
 ```bash
-python3 skills/core/compatibility-governor/scripts/compatibility.py --root .
+python3 scripts/compatibility.py --root .
 ```
 
 ## Rules

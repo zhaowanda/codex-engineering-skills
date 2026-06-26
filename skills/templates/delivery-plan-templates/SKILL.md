@@ -34,7 +34,7 @@ technical_design + architecture_design
 Generate from design artifacts:
 
 ```bash
-python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py \
+python3 scripts/render_delivery_plan.py \
   --doc-id REQ-001-checkout \
   --technical-design artifacts/design/technical_design.json \
   --architecture-design artifacts/design/architecture_design.json \
@@ -44,7 +44,7 @@ python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py
 Generate a synthetic example:
 
 ```bash
-python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py \
+python3 scripts/render_delivery_plan.py \
   --doc-id REQ-EXAMPLE \
   --example \
   --out artifacts/example_delivery_plan.json
@@ -53,7 +53,7 @@ python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py
 Validate:
 
 ```bash
-python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py \
+python3 scripts/render_delivery_plan.py \
   validate \
   --file artifacts/delivery_plan.json
 ```

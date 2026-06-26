@@ -32,7 +32,7 @@ spec
 Generate empty templates:
 
 ```bash
-python3 skills/templates/design-doc-templates/scripts/render_design_templates.py \
+python3 scripts/render_design_templates.py \
   --doc-id REQ-001-checkout \
   --title "Checkout discount display" \
   --out-dir artifacts/design
@@ -41,7 +41,7 @@ python3 skills/templates/design-doc-templates/scripts/render_design_templates.py
 Generate a complete synthetic example:
 
 ```bash
-python3 skills/templates/design-doc-templates/scripts/render_design_templates.py \
+python3 scripts/render_design_templates.py \
   --doc-id REQ-EXAMPLE \
   --title "Checkout discount display" \
   --out-dir artifacts/design-example \
@@ -51,7 +51,7 @@ python3 skills/templates/design-doc-templates/scripts/render_design_templates.py
 Review generated artifacts:
 
 ```bash
-python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py \
+python3 ../design-architecture-reviewer/scripts/design_arch_review.py \
   review \
   --technical-design artifacts/design/technical_design.json \
   --architecture-design artifacts/design/architecture_design.json \

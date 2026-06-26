@@ -30,7 +30,7 @@ implementation
 ## Command
 
 ```bash
-python3 skills/core/code-review-gate/scripts/review_gate.py \
+python3 scripts/review_gate.py \
   --artifact-dir artifacts/review \
   --out artifacts/review/code_review_gate.json
 ```

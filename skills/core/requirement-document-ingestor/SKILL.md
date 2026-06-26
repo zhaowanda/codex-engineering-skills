@@ -7,10 +7,19 @@ description: Ingest and normalize requirement source files before spec-governor.
 
 Use this skill before `spec-governor`.
 
+## Position
+
+```text
+raw requirement source
+-> requirement-document-ingestor
+-> spec-governor
+-> requirement-question-governor
+```
+
 ## Command
 
 ```bash
-python3 skills/core/requirement-document-ingestor/scripts/ingest_requirement.py \
+python3 scripts/ingest_requirement.py \
   --input requirement.md \
   --doc-id REQ-001 \
   --out-dir artifacts/REQ-001
@@ -21,7 +30,11 @@ python3 skills/core/requirement-document-ingestor/scripts/ingest_requirement.py 
 - Preserve source references and detected tables/images/process hints.
 - Do not claim OCR/PDF extraction succeeded unless text is actually available.
 - Write normalized text for `spec-governor`.
+- Keep original requirement facts separate from inferred summaries.
+- Flag unsupported file types or empty inputs as warnings or blockers.
 
 ## Output
 
 The output uses schema `codex-requirement-ingestion-v1`.
+
+The artifact reports normalized requirement text, source manifest, detected structures, unsupported inputs, blockers, warnings, and next command hints.

@@ -7,10 +7,19 @@ description: Govern open-source version and release readiness. Use before taggin
 
 Use this skill before creating a release tag.
 
+## Position
+
+```text
+change preparation
+-> version-release-governor
+-> release-package-governor
+-> tag/release publishing
+```
+
 ## Command
 
 ```bash
-python3 skills/core/version-release-governor/scripts/version_release.py \
+python3 scripts/version_release.py \
   --root . \
   --version 0.2.0
 ```
@@ -25,3 +34,5 @@ python3 skills/core/version-release-governor/scripts/version_release.py \
 ## Output
 
 The output uses schema `codex-version-release-v1`.
+
+The artifact reports requested version, project version, changelog status, SemVer validation, migration-note expectations, blockers, and warnings.

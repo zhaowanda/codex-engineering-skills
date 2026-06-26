@@ -5,16 +5,37 @@ description: Generate and validate production release change evidence. Use befor
 
 # Release Change Governor
 
+Use this skill before production release approval or change-ticket closure.
+
+## Position
+
+```text
+release evidence preparation
+-> release-change-governor
+-> release-evidence-binder
+-> production release approval
+```
+
+## Rules
+
+- Require release window, approvers, release order, rollback owner, change ticket, risk level, and communication plan.
+- Block release evidence when rollback owner or rollback plan is missing.
+- Treat high-risk changes as requiring explicit approver and post-release check ownership.
+- Keep release change evidence generic; do not include private credentials or customer data.
+- Validate filled templates before binding release evidence.
+
 ## Command
 
 ```bash
-python3 skills/core/release-change-governor/scripts/release_change.py template \
+python3 scripts/release_change.py template \
   --out artifacts/REQ-001/release_change.json
 
-python3 skills/core/release-change-governor/scripts/release_change.py validate \
+python3 scripts/release_change.py validate \
   --file artifacts/REQ-001/release_change.json
 ```
 
 ## Output
 
 The output uses schema `codex-release-change-v1`.
+
+The artifact reports release metadata, approval readiness, rollback readiness, communication plan, blockers, and warnings.

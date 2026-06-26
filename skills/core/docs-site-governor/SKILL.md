@@ -10,8 +10,8 @@ Use this skill before publishing documentation or adding new public skills.
 ## Commands
 
 ```bash
-python3 skills/core/docs-site-governor/scripts/docs_site.py generate --root .
-python3 skills/core/docs-site-governor/scripts/docs_site.py validate --root .
+python3 scripts/docs_site.py generate --root .
+python3 scripts/docs_site.py validate --root .
 ```
 
 ## Rules

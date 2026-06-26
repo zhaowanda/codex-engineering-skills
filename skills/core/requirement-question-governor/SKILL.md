@@ -10,7 +10,7 @@ Use this skill after ingestion/spec normalization and before design.
 ## Command
 
 ```bash
-python3 skills/core/requirement-question-governor/scripts/question_governor.py \
+python3 scripts/question_governor.py \
   generate \
   --spec artifacts/REQ-001/spec.json \
   --out artifacts/REQ-001/open_questions.json
@@ -19,7 +19,7 @@ python3 skills/core/requirement-question-governor/scripts/question_governor.py \
 Validate answers:
 
 ```bash
-python3 skills/core/requirement-question-governor/scripts/question_governor.py \
+python3 scripts/question_governor.py \
   validate \
   --file artifacts/REQ-001/open_questions.json
 ```

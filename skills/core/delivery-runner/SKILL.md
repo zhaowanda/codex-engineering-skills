@@ -10,7 +10,7 @@ Use this skill as the workflow status entrypoint.
 ## Command
 
 ```bash
-python3 skills/core/delivery-runner/scripts/delivery_runner.py \
+python3 scripts/delivery_runner.py \
   inspect \
   --artifact-dir artifacts/REQ-001
 ```

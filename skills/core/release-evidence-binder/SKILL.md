@@ -55,7 +55,7 @@ Optional but binding when present:
 ## Command
 
 ```bash
-python3 skills/core/release-evidence-binder/scripts/bind_release.py \
+python3 scripts/bind_release.py \
   --artifact-dir artifacts/review \
   --out artifacts/review/release_gate.json
 ```
@@ -63,7 +63,7 @@ python3 skills/core/release-evidence-binder/scripts/bind_release.py \
 For documentation-only changes:
 
 ```bash
-python3 skills/core/release-evidence-binder/scripts/bind_release.py \
+python3 scripts/bind_release.py \
   --artifact-dir artifacts/review \
   --change-type docs \
   --out artifacts/review/release_gate.json

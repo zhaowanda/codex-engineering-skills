@@ -10,7 +10,7 @@ Use this skill when a workflow or scenario depends on MCP tool evidence.
 ## Command
 
 ```bash
-python3 skills/core/mcp-integration-governor/scripts/mcp_integration.py --root .
+python3 scripts/mcp_integration.py --root .
 ```
 
 ## Rules

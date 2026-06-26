@@ -34,7 +34,7 @@ spec
 Review:
 
 ```bash
-python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py \
+python3 scripts/design_arch_review.py \
   review \
   --technical-design artifacts/technical_design.json \
   --architecture-design artifacts/architecture_design.json \
@@ -44,7 +44,7 @@ python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py \
 Validate a review artifact:
 
 ```bash
-python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py \
+python3 scripts/design_arch_review.py \
   validate \
   --file artifacts/design_architecture_review.json
 ```

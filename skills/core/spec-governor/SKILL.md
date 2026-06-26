@@ -10,7 +10,7 @@ Use this skill before technical design, architecture design, delivery planning, 
 ## Command
 
 ```bash
-python3 skills/core/spec-governor/scripts/spec_governor.py \
+python3 scripts/spec_governor.py \
   normalize \
   --doc-id REQ-001 \
   --title "Checkout discount display" \
@@ -21,7 +21,7 @@ python3 skills/core/spec-governor/scripts/spec_governor.py \
 Validate a spec:
 
 ```bash
-python3 skills/core/spec-governor/scripts/spec_governor.py \
+python3 scripts/spec_governor.py \
   validate \
   --file artifacts/REQ-001/spec.json
 ```

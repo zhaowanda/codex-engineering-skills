@@ -31,7 +31,7 @@ edit-readiness-governor permit
 Create a snapshot:
 
 ```bash
-python3 skills/core/workspace-write-guard/scripts/write_guard.py \
+python3 scripts/write_guard.py \
   snapshot \
   --repo /path/to/repo \
   --permit artifacts/edit_permit.json \
@@ -41,7 +41,7 @@ python3 skills/core/workspace-write-guard/scripts/write_guard.py \
 Audit after edits:
 
 ```bash
-python3 skills/core/workspace-write-guard/scripts/write_guard.py \
+python3 scripts/write_guard.py \
   audit \
   --repo /path/to/repo \
   --permit artifacts/edit_permit.json \
@@ -52,7 +52,7 @@ python3 skills/core/workspace-write-guard/scripts/write_guard.py \
 Fail fast in hooks:
 
 ```bash
-python3 skills/core/workspace-write-guard/scripts/write_guard.py \
+python3 scripts/write_guard.py \
   hook-check \
   --repo /path/to/repo \
   --permit artifacts/edit_permit.json \
@@ -62,7 +62,7 @@ python3 skills/core/workspace-write-guard/scripts/write_guard.py \
 Install a pre-commit hook:
 
 ```bash
-python3 skills/core/workspace-write-guard/scripts/install_pre_commit.py \
+python3 scripts/install_pre_commit.py \
   --repo /path/to/repo
 ```
 
@@ -74,7 +74,7 @@ export CODEX_WRITE_GUARD_SNAPSHOT=/path/to/write_guard_snapshot.json
 export CODEX_DOC_ID=REQ-001-checkout
 ```
 
-## Evidence
+## Output
 
 - Snapshot schema: `codex-write-guard-snapshot-v1`
 - Audit schema: `codex-write-guard-audit-v1`

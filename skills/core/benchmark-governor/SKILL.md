@@ -10,7 +10,7 @@ Use this skill before releases or major refactors to track quality signals.
 ## Command
 
 ```bash
-python3 skills/core/benchmark-governor/scripts/benchmark.py --root .
+python3 scripts/benchmark.py --root .
 ```
 
 ## Rules

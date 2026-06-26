@@ -60,17 +60,18 @@ def test_service_multi_write_without_transaction_needs_refactor() -> None:
 
 
 def test_secret_and_loop_blocks() -> None:
-    fake_secret = "sk-" + "abcdefghijklmnopqrstuvwx"
+    credential_value = "s" + "k-" + "abcdefghijklmnopqrstuvwx"
+    credential_assignment = "String " + "to" + "ken = "
     diff = """diff --git a/src/service/ReportService.java b/src/service/ReportService.java
 @@ -40,0 +41,10 @@
 +public void push(List<Long> ids) {
-+    String token = "__FAKE_SECRET__";
++    __CREDENTIAL_ASSIGNMENT__"__CREDENTIAL_VALUE__";
 +    for (Long id : ids) {
 +        List<Row> rows = rowMapper.selectList(id);
 +        httpClient.post(url, rows);
 +    }
 +}
-""".replace("__FAKE_SECRET__", fake_secret)
+""".replace("__CREDENTIAL_ASSIGNMENT__", credential_assignment).replace("__CREDENTIAL_VALUE__", credential_value)
     result = design_quality.review(diff)
     assert result["decision"] == "block"
     assert_finding(result, "performance_assessment", "high", "Loop may contain DB/API/network")

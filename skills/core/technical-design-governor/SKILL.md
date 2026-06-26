@@ -7,10 +7,19 @@ description: Generate a structured technical design draft from a normalized spec
 
 Use this skill after `spec-governor` and before architecture design or delivery planning.
 
+## Position
+
+```text
+spec-governor
+-> technical-design-governor
+-> architecture-design-governor
+-> design-architecture-reviewer
+```
+
 ## Command
 
 ```bash
-python3 skills/core/technical-design-governor/scripts/technical_design.py \
+python3 scripts/technical_design.py \
   --spec artifacts/REQ-001/spec.json \
   --out artifacts/REQ-001/technical_design.json
 ```
@@ -27,3 +36,5 @@ Then run `design-architecture-reviewer` after architecture design exists.
 ## Output
 
 The output uses schema `codex-technical-design-v1`.
+
+The artifact includes process flow, modules, logical data flow, API/UI behavior, options, selected approach, tests, risks, and traceability.

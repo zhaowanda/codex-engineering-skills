@@ -7,10 +7,19 @@ description: Generate a structured architecture design draft from normalized spe
 
 Use this skill after technical design and before delivery plan.
 
+## Position
+
+```text
+technical-design-governor
+-> architecture-design-governor
+-> design-architecture-reviewer
+-> delivery-plan-templates
+```
+
 ## Command
 
 ```bash
-python3 skills/core/architecture-design-governor/scripts/architecture_design.py \
+python3 scripts/architecture_design.py \
   --spec artifacts/REQ-001/spec.json \
   --technical-design artifacts/REQ-001/technical_design.json \
   --out artifacts/REQ-001/architecture_design.json
@@ -26,3 +35,5 @@ python3 skills/core/architecture-design-governor/scripts/architecture_design.py 
 ## Output
 
 The output uses schema `codex-architecture-design-v1`.
+
+The artifact contains architecture options, selected option, repository responsibilities, contracts, data ownership, deployment, rollback, observability, and risks.

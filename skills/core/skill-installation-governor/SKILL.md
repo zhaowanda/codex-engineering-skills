@@ -7,6 +7,15 @@ description: Install, plan, or validate Codex engineering skills from this open-
 
 Use this skill to install open-core skills into a local Codex skills directory.
 
+## Position
+
+```text
+repository checkout or release package
+-> skill-installation-governor
+-> local Codex skill usage
+-> sync-local-skills maintenance
+```
+
 ## Commands
 
 One-command install:
@@ -22,12 +31,12 @@ python3 install.py --dry-run
 ```
 
 ```bash
-python3 skills/core/skill-installation-governor/scripts/install_skills.py \
+python3 scripts/install_skills.py \
   --source .
 ```
 
 ```bash
-python3 skills/core/skill-installation-governor/scripts/install_skills.py \
+python3 scripts/install_skills.py \
   --source . \
   --target ~/.codex/skills/codex-engineering-skills
 ```
@@ -43,3 +52,5 @@ python3 skills/core/skill-installation-governor/scripts/install_skills.py \
 ## Output
 
 The output uses schema `codex-skill-installation-v1`.
+
+The artifact reports source root, target root, planned or copied skills, skipped paths, overwrite policy, blockers, warnings, and install decision.

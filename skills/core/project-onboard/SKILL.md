@@ -7,10 +7,27 @@ description: Onboard a repository into a private overlay by creating a generic p
 
 Use this skill in a private overlay repository.
 
+## Position
+
+```text
+new project adoption
+-> project-onboard
+-> overlay-health
+-> project-understanding-runner
+```
+
+## Rules
+
+- Create generic project skill skeletons and registry entries in a private overlay only.
+- Do not publish private repository paths, business terms, generated indexes, or baseline docs to open core.
+- Require project name, repository path, type, overlay root, and default branch.
+- Treat onboarding as registry setup; run project-understanding-runner afterwards for baseline evidence.
+- Validate overlay health before team rollout.
+
 ## Command
 
 ```bash
-python3 skills/core/project-onboard/scripts/project_onboard.py \
+python3 scripts/project_onboard.py \
   --project web-app \
   --repo /path/to/web-app \
   --type frontend \
@@ -21,3 +38,5 @@ python3 skills/core/project-onboard/scripts/project_onboard.py \
 ## Output
 
 The output uses schema `codex-project-onboard-v1`.
+
+The artifact reports planned or created registry entries, project skill paths, blockers, warnings, and next commands.

@@ -10,7 +10,7 @@ Use this skill to analyze a repository before requirement planning or baseline d
 ## Command
 
 ```bash
-python3 skills/core/project-understanding-runner/scripts/project_understand.py \
+python3 scripts/project_understand.py \
   --repo /path/to/repo \
   --project example \
   --out /tmp/project-understanding

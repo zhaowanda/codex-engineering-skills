@@ -10,7 +10,7 @@ Use this skill to validate example scenarios without private project data.
 ## Command
 
 ```bash
-python3 skills/core/example-scenario-runner/scripts/example_scenario.py \
+python3 scripts/example_scenario.py \
   --root . \
   --out /tmp/codex-example-scenarios
 ```

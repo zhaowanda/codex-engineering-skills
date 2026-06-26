@@ -33,7 +33,7 @@ implementation
 Review a diff file:
 
 ```bash
-python3 skills/core/code-design-quality-reviewer/scripts/design_quality.py \
+python3 scripts/design_quality.py \
   review \
   --diff-file artifacts/change.diff \
   --requirement-id REQ-001-checkout \
@@ -46,7 +46,7 @@ python3 skills/core/code-design-quality-reviewer/scripts/design_quality.py \
 Validate review output:
 
 ```bash
-python3 skills/core/code-design-quality-reviewer/scripts/design_quality.py \
+python3 scripts/design_quality.py \
   validate \
   --file artifacts/code_design_quality.json
 ```
@@ -54,7 +54,7 @@ python3 skills/core/code-design-quality-reviewer/scripts/design_quality.py \
 Resolve a finding:
 
 ```bash
-python3 skills/core/code-design-quality-reviewer/scripts/design_quality.py \
+python3 scripts/design_quality.py \
   resolve \
   --file artifacts/code_design_quality.json \
   --finding-id CDQR-XXXXXXXXXX \

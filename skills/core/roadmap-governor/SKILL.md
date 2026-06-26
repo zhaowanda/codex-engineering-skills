@@ -10,7 +10,7 @@ Use this skill after adding or removing public skills.
 ## Command
 
 ```bash
-python3 skills/core/roadmap-governor/scripts/roadmap.py --root .
+python3 scripts/roadmap.py --root .
 ```
 
 ## Rules

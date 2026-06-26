@@ -10,7 +10,7 @@ Use this skill before accepting external contributions or publishing contributio
 ## Command
 
 ```bash
-python3 skills/core/contribution-governor/scripts/contribution.py --root .
+python3 scripts/contribution.py --root .
 ```
 
 ## Rules

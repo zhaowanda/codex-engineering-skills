@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import tempfile
 from pathlib import Path
 
@@ -59,12 +60,22 @@ def test_prompt_pack_validates_standard_prompts() -> None:
     assert result["prompt_count"] >= 5
 
 
+def test_skill_docs_do_not_use_source_tree_script_paths() -> None:
+    offenders = []
+    pattern = re.compile(r"python3 skills/(core|templates)/")
+    for path in sorted((ROOT / "skills").glob("*/*/SKILL.md")):
+        if pattern.search(path.read_text(encoding="utf-8")):
+            offenders.append(path.relative_to(ROOT).as_posix())
+    assert not offenders
+
+
 def run_all() -> None:
     test_install_skills_dry_run_counts_core_and_templates()
     test_default_target_uses_codex_skills_dir()
     test_install_skills_copies_to_empty_target()
     test_artifact_schema_inventory_has_many_schemas()
     test_prompt_pack_validates_standard_prompts()
+    test_skill_docs_do_not_use_source_tree_script_paths()
 
 
 if __name__ == "__main__":

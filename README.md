@@ -31,9 +31,10 @@ codex-engineering-skills/
   docs/
     architecture.md
     getting-started.md
+    skill-catalog.md
     migration-plan.md
-    skill-layering.md
     open-source-boundary.md
+    open-source-roadmap.md
     workflow-guide.md
   examples/
     project-registry/
@@ -48,6 +49,8 @@ codex-engineering-skills/
   scripts/
     codex_eng.py
     privacy_scan.py
+    skill_health.py
+    sync_local_skills.py
   prompts/
     one-line-request.md
     long-prd.md
@@ -57,9 +60,15 @@ codex-engineering-skills/
     low-rework-implementation.md
   skills/
     core/
+      <skill-name>/
+        SKILL.md
+        scripts/
     templates/
+      <template-skill-name>/
+        SKILL.md
+        scripts/
   tests/
-    test_privacy_scan.py
+    test_*.py
 ```
 
 ## Skill Layers
@@ -126,6 +135,14 @@ Unified CLI:
 ```bash
 python3 scripts/codex_eng.py synthetic-e2e --out-dir /tmp/codex-synthetic
 python3 scripts/codex_eng.py inspect --artifact-dir /tmp/codex-synthetic
+```
+
+Framework validation:
+
+```bash
+python3 -m pytest -q
+python3 -m compileall -q scripts skills tests
+python3 scripts/skill_health.py --root .
 ```
 
 Analyze an existing repository before requirement design:
@@ -222,6 +239,7 @@ python3 skills/core/dependency-license-governor/scripts/dependency_license.py --
 python3 skills/core/example-scenario-runner/scripts/example_scenario.py --root . --out /tmp/codex-example-scenarios
 python3 skills/core/artifact-schema-governor/scripts/artifact_schema.py --root .
 python3 skills/core/prompt-pack-governor/scripts/prompt_pack.py --root . --validate
+python3 scripts/skill_health.py --root .
 python3 skills/core/skill-installation-governor/scripts/install_skills.py --source . --target /tmp/codex-skills --dry-run
 python3 scripts/codex_eng.py run contribution --root .
 python3 scripts/codex_eng.py run security-policy --root .

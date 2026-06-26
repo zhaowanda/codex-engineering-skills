@@ -5,10 +5,29 @@ description: Analyze a git diff and classify engineering impact areas before rev
 
 # Diff Impact Analyzer
 
+Use this skill immediately after implementation and before review, testing, or release evidence selection.
+
+## Position
+
+```text
+implementation diff
+-> diff-impact-analyzer
+-> evidence-auto-collector / change-risk-governor
+-> code-review-gate
+```
+
+## Rules
+
+- Classify impact areas from changed paths and diff content, including API, database, configuration, permission, performance, frontend, tests, docs, migration, and release.
+- Prefer conservative evidence requirements when a change could affect more than one area.
+- Treat unknown file types as review evidence, not as safe/no-impact changes.
+- Do not inspect live systems or mutate repositories; analyze supplied diff text only.
+- Include required evidence so downstream gates can identify missing validation.
+
 ## Command
 
 ```bash
-python3 skills/core/diff-impact-analyzer/scripts/diff_impact.py \
+python3 scripts/diff_impact.py \
   --diff-file /path/to/change.diff \
   --out artifacts/REQ-001/diff_impact.json
 ```
@@ -16,3 +35,5 @@ python3 skills/core/diff-impact-analyzer/scripts/diff_impact.py \
 ## Output
 
 The output uses schema `codex-diff-impact-v1`.
+
+The artifact includes impact areas, evidence required, warnings, and review notes inferred from the diff.

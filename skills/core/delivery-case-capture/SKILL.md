@@ -10,7 +10,7 @@ Use this skill after a delivery run.
 ## Command
 
 ```bash
-python3 skills/core/delivery-case-capture/scripts/capture_case.py \
+python3 scripts/capture_case.py \
   --artifact-dir artifacts/REQ-001 \
   --case-id CASE-001 \
   --out cases/CASE-001.json

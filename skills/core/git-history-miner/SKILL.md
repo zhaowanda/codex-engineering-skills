@@ -5,10 +5,29 @@ description: Mine generic Git history signals for a source repository. Use when 
 
 # Git History Miner
 
+Use this skill during project understanding to identify recent change themes and hotspots without exposing private author metadata.
+
+## Position
+
+```text
+repository-analyzer
+-> git-history-miner
+-> project-baseline-reverser / project-understanding-runner
+-> risk and hotspot review
+```
+
+## Rules
+
+- Mine generic signals such as recent themes, hotspot files, hotspot directories, and change frequency.
+- Do not output author emails, private remotes, branch secrets, or proprietary ticket URLs.
+- Treat shallow, empty, or non-Git repositories as limited evidence with warnings.
+- Do not rewrite history, fetch remotes, or mutate the repository.
+- Use history signals as risk hints, not as proof of current ownership or correctness.
+
 ## Command
 
 ```bash
-python3 skills/core/git-history-miner/scripts/git_history.py \
+python3 scripts/git_history.py \
   --repo /path/to/repo \
   --project example \
   --out /tmp/git_history.json
@@ -17,3 +36,5 @@ python3 skills/core/git-history-miner/scripts/git_history.py \
 ## Output
 
 The output uses schema `codex-git-history-mining-v1`.
+
+The artifact reports recent commit themes, hotspot paths, history limitations, warnings, and privacy-safe metadata.

@@ -32,7 +32,7 @@ delivery_plan
 Check one repository:
 
 ```bash
-python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
+python3 scripts/git_worktree.py \
   check \
   --repo /path/to/repo \
   --base-branch main
@@ -41,7 +41,7 @@ python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
 Prepare one repository:
 
 ```bash
-python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
+python3 scripts/git_worktree.py \
   prepare \
   --repo /path/to/repo \
   --base-branch main \
@@ -52,7 +52,7 @@ python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
 Prepare all modify repositories from a generic delivery plan:
 
 ```bash
-python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
+python3 scripts/git_worktree.py \
   prepare-plan \
   --delivery-plan artifacts/delivery_plan.json \
   --doc-id REQ-001-checkout \
@@ -63,7 +63,7 @@ python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
 Assert readiness immediately before edits:
 
 ```bash
-python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
+python3 scripts/git_worktree.py \
   assert-ready \
   --repo /path/to/repo \
   --branch feature/REQ-001-checkout \
@@ -94,7 +94,7 @@ python3 skills/core/git-worktree-governor/scripts/git_worktree.py \
 
 Only `role=modify` tasks are prepared.
 
-## Evidence
+## Output
 
 Single-repo preparation writes `git_baseline_evidence.json`:
 

@@ -21,7 +21,7 @@ stable doc_id
 Initialize:
 
 ```bash
-python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
+python3 scripts/delivery_state.py \
   init \
   --doc-id REQ-20260623-example \
   --lane standard_requirement \
@@ -31,7 +31,7 @@ python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
 Advance:
 
 ```bash
-python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
+python3 scripts/delivery_state.py \
   advance \
   --state /path/to/artifacts/delivery_state.json \
   --stage technical_design \
@@ -42,7 +42,7 @@ python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
 Block:
 
 ```bash
-python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
+python3 scripts/delivery_state.py \
   block \
   --state /path/to/artifacts/delivery_state.json \
   --reason "open clarification questions remain" \
@@ -52,7 +52,7 @@ python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
 Validate before implementation or release:
 
 ```bash
-python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
+python3 scripts/delivery_state.py \
   validate \
   --state /path/to/artifacts/delivery_state.json \
   --target implementation
@@ -69,7 +69,7 @@ python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
 - Let downstream gates advance only the evidence they own.
 - Keep chat output small; point to evidence paths.
 
-## Output Contract
+## Output
 
 ```json
 {
@@ -97,4 +97,3 @@ python3 skills/core/delivery-state-governor/scripts/delivery_state.py \
 - `migration`: platformization or data/config/provider migration, requires current baseline, target architecture, compatibility, dual-run, rollback, and integration/UAT evidence.
 - `review_only`: review without implementation.
 - `docs_reverse`: reconstruct baseline docs from existing code.
-

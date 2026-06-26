@@ -7,10 +7,18 @@ description: Generate and validate configuration readiness evidence for engineer
 
 Use this skill during design and before release.
 
+## Position
+
+```text
+spec/design/diff
+-> configuration-governor
+-> code-review-gate / release-evidence-binder
+```
+
 ## Command
 
 ```bash
-python3 skills/core/configuration-governor/scripts/configuration.py \
+python3 scripts/configuration.py \
   analyze \
   --spec artifacts/REQ-001/spec.json \
   --technical-design artifacts/REQ-001/technical_design.json \
@@ -27,3 +35,5 @@ python3 skills/core/configuration-governor/scripts/configuration.py \
 ## Output
 
 The output uses schema `codex-configuration-readiness-v1`.
+
+The artifact lists configuration items, owners, environment scope, defaults, rollback decisions, secret-handling rules, blockers, and warnings.

@@ -5,10 +5,29 @@ description: Validate that implementation is complete before review, testing, or
 
 # Implementation Completion Gate
 
+Use this skill immediately after file edits and before review or test evidence is accepted.
+
+## Position
+
+```text
+file edits
+-> implementation-completion-gate
+-> diff-impact-analyzer
+-> code-design-quality-reviewer / code-review-gate
+```
+
+## Rules
+
+- Require a real diff file; empty or missing diffs cannot prove implementation completion.
+- Check changed files against delivery-plan scope when a plan is supplied.
+- Require a concrete implementation summary, not a generic placeholder.
+- Warn on follow-up evidence gaps that must be handled by review or test gates.
+- Treat this as completion evidence only; it does not replace code review or test execution.
+
 ## Command
 
 ```bash
-python3 skills/core/implementation-completion-gate/scripts/implementation_complete.py \
+python3 scripts/implementation_complete.py \
   --diff-file /path/to/change.diff \
   --delivery-plan artifacts/REQ-001/delivery_plan.json \
   --summary "implemented scoped change" \
@@ -18,3 +37,5 @@ python3 skills/core/implementation-completion-gate/scripts/implementation_comple
 ## Output
 
 The output uses schema `codex-implementation-completion-v1`.
+
+The artifact reports changed files, scope alignment, summary quality, blockers, warnings, and evidence follow-up items.

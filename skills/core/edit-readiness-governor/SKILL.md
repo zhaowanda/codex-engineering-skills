@@ -36,7 +36,7 @@ spec/design/plan
 Assert readiness:
 
 ```bash
-python3 skills/core/edit-readiness-governor/scripts/edit_readiness.py \
+python3 scripts/edit_readiness.py \
   assert \
   --repo /path/to/repo \
   --doc-id REQ-001-checkout \
@@ -55,7 +55,7 @@ python3 skills/core/edit-readiness-governor/scripts/edit_readiness.py \
 Create a short-lived edit permit:
 
 ```bash
-python3 skills/core/edit-readiness-governor/scripts/edit_readiness.py \
+python3 scripts/edit_readiness.py \
   permit \
   --repo /path/to/repo \
   --doc-id REQ-001-checkout \
@@ -76,7 +76,7 @@ python3 skills/core/edit-readiness-governor/scripts/edit_readiness.py \
 Verify permit before a write:
 
 ```bash
-python3 skills/core/edit-readiness-governor/scripts/edit_readiness.py \
+python3 scripts/edit_readiness.py \
   verify-permit \
   --permit artifacts/edit_permit.json \
   --repo /path/to/repo \
@@ -88,7 +88,7 @@ python3 skills/core/edit-readiness-governor/scripts/edit_readiness.py \
 Wrap scripted writes:
 
 ```bash
-python3 skills/core/edit-readiness-governor/scripts/pre_edit_wrapper.py \
+python3 scripts/pre_edit_wrapper.py \
   --permit artifacts/edit_permit.json \
   --repo /path/to/repo \
   --doc-id REQ-001-checkout \
@@ -98,7 +98,7 @@ python3 skills/core/edit-readiness-governor/scripts/pre_edit_wrapper.py \
   -- touch /tmp/example
 ```
 
-## Evidence
+## Output
 
 Readiness output uses schema `codex-edit-readiness-v1`.
 

@@ -10,7 +10,7 @@ Use this skill before publishing docs.
 ## Command
 
 ```bash
-python3 skills/core/docs-readability-governor/scripts/docs_readability.py --root .
+python3 scripts/docs_readability.py --root .
 ```
 
 ## Rules

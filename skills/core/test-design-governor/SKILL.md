@@ -10,7 +10,7 @@ Use this skill after design and before implementation.
 ## Commands
 
 ```bash
-python3 skills/core/test-design-governor/scripts/test_design.py \
+python3 scripts/test_design.py \
   render \
   --spec artifacts/REQ-001/spec.json \
   --technical-design artifacts/REQ-001/technical_design.json \
@@ -19,7 +19,7 @@ python3 skills/core/test-design-governor/scripts/test_design.py \
 ```
 
 ```bash
-python3 skills/core/test-design-governor/scripts/test_design.py \
+python3 scripts/test_design.py \
   validate \
   --file artifacts/REQ-001/test_design.json
 ```

@@ -7,11 +7,20 @@ description: Provide and validate reusable prompt packs for using Codex engineer
 
 Use this skill to list or validate prompt packs for external users.
 
+## Position
+
+```text
+prompt authoring or release
+-> prompt-pack-governor
+-> prompt-effectiveness-governor
+-> documentation/release readiness
+```
+
 ## Commands
 
 ```bash
-python3 skills/core/prompt-pack-governor/scripts/prompt_pack.py --root . --list
-python3 skills/core/prompt-pack-governor/scripts/prompt_pack.py --root . --validate
+python3 scripts/prompt_pack.py --root . --list
+python3 scripts/prompt_pack.py --root . --validate
 ```
 
 ## Rules
@@ -19,7 +28,11 @@ python3 skills/core/prompt-pack-governor/scripts/prompt_pack.py --root . --valid
 - Prompt packs must state the target scenario.
 - Prompts must require artifacts, boundaries, evidence, and stop conditions.
 - Prompts must avoid private project names and local paths.
+- Prompts should guide users to design-first delivery before implementation.
+- Release-readiness prompts must require validation and rollback evidence.
 
 ## Output
 
 The output uses schema `codex-prompt-pack-v1`.
+
+The artifact reports prompt inventory, scenario coverage, validation blockers, private-data warnings, missing evidence requirements, and stop-condition gaps.

@@ -10,13 +10,13 @@ Use this skill when a delivery needs proof that every requirement and acceptance
 ## Commands
 
 ```bash
-python3 skills/core/traceability-governor/scripts/traceability.py \
+python3 scripts/traceability.py \
   --artifact-dir artifacts/REQ-001 \
   --out artifacts/REQ-001/traceability_matrix.json
 ```
 
 ```bash
-python3 skills/core/traceability-governor/scripts/traceability.py \
+python3 scripts/traceability.py \
   --artifact-dir artifacts/REQ-001 \
   --validate
 ```

@@ -17,7 +17,7 @@ Use this skill before teams run the workflow on real repositories.
 ## Command
 
 ```bash
-python3 skills/core/framework-config-governor/scripts/framework_config.py \
+python3 scripts/framework_config.py \
   validate \
   --framework config/framework.example.yaml \
   --project-registry examples/project-registry/projects.example.yaml
@@ -26,7 +26,7 @@ python3 skills/core/framework-config-governor/scripts/framework_config.py \
 With explicit open-core root:
 
 ```bash
-python3 skills/core/framework-config-governor/scripts/framework_config.py \
+python3 scripts/framework_config.py \
   validate \
   --framework config/framework.example.yaml \
   --project-registry examples/project-registry/projects.example.yaml \

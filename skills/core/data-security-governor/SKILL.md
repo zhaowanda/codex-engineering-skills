@@ -7,10 +7,18 @@ description: Generate and validate data security review evidence for design, imp
 
 Use this skill during design and release review.
 
+## Position
+
+```text
+spec/design/diff
+-> data-security-governor
+-> code-review-gate / release-evidence-binder
+```
+
 ## Command
 
 ```bash
-python3 skills/core/data-security-governor/scripts/data_security.py \
+python3 scripts/data_security.py \
   design \
   --spec artifacts/REQ-001/spec.json \
   --technical-design artifacts/REQ-001/technical_design.json \
@@ -27,3 +35,5 @@ python3 skills/core/data-security-governor/scripts/data_security.py \
 ## Output
 
 The output uses schema `codex-data-security-review-v1`.
+
+The artifact reports sensitive data areas, controls, permission cases, masking requirements, blockers, warnings, and residual risks.

@@ -10,7 +10,7 @@ Use this skill before publishing the repository or accepting security-sensitive 
 ## Command
 
 ```bash
-python3 skills/core/security-policy-governor/scripts/security_policy.py --root .
+python3 scripts/security_policy.py --root .
 ```
 
 ## Rules

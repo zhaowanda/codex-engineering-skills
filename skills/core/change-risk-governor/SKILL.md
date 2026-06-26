@@ -7,10 +7,26 @@ description: Classify engineering change risk from diff impact, delivery plan, c
 
 Use this skill after implementation impact analysis or before release planning to determine the required control level.
 
+## Position
+
+```text
+diff-impact-analyzer / implementation-completion-gate
+-> change-risk-governor
+-> code-review-gate / release-change-governor
+```
+
+## Rules
+
+- Classify risk from impact areas, delivery plan scope, configuration, security, performance, traceability, implementation, and diff text signals.
+- Escalate to high or critical when database, permissions, auth, secrets, production config, payments, destructive operations, or rollback uncertainty appear.
+- Never downgrade risk just because an evidence file is missing; missing evidence should increase uncertainty.
+- Prefer `medium` for ordinary code changes with standard review and tests.
+- Include required controls so release planning can choose validation, approval, and rollback depth.
+
 ## Command
 
 ```bash
-python3 skills/core/change-risk-governor/scripts/change_risk.py \
+python3 scripts/change_risk.py \
   --artifact-dir artifacts/REQ-001 \
   --out artifacts/REQ-001/change_risk.json
 ```

@@ -7,10 +7,19 @@ description: Review deprecation and migration readiness for Codex engineering sk
 
 Use this skill before removing or renaming public contracts.
 
+## Position
+
+```text
+public contract change
+-> deprecation-governor
+-> compatibility-governor
+-> release notes / migration guidance
+```
+
 ## Command
 
 ```bash
-python3 skills/core/deprecation-governor/scripts/deprecation.py --root .
+python3 scripts/deprecation.py --root .
 ```
 
 ## Rules
@@ -18,7 +27,11 @@ python3 skills/core/deprecation-governor/scripts/deprecation.py --root .
 - `docs/deprecation-policy.md` must exist.
 - Policy must mention notice, migration, compatibility window, and removal.
 - Compatibility warnings require migration or deprecation notes.
+- Removed or renamed public commands require user-facing migration guidance.
+- Schema or skill name changes require a compatibility window unless explicitly documented as breaking.
 
 ## Output
 
 The output uses schema `codex-deprecation-review-v1`.
+
+The artifact reports policy coverage, notice and migration readiness, compatibility-window expectations, removal-rule blockers, and warnings.

@@ -7,6 +7,15 @@ description: Generate and validate frontend browser acceptance evidence for UI c
 
 Use this skill after frontend implementation and before test evidence or release evidence binding.
 
+## Position
+
+```text
+frontend implementation
+-> frontend-acceptance-runner
+-> test-evidence-gate
+-> release-evidence-binder
+```
+
 ## Scope
 
 - Generate a `frontend_acceptance.json` template for browser evidence collection.
@@ -27,7 +36,7 @@ Use this skill after frontend implementation and before test evidence or release
 Create a template:
 
 ```bash
-python3 skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py \
+python3 scripts/frontend_acceptance.py \
   template \
   --page-type list \
   --target-url http://localhost:3000/orders \
@@ -37,7 +46,7 @@ python3 skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py \
 Validate evidence:
 
 ```bash
-python3 skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py \
+python3 scripts/frontend_acceptance.py \
   validate \
   --file artifacts/review/frontend_acceptance.json
 ```
