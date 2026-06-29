@@ -45,6 +45,7 @@
 - `skills/core/post-release-observer`: post-release-observer
 - `skills/core/project-baseline-reverser`: project-baseline-reverser
 - `skills/core/project-onboard`: project-onboard
+- `skills/core/project-runner`: project-runner
 - `skills/core/project-understanding-runner`: project-understanding-runner
 - `skills/core/prompt-effectiveness-governor`: prompt-effectiveness-governor
 - `skills/core/prompt-pack-governor`: prompt-pack-governor

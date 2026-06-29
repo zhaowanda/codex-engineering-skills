@@ -88,9 +88,12 @@ python3 scripts/codex_eng.py run artifact-schema --root .
 Before designing against a legacy or unfamiliar codebase, generate a project understanding dossier:
 
 ```bash
-python3 scripts/codex_eng.py run project-understand \
+python3 scripts/codex_eng.py project legacy \
   --repo examples/synthetic-repos/basic-web-service \
   --project basic-web-service \
+  --type backend \
+  --git-url git@example.com:org/basic-web-service.git \
+  --overlay-root /tmp/codex-private-overlay \
   --out /tmp/codex-project-understanding
 ```
 
@@ -105,6 +108,11 @@ Expected outputs:
 - `baseline.json`: machine-readable inferred baseline.
 - `baseline_quality.json`: baseline completeness review.
 - `human_baseline.md`: readable project summary for maintainers.
+- `skills/<project>/SKILL.md`: private project skill.
+- `skills/<project>/references/`: expert project references.
+- `projects.yaml`: private project registry.
+- `indexes/<project>.code_index.json`: canonical private code search index.
+- `baseline/<project>.baseline.json`: private legacy baseline.
 
 For real repositories, write outputs to a private overlay or temporary artifact directory. Do not commit generated real project baselines, indexes, endpoint maps, or config surfaces to this open-source repository.
 
@@ -181,14 +189,15 @@ The runner tells you the current stage, missing artifacts, blockers, next comman
 
 ## 9. Connect A Private Overlay
 
-Use `project-onboard`, `code-index-builder`, and `docs-governor` in a private repository:
+Use `project-runner` and `docs-governor` in a private repository:
 
 ```bash
-python3 skills/core/project-onboard/scripts/project_onboard.py \
+python3 scripts/codex_eng.py project new \
   --project web-app \
   --repo /path/to/web-app \
   --type frontend \
-  --overlay-root overlay \
+  --git-url git@example.com:org/web-app.git \
+  --overlay-root /path/to/private-overlay \
   --default-branch main
 ```
 

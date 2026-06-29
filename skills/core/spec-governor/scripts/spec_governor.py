@@ -52,6 +52,24 @@ def extract_acceptance(lines: list[str]) -> list[dict[str, Any]]:
     return result
 
 
+def extract_requirements(lines: list[str]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    req_pattern = re.compile(r"^(req|requirement|需求|功能)[:：\s-]*(.+)$", re.I)
+    skip_pattern = re.compile(r"^(ac|acceptance|验收|验收标准|标准|rule|规则|out of scope|非目标|assumption|假设|risk|风险)[:：\s-]*", re.I)
+    for idx, line in enumerate(lines, start=1):
+        match = req_pattern.match(line)
+        if match:
+            result.append({"id": f"REQ-{len(result) + 1}", "summary": match.group(2).strip(), "source_evidence": f"input line {idx}"})
+    if not result:
+        for idx, line in enumerate(lines, start=1):
+            if skip_pattern.match(line) or "?" in line or "？" in line:
+                continue
+            result.append({"id": f"REQ-{len(result) + 1}", "summary": line, "source_evidence": f"input line {idx}"})
+            if len(result) >= 3:
+                break
+    return result
+
+
 def extract_rules(lines: list[str]) -> list[dict[str, str]]:
     rules: list[dict[str, str]] = []
     for line in lines:
@@ -69,6 +87,16 @@ def extract_open_questions(lines: list[str]) -> list[dict[str, str]]:
     return questions
 
 
+def extract_prefixed(lines: list[str], prefixes: tuple[str, ...]) -> list[str]:
+    pattern = re.compile(rf"^({'|'.join(re.escape(item) for item in prefixes)})[:：\s-]*(.+)$", re.I)
+    result: list[str] = []
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            result.append(match.group(2).strip())
+    return result
+
+
 def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
     lines = split_lines(text)
     summary = lines[0] if lines else title
@@ -76,6 +104,11 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
     acceptance = extract_acceptance(lines)
     rules = extract_rules(lines)
     questions = extract_open_questions(lines)
+    requirements = extract_requirements(lines)
+    out_of_scope = extract_prefixed(lines, ("out of scope", "非目标", "不包含"))
+    assumptions = extract_prefixed(lines, ("assumption", "假设"))
+    risks = [{"id": f"RISK-{idx + 1}", "risk": item, "source_evidence": "input"} for idx, item in enumerate(extract_prefixed(lines, ("risk", "风险")))]
+    non_goals = extract_prefixed(lines, ("non-goal", "non goal", "非目标"))
     actors = []
     lower = text.lower()
     for candidate in ["admin", "operator", "customer", "user", "buyer", "管理员", "用户", "客户", "运营"]:
@@ -93,14 +126,14 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
         "actors": sorted(set(actors)),
         "scope": {
             "in_scope": [summary] if summary else [],
-            "out_of_scope": [],
-            "assumptions": [],
-            "non_goals": [],
+            "out_of_scope": out_of_scope,
+            "assumptions": assumptions,
+            "non_goals": non_goals,
         },
-        "requirements": [{"id": "REQ-1", "summary": summary, "source_evidence": "input line 1"}] if summary else [],
+        "requirements": requirements,
         "business_rules": rules,
         "acceptance_criteria": acceptance,
-        "risks": [],
+        "risks": risks,
         "open_questions": questions,
         "decision": "blocked" if questions else "ready_for_design",
         "next_action": "Close open questions before design." if questions else "Proceed to technical and architecture design.",

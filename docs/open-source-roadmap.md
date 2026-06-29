@@ -47,6 +47,7 @@
 - Data security governor. `done`
 - Code index builder and lookup. `done`
 - Project onboarding. `done`
+- Project runner for new and legacy private overlay setup. `done`
 - Docs governor. `done`
 - Project baseline reverser. `done`
 - Repository analyzer. `done`

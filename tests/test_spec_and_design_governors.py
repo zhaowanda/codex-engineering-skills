@@ -20,6 +20,7 @@ def load_module(name: str, path: Path):
 spec_governor = load_module("spec_governor", ROOT / "skills/core/spec-governor/scripts/spec_governor.py")
 technical_design = load_module("technical_design", ROOT / "skills/core/technical-design-governor/scripts/technical_design.py")
 architecture_design = load_module("architecture_design", ROOT / "skills/core/architecture-design-governor/scripts/architecture_design.py")
+project_understand = load_module("project_understand", ROOT / "skills/core/project-understanding-runner/scripts/project_understand.py")
 delivery_runner = load_module("delivery_runner", ROOT / "skills/core/delivery-runner/scripts/delivery_runner.py")
 
 
@@ -49,6 +50,27 @@ def test_spec_blocks_open_questions() -> None:
     assert any(item["source"] == "open_questions" for item in validation["blockers"])
 
 
+def test_spec_extracts_multiple_requirements_scope_risks_and_questions() -> None:
+    text = """
+    Req: Admin exports filtered orders.
+    Req: Operator sees export history.
+    Rule: only admin can export filtered results.
+    AC: exported file contains order id and status.
+    AC: non-admin cannot see export action.
+    Out of scope: scheduled exports.
+    Assumption: existing order API remains available.
+    Risk: large exports may be slow.
+    Which columns are mandatory?
+    """
+    spec = spec_governor.normalize("REQ-20", "Order export", text)
+    assert len(spec["requirements"]) == 2
+    assert len(spec["acceptance_criteria"]) == 2
+    assert spec["scope"]["out_of_scope"] == ["scheduled exports."]
+    assert spec["scope"]["assumptions"] == ["existing order API remains available."]
+    assert spec["risks"]
+    assert spec["open_questions"]
+
+
 def test_technical_and_architecture_design_render_core_sections() -> None:
     spec = spec_governor.normalize("REQ-3", "Checkout display", "Buyer sees discount. AC: discount is visible before submit.")
     tech = technical_design.render(spec)
@@ -59,6 +81,20 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     assert arch["schema"] == "codex-architecture-design-v1"
     assert arch["architecture_options"]
     assert arch["repo_responsibilities"][0]["role"] == "modify"
+
+
+def test_project_understanding_informs_design_and_architecture() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        understanding_dir = Path(tmp) / "understanding"
+        project_understand.run(ROOT / "examples/synthetic-repos/basic-web-service", "basic-web-service", understanding_dir)
+        spec = spec_governor.normalize("REQ-30", "Order export", "Admin exports orders. AC: exported file contains order id.")
+        tech = technical_design.render(spec, technical_design.load_project_understanding(understanding_dir))
+        arch = architecture_design.render(spec, tech, architecture_design.load_project_understanding(understanding_dir))
+        assert tech["project_context"]["project"] == "basic-web-service"
+        assert "app/main.py" in tech["project_context"]["read_first"]
+        assert tech["module_decomposition"][0]["module"] != "target module to be confirmed"
+        assert arch["repo_responsibilities"][0]["repo"] == "basic-web-service"
+        assert arch["repo_responsibilities"][0]["repo_path"].endswith("examples/synthetic-repos/basic-web-service")
 
 
 def test_delivery_runner_reports_next_stage() -> None:
@@ -97,7 +133,9 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
 def run_all() -> None:
     test_spec_normalize_ready_for_design()
     test_spec_blocks_open_questions()
+    test_spec_extracts_multiple_requirements_scope_risks_and_questions()
     test_technical_and_architecture_design_render_core_sections()
+    test_project_understanding_informs_design_and_architecture()
     test_delivery_runner_reports_next_stage()
     test_delivery_runner_allows_implementation_when_pre_edit_gates_pass()
 

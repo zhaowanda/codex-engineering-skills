@@ -126,6 +126,8 @@ def run(
             skipped,
             steps,
         )
+    else:
+        project_out = None
 
     normalized = out / "requirement.normalized.txt"
     run_if_needed(
@@ -171,10 +173,13 @@ def run(
     )
 
     technical = out / "technical_design.json"
+    technical_command = ["python3", "skills/core/technical-design-governor/scripts/technical_design.py", "--spec", str(spec), "--out", str(technical)]
+    if project_out:
+        technical_command.extend(["--project-understanding", str(project_out)])
     run_if_needed(
         "technical_design",
         technical,
-        ["python3", "skills/core/technical-design-governor/scripts/technical_design.py", "--spec", str(spec), "--out", str(technical)],
+        technical_command,
         force,
         generated,
         skipped,
@@ -182,19 +187,22 @@ def run(
     )
 
     architecture = out / "architecture_design.json"
+    architecture_command = [
+        "python3",
+        "skills/core/architecture-design-governor/scripts/architecture_design.py",
+        "--spec",
+        str(spec),
+        "--technical-design",
+        str(technical),
+        "--out",
+        str(architecture),
+    ]
+    if project_out:
+        architecture_command.extend(["--project-understanding", str(project_out)])
     run_if_needed(
         "architecture_design",
         architecture,
-        [
-            "python3",
-            "skills/core/architecture-design-governor/scripts/architecture_design.py",
-            "--spec",
-            str(spec),
-            "--technical-design",
-            str(technical),
-            "--out",
-            str(architecture),
-        ],
+        architecture_command,
         force,
         generated,
         skipped,
@@ -246,21 +254,24 @@ def run(
     )
 
     delivery_plan = out / "delivery_plan.json"
+    delivery_command = [
+        "python3",
+        "skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py",
+        "--doc-id",
+        doc_id,
+        "--technical-design",
+        str(technical),
+        "--architecture-design",
+        str(architecture),
+        "--out",
+        str(delivery_plan),
+    ]
+    if project_out:
+        delivery_command.extend(["--project-understanding", str(project_out)])
     run_if_needed(
         "delivery_plan",
         delivery_plan,
-        [
-            "python3",
-            "skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py",
-            "--doc-id",
-            doc_id,
-            "--technical-design",
-            str(technical),
-            "--architecture-design",
-            str(architecture),
-            "--out",
-            str(delivery_plan),
-        ],
+        delivery_command,
         force,
         generated,
         skipped,

@@ -66,18 +66,36 @@ REGISTRY = """
 schema: codex-project-registry-v1
 projects:
   - name: web-app
-    root: /path/to/web-app
     type: frontend
     default_branch: main
     skill: web-app
+    repo:
+      git_url: git@example.com:org/web-app.git
+      default_branch: main
+      local_path_hint: /path/to/web-app
+    dependencies:
+      []
+    assets:
+      skill: skills/web-app/SKILL.md
+      references: skills/web-app/references
+      index: indexes/web-app.code_index.json
+      baseline: baseline/web-app.baseline.json
     test_strategy: npm
   - name: api-service
-    root: /path/to/api-service
     type: backend
     default_branch: main
     skill: api-service
-    related_projects:
+    repo:
+      git_url: git@example.com:org/api-service.git
+      default_branch: main
+      local_path_hint: api-service
+    dependencies:
       - web-app
+    assets:
+      skill: skills/api-service/SKILL.md
+      references: skills/api-service/references
+      index: indexes/api-service.code_index.json
+      baseline: baseline/api-service.baseline.json
     test_strategy: pytest
 """
 
@@ -117,10 +135,13 @@ def test_validate_blocks_project_root_inside_open_core() -> None:
 schema: codex-project-registry-v1
 projects:
   - name: web-app
-    root: {root}/examples/web-app
     type: frontend
     default_branch: main
     skill: web-app
+    repo:
+      git_url: git@example.com:org/web-app.git
+      default_branch: main
+      local_path_hint: {root}/examples/web-app
     test_strategy: npm
 """.format(root=root.as_posix()),
         )

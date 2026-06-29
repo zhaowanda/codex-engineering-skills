@@ -40,6 +40,33 @@ def safe_list(value: Any) -> list[str]:
     return [str(item) for item in as_list(value) if str(item).strip()]
 
 
+def load_project_understanding(path: Path | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    base = path if path.is_dir() else path.parent
+    if not base.exists():
+        return {}
+    result: dict[str, Any] = {}
+    for name in ["repository_analysis", "dependency_surface", "code_index", "baseline"]:
+        file = base / f"{name}.json"
+        if file.exists():
+            result[name] = read_json(str(file))
+    return result
+
+
+def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
+    repo = project_understanding.get("repository_analysis", {})
+    deps = project_understanding.get("dependency_surface", {})
+    index = project_understanding.get("code_index", {})
+    baseline = project_understanding.get("baseline", {})
+    project = str(repo.get("project") or baseline.get("project") or "target-repo")
+    repo_path = str(index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
+    files = [str(item.get("path")) for item in as_list(index.get("files")) if isinstance(item, dict) and item.get("path")]
+    entrypoints = [str(item) for item in as_list(repo.get("entrypoint_hints"))]
+    tests = [str(item) for item in as_list(deps.get("test_command_hints"))] or [str(item) for item in as_list(repo.get("test_hints"))]
+    return {"project": project, "repo_path": repo_path, "files": files, "entrypoints": entrypoints, "tests": tests}
+
+
 def repo_responsibilities(architecture: dict[str, Any]) -> list[dict[str, Any]]:
     repos: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -103,7 +130,8 @@ def allowed_files_hint(repo: str, architecture: dict[str, Any]) -> list[str]:
     return sorted(set(hints))
 
 
-def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
+def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dict[str, Any], project_understanding: dict[str, Any] | None = None) -> dict[str, Any]:
+    ctx = project_context(project_understanding or {})
     repos = repo_responsibilities(architecture)
     topology = topology_by_repo(architecture)
     acceptance = acceptance_from_design(technical)
@@ -113,11 +141,15 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
     for repo in repos:
         repo_name = repo["repo"]
         role = repo["role"]
+        repo_path = repo["repo_path"] or (ctx["repo_path"] if repo_name in {ctx["project"], "target-repo"} else "")
         modules = topology.get(repo_name, [])
         allowed = allowed_files_hint(repo_name, architecture)
+        if ctx["files"] and repo_name in {ctx["project"], "target-repo"}:
+            allowed = sorted(set([*allowed, *ctx["entrypoints"], *ctx["files"][:5]]))
+        test_commands = ctx["tests"] if repo_name in {ctx["project"], "target-repo"} else []
         task = {
             "repo": repo_name,
-            "repo_path": repo["repo_path"],
+            "repo_path": repo_path,
             "role": role,
             "responsibility": repo["responsibility"],
             "tasks": [
@@ -130,13 +162,13 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
             ],
             "read_first": allowed,
             "allowed_files": allowed if role == "modify" else [],
-            "test_commands": [],
+            "test_commands": test_commands,
             "acceptance_evidence": acceptance,
             "risks": [],
             "rollback": [],
         }
         if role == "modify":
-            if not repo["repo_path"]:
+            if not repo_path:
                 open_gates.append(f"{repo_name}: repo_path is required before git prepare-plan")
             if not task["allowed_files"]:
                 open_gates.append(f"{repo_name}: allowed_files should be narrowed before edit permit")
@@ -238,6 +270,7 @@ def main() -> int:
     parser.add_argument("--doc-id")
     parser.add_argument("--technical-design")
     parser.add_argument("--architecture-design")
+    parser.add_argument("--project-understanding")
     parser.add_argument("--example", action="store_true")
     parser.add_argument("--out")
     args = parser.parse_args()
@@ -255,7 +288,12 @@ def main() -> int:
     else:
         if not args.technical_design or not args.architecture_design:
             raise SystemExit("--technical-design and --architecture-design are required unless --example is used")
-        plan = render_from_design(doc_id, read_json(args.technical_design), read_json(args.architecture_design))
+        plan = render_from_design(
+            doc_id,
+            read_json(args.technical_design),
+            read_json(args.architecture_design),
+            load_project_understanding(Path(args.project_understanding)) if args.project_understanding else None,
+        )
     write_json(args.out, plan)
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     return 0 if plan.get("decision") == "ready" else 1

@@ -19,6 +19,7 @@ new project adoption
 ## Rules
 
 - Create generic project skill skeletons and registry entries in a private overlay only.
+- Project skill skeletons must use `SKILL.md` plus `references/` with business boundary, feature map, API map, code index, change playbook, contract patterns, validation recipes, pitfalls, project edit gate, and review cases.
 - Do not publish private repository paths, business terms, generated indexes, or baseline docs to open core.
 - Require project name, repository path, type, overlay root, and default branch.
 - Treat onboarding as registry setup; run project-understanding-runner afterwards for baseline evidence.

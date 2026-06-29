@@ -65,6 +65,12 @@ def test_auto_runner_project_understanding_optional() -> None:
             out=out,
         )
         assert (out / "project_understanding/baseline_quality.json").exists()
+        technical = (out / "technical_design.json").read_text(encoding="utf-8")
+        architecture = (out / "architecture_design.json").read_text(encoding="utf-8")
+        plan = (out / "delivery_plan.json").read_text(encoding="utf-8")
+        assert "basic-web-service" in technical
+        assert "basic-web-service" in architecture
+        assert "examples/synthetic-repos/basic-web-service" in plan
         assert any(step["name"] == "project_understanding" for step in result["steps"])
 
 

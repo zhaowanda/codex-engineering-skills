@@ -198,13 +198,17 @@ def validate_project_registry(registry: dict[str, Any], open_core_root: Path) ->
         elif name in seen_names:
             blockers.append({"source": source, "message": "project name must be unique"})
         seen_names.add(name)
-        for key in ["root", "type", "default_branch", "skill"]:
+        for key in ["type", "default_branch", "skill"]:
             if not project.get(key):
                 blockers.append({"source": f"{source}.{key}", "message": f"{key} is required"})
+        repo = project.get("repo") if isinstance(project.get("repo"), dict) else {}
+        git_url = str(repo.get("git_url") or project.get("git_url") or project.get("root") or "")
+        if not git_url:
+            blockers.append({"source": f"{source}.repo.git_url", "message": "repo.git_url is required"})
         project_type = str(project.get("type") or "")
         if project_type and project_type not in PROJECT_TYPES:
             warnings.append({"source": f"{source}.type", "message": "project type is not a known generic type", "value": project_type})
-        root = str(project.get("root") or "")
+        root = str(repo.get("local_path_hint") or project.get("root") or "")
         if root:
             if is_placeholder_path(root):
                 warnings.append({"source": f"{source}.root", "message": "project root is a placeholder and must be replaced in a private overlay"})
@@ -212,9 +216,9 @@ def validate_project_registry(registry: dict[str, Any], open_core_root: Path) ->
                 blockers.append({"source": f"{source}.root", "message": "project root must not point inside the open-core repository"})
         if not project.get("test_strategy"):
             warnings.append({"source": f"{source}.test_strategy", "message": "test_strategy is recommended"})
-        for related in as_list(project.get("related_projects")):
+        for related in as_list(project.get("dependencies", project.get("related_projects"))):
             if related and str(related) not in seen_names:
-                warnings.append({"source": f"{source}.related_projects", "message": "related project is not declared before this entry", "related_project": related})
+                warnings.append({"source": f"{source}.dependencies", "message": "dependency project is not declared before this entry", "dependency": related})
     return blockers, warnings
 
 

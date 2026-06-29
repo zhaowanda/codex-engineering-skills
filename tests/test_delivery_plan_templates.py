@@ -34,6 +34,33 @@ def test_missing_repo_path_keeps_plan_incomplete() -> None:
     assert any("repo_path is required" in item for item in plan["open_gates"])
 
 
+def test_project_understanding_fills_repo_path_files_and_tests() -> None:
+    understanding = {
+        "repository_analysis": {
+            "project": "basic-web-service",
+            "entrypoint_hints": ["app/main.py"],
+            "test_hints": ["tests/test_main.py"],
+        },
+        "dependency_surface": {"test_command_hints": ["pytest"]},
+        "code_index": {
+            "repo_root": "examples/synthetic-repos/basic-web-service",
+            "files": [{"path": "app/main.py"}, {"path": "tests/test_main.py"}],
+        },
+    }
+    technical = {"doc_id": "REQ-1", "test_strategy": [{"case": "case", "evidence": ["pytest"]}], "acceptance_mapping": [{"acceptance_id": "AC-1", "evidence_required": ["pytest"]}]}
+    architecture = {
+        "doc_id": "REQ-1",
+        "repo_responsibilities": [{"repo": "basic-web-service", "role": "modify", "responsibility": "change API"}],
+        "module_topology": [{"repo": "basic-web-service", "module": "app/main.py", "change_type": "modify"}],
+    }
+    plan = render_delivery_plan.render_from_design("REQ-1", technical, architecture, understanding)
+    task = plan["repo_tasks"][0]
+    assert task["repo_path"].endswith("examples/synthetic-repos/basic-web-service")
+    assert "app/main.py" in task["allowed_files"]
+    assert "pytest" in task["test_commands"]
+    assert not any("repo_path is required" in item for item in plan["open_gates"])
+
+
 def test_render_and_validate_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "delivery_plan.json"
@@ -47,6 +74,7 @@ def test_render_and_validate_file() -> None:
 def run_all() -> None:
     test_example_plan_is_valid()
     test_missing_repo_path_keeps_plan_incomplete()
+    test_project_understanding_fills_repo_path_files_and_tests()
     test_render_and_validate_file()
 
 

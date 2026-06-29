@@ -42,6 +42,7 @@ COMMANDS = {
     "git-history": ["python3", "skills/core/git-history-miner/scripts/git_history.py"],
     "baseline-quality": ["python3", "skills/core/baseline-quality-governor/scripts/baseline_quality.py"],
     "project-understand": ["python3", "skills/core/project-understanding-runner/scripts/project_understand.py"],
+    "project-runner": ["python3", "skills/core/project-runner/scripts/project_runner.py"],
     "sync-local-skills": ["python3", "scripts/sync_local_skills.py"],
 }
 
@@ -62,6 +63,16 @@ def main() -> int:
     p_auto.add_argument("--project")
     p_auto.add_argument("--out")
     p_auto.add_argument("--force", action="store_true")
+    p_project = sub.add_parser("project")
+    p_project.add_argument("mode", choices=["new", "legacy"])
+    p_project.add_argument("--project", required=True)
+    p_project.add_argument("--repo", required=True)
+    p_project.add_argument("--type", required=True)
+    p_project.add_argument("--overlay-root", required=True)
+    p_project.add_argument("--default-branch", default="main")
+    p_project.add_argument("--git-url")
+    p_project.add_argument("--depends-on", action="append", default=[])
+    p_project.add_argument("--out")
     p_inspect = sub.add_parser("inspect")
     p_inspect.add_argument("--artifact-dir", required=True)
     p_e2e = sub.add_parser("synthetic-e2e")
@@ -79,6 +90,29 @@ def main() -> int:
                 command.extend([f"--{flag.replace('_', '-')}", value])
         if args.force:
             command.append("--force")
+        return run_command(command)
+    if args.cmd == "project":
+        command = [
+            "python3",
+            "skills/core/project-runner/scripts/project_runner.py",
+            args.mode,
+            "--project",
+            args.project,
+            "--repo",
+            args.repo,
+            "--type",
+            args.type,
+            "--overlay-root",
+            args.overlay_root,
+            "--default-branch",
+            args.default_branch,
+        ]
+        if args.git_url:
+            command.extend(["--git-url", args.git_url])
+        for dependency in args.depends_on:
+            command.extend(["--depends-on", dependency])
+        if args.out:
+            command.extend(["--out", args.out])
         return run_command(command)
     if args.cmd == "inspect":
         return run_command(COMMANDS["inspect"] + ["--artifact-dir", args.artifact_dir])

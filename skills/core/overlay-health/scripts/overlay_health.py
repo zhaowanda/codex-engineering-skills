@@ -33,9 +33,12 @@ def check(overlay_root: Path) -> dict[str, Any]:
             continue
         if not (overlay_root / "skills" / name / "SKILL.md").exists():
             blockers.append({"source": name, "message": "project skill missing"})
-        if not list((overlay_root / "indexes").glob(f"{name}*.json")):
+        assets = project.get("assets") if isinstance(project.get("assets"), dict) else {}
+        index_path = overlay_root / str(assets.get("index", f"indexes/{name}.code_index.json"))
+        baseline_path = overlay_root / str(assets.get("baseline", f"baseline/{name}.baseline.json"))
+        if not index_path.exists() and not list((overlay_root / "indexes").glob(f"{name}*.json")):
             warnings.append({"source": name, "message": "project index missing"})
-        if not list((overlay_root / "baseline").glob(f"{name}*.json")):
+        if not baseline_path.exists() and not list((overlay_root / "baseline").glob(f"{name}*.json")):
             warnings.append({"source": name, "message": "baseline docs missing"})
     return {
         "schema": "codex-overlay-health-v1",

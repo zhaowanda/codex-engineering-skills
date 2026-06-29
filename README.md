@@ -159,13 +159,16 @@ python3 scripts/skill_health.py --root .
 Analyze an existing repository before requirement design:
 
 ```bash
-python3 scripts/codex_eng.py run project-understand \
+python3 scripts/codex_eng.py project legacy \
   --repo examples/synthetic-repos/basic-web-service \
   --project basic-web-service \
+  --type backend \
+  --git-url git@example.com:org/basic-web-service.git \
+  --overlay-root /tmp/codex-private-overlay \
   --out /tmp/codex-project-understanding
 ```
 
-The runner emits machine JSON plus `human_baseline.md`. For real projects, write these outputs to a private overlay or temporary artifact directory, not to this open-source repository.
+The project runner creates the project skill, `projects.yaml`, canonical code index, and legacy baseline outputs in a private overlay. For new projects, use `python3 scripts/codex_eng.py project new ...` to create the same project skill and registry structure before implementation work.
 
 ## Available Core Skills
 
@@ -182,6 +185,7 @@ The runner emits machine JSON plus `human_baseline.md`. For real projects, write
 - `skills/core/data-security-governor`: creates data security review evidence for PII, permissions, tenants, payment data, secrets, exports, logs, and audit-sensitive changes.
 - `skills/core/code-index-builder`: builds compact private project indexes from source files, symbols, routes, and keywords to reduce broad source searches.
 - `skills/core/code-index-lookup`: queries compact project indexes before reading large codebases.
+- `skills/core/project-runner`: unified private-overlay project entrypoint for new and legacy repositories, generating project skills, `projects.yaml`, canonical indexes, and legacy baselines.
 - `skills/core/project-onboard`: creates a private overlay project skill skeleton and project registry entry for a new repository.
 - `skills/core/docs-governor`: initializes and validates a long-lived delivery docs repository layout that separates human docs from machine artifacts.
 - `skills/core/project-baseline-reverser`: generates inferred baseline documentation from source structure and Git history for projects without existing docs.

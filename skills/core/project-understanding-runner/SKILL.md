@@ -16,9 +16,24 @@ python3 scripts/project_understand.py \
   --out /tmp/project-understanding
 ```
 
+To also generate or refresh a private project skill with the standard project-level structure:
+
+```bash
+python3 scripts/project_understand.py \
+  --repo /path/to/repo \
+  --project operate-platform-fe \
+  --out /tmp/project-understanding \
+  --write-project-skill \
+  --overlay-root /path/to/private-overlay \
+  --type frontend \
+  --default-branch main
+```
+
 ## Rules
 
 - Write outputs only to the requested `--out` directory.
+- Write project skill skeletons only when `--write-project-skill` is explicitly set.
+- Project skill output must use `SKILL.md` plus `references/` containing business boundary, feature map, API map, code index, change playbook, contract patterns, validation recipes, pitfalls, project edit gate, and review cases.
 - Do not commit generated real project outputs to open core.
 - Treat all generated baseline docs as heuristic until owner-reviewed.
 
