@@ -1,6 +1,10 @@
 ---
 name: data-security-governor
 description: Generate and validate data security review evidence for design, implementation, and release. Use when requirements, designs, diffs, logs, exports, permissions, tenants, payments, secrets, PII, audit, or data retention may be affected.
+category: workflow-gate
+maturity: expert-gate
+stage: release
+gate: true
 ---
 
 # Data Security Governor

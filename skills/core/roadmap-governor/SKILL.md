@@ -1,6 +1,10 @@
 ---
 name: roadmap-governor
 description: Review roadmap consistency for Codex engineering skills. Use when adding skills, changing README skill lists, updating CHANGELOG, or preparing releases to ensure docs/open-source-roadmap.md reflects actual public skills and avoids stale or untracked capability claims.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Roadmap Governor

@@ -1,6 +1,10 @@
 ---
 name: release-change-governor
 description: Generate and validate production release change evidence. Use before production release when a change needs release window, approvers, release order, rollback owner, change ticket, risk level, and communication plan.
+category: release-governor
+maturity: expert-gate
+stage: release
+gate: true
 ---
 
 # Release Change Governor

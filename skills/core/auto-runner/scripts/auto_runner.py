@@ -11,6 +11,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[4]
 SCHEMA = "codex-auto-runner-summary-v1"
+PROFILE_REGISTRY = ROOT / "config/workflow-profiles.example.yaml"
 
 
 def slug(value: str) -> str:
@@ -44,6 +45,87 @@ def read_json(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def parse_scalar(value: str) -> Any:
+    value = value.strip().strip('"').strip("'")
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+def load_restricted_yaml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    lines: list[tuple[int, str]] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        lines.append((len(raw) - len(raw.lstrip(" ")), raw.strip()))
+
+    def parse_block(index: int, indent: int) -> tuple[Any, int]:
+        if index >= len(lines):
+            return {}, index
+        container: Any = [] if lines[index][1].startswith("- ") else {}
+        while index < len(lines):
+            current_indent, text = lines[index]
+            if current_indent < indent or current_indent > indent:
+                break
+            if text.startswith("- "):
+                if not isinstance(container, list):
+                    break
+                item = text[2:].strip()
+                index += 1
+                if ":" in item:
+                    key, value = item.split(":", 1)
+                    entry: dict[str, Any] = {}
+                    if value.strip():
+                        entry[key.strip()] = parse_scalar(value.strip())
+                    else:
+                        child, index = parse_block(index, indent + 2)
+                        entry[key.strip()] = child
+                    while index < len(lines) and lines[index][0] > indent:
+                        child_indent, child_text = lines[index]
+                        if child_indent != indent + 2 or child_text.startswith("- ") or ":" not in child_text:
+                            break
+                        child_key, child_value = child_text.split(":", 1)
+                        index += 1
+                        if child_value.strip():
+                            entry[child_key.strip()] = parse_scalar(child_value.strip())
+                        else:
+                            child, index = parse_block(index, child_indent + 2)
+                            entry[child_key.strip()] = child
+                    container.append(entry)
+                else:
+                    container.append(parse_scalar(item))
+                continue
+            if not isinstance(container, dict) or ":" not in text:
+                break
+            key, value = text.split(":", 1)
+            index += 1
+            if value.strip():
+                container[key.strip()] = parse_scalar(value.strip())
+            else:
+                child, index = parse_block(index, indent + 2)
+                container[key.strip()] = child
+        return container, index
+
+    parsed, _ = parse_block(0, lines[0][0] if lines else 0)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def load_profile_registry(path: Path = PROFILE_REGISTRY) -> dict[str, dict[str, Any]]:
+    data = load_restricted_yaml(path)
+    profiles: dict[str, dict[str, Any]] = {}
+    for item in data.get("profiles", []) if isinstance(data.get("profiles"), list) else []:
+        if isinstance(item, dict) and item.get("name"):
+            profiles[str(item["name"])] = item
+    return profiles
 
 
 def run_command(name: str, args: list[str]) -> dict[str, Any]:
@@ -86,6 +168,38 @@ def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any]
     return blockers
 
 
+def as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def select_workflow_profile(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> dict[str, Any]:
+    profiles = load_profile_registry()
+    if explicit_profile and explicit_profile in profiles:
+        return profiles[explicit_profile]
+    lane = str(spec.get("lane") or "")
+    impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
+    if has_repo and "cross_repo_api" in profiles:
+        return profiles["cross_repo_api"]
+    if "ui" in impacts and "frontend_change" in profiles:
+        return profiles["frontend_change"]
+    if "api" in impacts and "cross_repo_api" in profiles:
+        return profiles["cross_repo_api"]
+    if "data" in impacts and "data_migration" in profiles:
+        return profiles["data_migration"]
+    for profile in profiles.values():
+        if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
+            return profile
+    return profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
+
+
+def missing_profile_artifacts(profile: dict[str, Any], out: Path) -> list[str]:
+    return [str(item) for item in as_list(profile.get("expected_artifacts")) if not (out / str(item)).exists()]
+
+
 def run(
     input_path: Path,
     doc_id: str | None = None,
@@ -94,6 +208,7 @@ def run(
     project: str | None = None,
     out: Path | None = None,
     force: bool = False,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     input_path = input_path.resolve()
     doc_id = doc_id or default_doc_id(input_path)
@@ -278,6 +393,25 @@ def run(
         steps,
     )
 
+    delivery_plan_review = out / "delivery_plan_review.json"
+    run_if_needed(
+        "delivery_plan_review",
+        delivery_plan_review,
+        [
+            "python3",
+            "skills/core/delivery-plan-reviewer/scripts/delivery_plan_review.py",
+            "review",
+            "--file",
+            str(delivery_plan),
+            "--out",
+            str(delivery_plan_review),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
+
     delivery_status = out / "delivery_status.json"
     inspect_result = run_command(
         "inspect",
@@ -300,6 +434,9 @@ def run(
             inspect_status = {}
 
     blockers = collect_blockers(steps, inspect_status)
+    spec_data = read_json(spec)
+    selected_profile = select_workflow_profile(spec_data, bool(repo and project), profile)
+    missing_profile = missing_profile_artifacts(selected_profile, out)
     summary = {
         "schema": SCHEMA,
         "decision": "block" if blockers else "pass",
@@ -310,6 +447,10 @@ def run(
         "generated_artifacts": sorted(set(generated)),
         "skipped_artifacts": skipped,
         "steps": steps,
+        "workflow_profile": selected_profile,
+        "required_gates": selected_profile.get("required_skills", []),
+        "missing_profile_artifacts": missing_profile,
+        "next_profile_command": selected_profile.get("next_safe_command", ""),
         "blockers": blockers,
         "inspect_status": inspect_status,
         "next_stage": inspect_status.get("next_stage", ""),
@@ -330,6 +471,7 @@ def main() -> int:
     parser.add_argument("--repo")
     parser.add_argument("--project")
     parser.add_argument("--out")
+    parser.add_argument("--profile")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     result = run(
@@ -340,6 +482,7 @@ def main() -> int:
         project=args.project,
         out=Path(args.out) if args.out else None,
         force=args.force,
+        profile=args.profile,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

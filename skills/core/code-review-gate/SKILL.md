@@ -1,6 +1,10 @@
 ---
 name: code-review-gate
 description: Aggregate post-implementation review evidence into one code review gate. Use after implementation to combine bug-first review, code design quality, write guard audit, security/performance evidence, tests, CI, frontend acceptance, configuration readiness, and release blockers.
+category: workflow-gate
+maturity: expert-gate
+stage: post-implementation-review
+gate: true
 ---
 
 # Code Review Gate

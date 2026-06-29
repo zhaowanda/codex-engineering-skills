@@ -1,6 +1,10 @@
 ---
 name: architecture-design-governor
 description: Generate a structured architecture design draft from normalized spec and technical design before delivery planning. Use when a requirement needs component boundaries, repo responsibilities, cross-repo contracts, data ownership, integration sequence, deployment, rollback, and architecture option comparison.
+category: artifact-generator
+maturity: deterministic-helper
+stage: design
+gate: false
 ---
 
 # Architecture Design Governor

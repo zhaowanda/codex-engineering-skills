@@ -1,6 +1,10 @@
 ---
 name: artifact-schema-governor
 description: Inventory and validate machine-readable artifact schemas emitted by Codex engineering skills. Use when adding or changing gate scripts, release artifacts, synthetic examples, or CI checks to ensure schema names are discoverable, stable, unique, and consistently documented.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Artifact Schema Governor

@@ -9,6 +9,16 @@ from typing import Any
 
 
 SCHEMA = "codex-spec-v1"
+IMPACT_AREAS = {
+    "api": ("api", "endpoint", "route", "接口", "端点"),
+    "ui": ("ui", "ux", "page", "screen", "button", "frontend", "页面", "按钮", "前端"),
+    "data": ("data", "database", "db", "sql", "migration", "字段", "数据库", "数据", "迁移"),
+    "permission": ("permission", "role", "tenant", "admin", "operator", "auth", "权限", "角色", "租户", "管理员"),
+    "config": ("config", "env", "feature flag", "配置", "环境变量", "开关"),
+    "performance": ("performance", "latency", "slow", "export", "batch", "性能", "延迟", "导出", "批量"),
+    "security": ("security", "pii", "secret", "payment", "安全", "隐私", "密钥", "支付"),
+}
+SHALLOW_TERMS = {"user", "existing source", "test evidence", "expected behavior", "preserve existing", "待确认", "unknown", "tbd"}
 
 
 def as_list(value: Any) -> list[Any]:
@@ -46,9 +56,16 @@ def extract_acceptance(lines: list[str]) -> list[dict[str, Any]]:
     for line in lines:
         match = ac_pattern.match(line)
         if match:
-            result.append({"id": f"AC-{len(result) + 1}", "criteria": match.group(2).strip(), "evidence_required": []})
+            criteria = match.group(2).strip()
+            result.append({
+                "id": f"AC-{len(result) + 1}",
+                "criteria": criteria,
+                "type": "negative" if is_negative(criteria) else "positive",
+                "evidence_required": evidence_for_text(criteria),
+                "source_evidence": "input",
+            })
     if not result and lines:
-        result.append({"id": "AC-1", "criteria": f"User-visible behavior matches: {lines[0]}", "evidence_required": ["test evidence"]})
+        result.append({"id": "AC-1", "criteria": f"User-visible behavior matches: {lines[0]}", "type": "positive", "evidence_required": ["test evidence"], "source_evidence": "inferred from first line"})
     return result
 
 
@@ -87,6 +104,68 @@ def extract_open_questions(lines: list[str]) -> list[dict[str, str]]:
     return questions
 
 
+def is_negative(text: str) -> bool:
+    lower = text.lower()
+    return any(token in lower for token in ["cannot", "must not", "should not", "deny", "forbid", "unauthorized", "non-admin", "不能", "不得", "禁止", "无权限", "非管理员"])
+
+
+def evidence_for_text(text: str) -> list[str]:
+    lower = text.lower()
+    evidence = ["functional_test"]
+    if any(token in lower for token in ["ui", "page", "button", "screen", "页面", "按钮", "前端"]):
+        evidence.append("frontend_acceptance")
+    if any(token in lower for token in ["api", "endpoint", "接口"]):
+        evidence.append("api_test")
+    if any(token in lower for token in ["permission", "role", "admin", "unauthorized", "权限", "角色", "管理员", "无权限"]):
+        evidence.append("permission_negative_test")
+    if any(token in lower for token in ["export", "file", "csv", "excel", "导出", "文件"]):
+        evidence.append("export_evidence")
+    return sorted(set(evidence))
+
+
+def detect_impact_surface(text: str) -> list[dict[str, Any]]:
+    lower = text.lower()
+    result: list[dict[str, Any]] = []
+    for area, terms in IMPACT_AREAS.items():
+        matched = [term for term in terms if term in lower or term in text]
+        if matched:
+            result.append({"area": area, "signals": sorted(set(matched)), "status": "detected"})
+    return result
+
+
+def extract_personas(actors: list[str]) -> list[dict[str, str]]:
+    return [{"actor": actor, "goal": "complete requirement outcome", "permission_boundary": "confirm in design"} for actor in actors]
+
+
+def extract_user_scenarios(lines: list[str], actors: list[str]) -> list[dict[str, Any]]:
+    scenarios: list[dict[str, Any]] = []
+    pattern = re.compile(r"^(scenario|场景)[:：\s-]*(.+)$", re.I)
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            scenarios.append({"id": f"SC-{len(scenarios) + 1}", "actor": actors[0], "trigger": match.group(2).strip(), "preconditions": [], "expected_outcome": match.group(2).strip(), "source_evidence": "input"})
+    if not scenarios and lines:
+        scenarios.append({"id": "SC-1", "actor": actors[0], "trigger": lines[0], "preconditions": [], "expected_outcome": lines[0], "source_evidence": "inferred from first line"})
+    return scenarios
+
+
+def extract_business_objectives(lines: list[str]) -> list[dict[str, str]]:
+    objectives = extract_prefixed(lines, ("objective", "goal", "业务目标", "目标"))
+    if objectives:
+        return [{"id": f"BO-{idx + 1}", "objective": item, "source_evidence": "input"} for idx, item in enumerate(objectives)]
+    return []
+
+
+def classify_data(text: str) -> dict[str, Any]:
+    lower = text.lower()
+    signals = []
+    if any(token in lower for token in ["email", "phone", "address", "name", "pii", "手机号", "邮箱", "姓名", "地址"]):
+        signals.append("personal_data")
+    if any(token in lower for token in ["payment", "card", "invoice", "支付", "银行卡", "发票"]):
+        signals.append("payment_or_financial")
+    return {"classification": "sensitive" if signals else "unknown", "signals": signals, "requires_security_review": bool(signals)}
+
+
 def extract_prefixed(lines: list[str], prefixes: tuple[str, ...]) -> list[str]:
     pattern = re.compile(rf"^({'|'.join(re.escape(item) for item in prefixes)})[:：\s-]*(.+)$", re.I)
     result: list[str] = []
@@ -116,6 +195,11 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
             actors.append(candidate)
     if not actors:
         actors = ["user"]
+    impact_surface = detect_impact_surface(text)
+    personas = extract_personas(sorted(set(actors)))
+    scenarios = extract_user_scenarios(lines, sorted(set(actors)))
+    objectives = extract_business_objectives(lines)
+    negative_acceptance = [item for item in acceptance if item.get("type") == "negative"]
     return {
         "schema": SCHEMA,
         "doc_id": doc_id,
@@ -131,10 +215,23 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
             "non_goals": non_goals,
         },
         "requirements": requirements,
+        "personas": personas,
+        "user_scenarios": scenarios,
+        "business_objectives": objectives,
+        "impact_surface": impact_surface,
+        "data_classification": classify_data(text),
+        "permission_scope": {
+            "actors": sorted(set(actors)),
+            "sensitive": any(item.get("area") == "permission" for item in impact_surface),
+            "negative_cases_required": any(item.get("area") == "permission" for item in impact_surface),
+        },
+        "compatibility_constraints": extract_prefixed(lines, ("compatibility", "兼容", "backward compatible", "向后兼容")),
         "business_rules": rules,
         "acceptance_criteria": acceptance,
+        "negative_acceptance_criteria": negative_acceptance,
         "risks": risks,
         "open_questions": questions,
+        "source_trace": [{"line": idx, "text": line} for idx, line in enumerate(lines, start=1)],
         "decision": "blocked" if questions else "ready_for_design",
         "next_action": "Close open questions before design." if questions else "Proceed to technical and architecture design.",
     }
@@ -162,10 +259,30 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
         blockers.append({"source": "open_questions", "message": "open questions must be closed before implementation", "count": len(open_questions)})
     if not as_list(spec.get("business_rules")):
         warnings.append({"source": "business_rules", "message": "no explicit business rules were extracted"})
+    if not as_list(spec.get("user_scenarios")):
+        warnings.append({"source": "user_scenarios", "message": "no user scenarios were captured"})
+    if not as_list(spec.get("business_objectives")):
+        warnings.append({"source": "business_objectives", "message": "no business objective was captured"})
+    impact_surface = [item for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)]
+    if not impact_surface:
+        warnings.append({"source": "impact_surface", "message": "no API/UI/data/permission/config/performance/security impact was detected or declared"})
+    permission_scope = spec.get("permission_scope") if isinstance(spec.get("permission_scope"), dict) else {}
+    if permission_scope.get("negative_cases_required") and not as_list(spec.get("negative_acceptance_criteria")):
+        blockers.append({"source": "negative_acceptance_criteria", "message": "permission-sensitive requirements need negative acceptance criteria"})
+    data_classification = spec.get("data_classification") if isinstance(spec.get("data_classification"), dict) else {}
+    if data_classification.get("requires_security_review") and not any(item.get("area") == "security" for item in impact_surface):
+        warnings.append({"source": "data_classification", "message": "sensitive data detected without explicit security impact"})
+    shallow_hits = []
+    for key in ["requirement_summary", "actors"]:
+        text = json.dumps(spec.get(key), ensure_ascii=False).lower()
+        shallow_hits.extend(sorted(term for term in SHALLOW_TERMS if term in text))
+    if shallow_hits:
+        warnings.append({"source": "quality", "message": "spec contains shallow or placeholder language", "terms": sorted(set(shallow_hits))})
     decision = "block" if blockers else "pass"
     return {
         "schema": "codex-spec-validation-v1",
         "decision": decision,
+        "quality_level": "expert_ready" if not blockers and len(warnings) <= 1 else "usable" if not blockers else "blocked",
         "blockers": blockers,
         "warnings": warnings,
         "next_action": "Fix spec blockers before design/implementation." if blockers else "Spec is ready for design.",

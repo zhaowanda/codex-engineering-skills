@@ -1,6 +1,10 @@
 ---
 name: skill-installation-governor
 description: Install, plan, or validate Codex engineering skills from this open-core repository into a local Codex skills directory. Use when users want one-command installation, dry-run installation planning, overwrite-safe copying, or verification that installed SKILL.md files match the source repository.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Skill Installation Governor

@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
 
 
+ROOT = Path(__file__).resolve().parents[4]
 ORDER = [
     ("spec", "spec.json"),
     ("technical_design", "technical_design.json"),
     ("architecture_design", "architecture_design.json"),
     ("delivery_plan", "delivery_plan.json"),
+    ("delivery_plan_review", "delivery_plan_review.json"),
     ("design_review", "design_architecture_review.json"),
     ("git", "git_worktree_evidence.json"),
     ("edit_permit", "edit_permit.json"),
@@ -24,7 +27,7 @@ ORDER = [
     ("release", "release_gate.json"),
     ("post_release", "post_release_observation.json"),
 ]
-IMPLEMENTATION_REQUIRED = ["spec", "technical_design", "architecture_design", "delivery_plan", "design_review", "git", "edit_permit"]
+IMPLEMENTATION_REQUIRED = ["spec", "technical_design", "architecture_design", "delivery_plan", "delivery_plan_review", "design_review", "git", "edit_permit"]
 RELEASE_REQUIRED = ["implementation", "review", "test", "environment", "uat", "release_change", "release"]
 
 
@@ -47,9 +50,42 @@ def is_pass(data: dict[str, Any]) -> bool:
     return bool(data) and not any(data.get(key) for key in ["blockers", "active_blockers", "missing_evidence"])
 
 
-def inspect(artifact_dir: Path) -> dict[str, Any]:
+def load_auto_runner_module() -> Any:
+    path = ROOT / "skills/core/auto-runner/scripts/auto_runner.py"
+    spec = importlib.util.spec_from_file_location("auto_runner_profiles", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def selected_profile(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
+    auto_summary = load_json(artifact_dir / "auto_run_summary.json")
+    if isinstance(auto_summary.get("workflow_profile"), dict) and not profile_name:
+        return auto_summary["workflow_profile"]
+    try:
+        auto_runner = load_auto_runner_module()
+        profiles = auto_runner.load_profile_registry()
+        if profile_name and profile_name in profiles:
+            return profiles[profile_name]
+        spec = load_json(artifact_dir / "spec.json")
+        return auto_runner.select_workflow_profile(spec, (artifact_dir / "project_understanding").exists(), profile_name)
+    except Exception:
+        return {"name": profile_name or "", "expected_artifacts": [], "required_skills": []}
+
+
+def missing_profile_artifacts(profile: dict[str, Any], artifact_dir: Path) -> list[str]:
+    items = profile.get("expected_artifacts", [])
+    if not isinstance(items, list):
+        items = [items]
+    return [str(item) for item in items if not (artifact_dir / str(item)).exists()]
+
+
+def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
     artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_dir / filename) for name, filename in ORDER}
     state = load_json(artifact_dir / "delivery_state.json")
+    profile = selected_profile(artifact_dir, profile_name)
+    profile_missing = missing_profile_artifacts(profile, artifact_dir)
     completed = [name for name, _ in ORDER if is_pass(artifacts[name])]
     missing = [name for name, _ in ORDER if not artifacts[name]]
     blockers: list[dict[str, Any]] = []
@@ -78,6 +114,7 @@ def inspect(artifact_dir: Path) -> dict[str, Any]:
         "technical_design": "python3 skills/core/technical-design-governor/scripts/technical_design.py --spec artifacts/REQ-001/spec.json --out artifacts/REQ-001/technical_design.json",
         "architecture_design": "python3 skills/core/architecture-design-governor/scripts/architecture_design.py --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --out artifacts/REQ-001/architecture_design.json",
         "delivery_plan": "python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py --doc-id REQ-001 --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/delivery_plan.json",
+        "delivery_plan_review": "python3 skills/core/delivery-plan-reviewer/scripts/delivery_plan_review.py review --file artifacts/REQ-001/delivery_plan.json --out artifacts/REQ-001/delivery_plan_review.json",
         "design_review": "python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json",
         "environment": "python3 skills/core/environment-promotion-governor/scripts/environment_promotion.py template --out artifacts/REQ-001/environment_promotion.json",
         "uat": "python3 skills/core/uat-acceptance-governor/scripts/uat_acceptance.py template --out artifacts/REQ-001/uat_acceptance.json",
@@ -91,6 +128,9 @@ def inspect(artifact_dir: Path) -> dict[str, Any]:
         "completed_stages": completed,
         "missing_artifacts": missing,
         "blockers": blockers,
+        "workflow_profile": profile,
+        "profile_missing_artifacts": profile_missing,
+        "next_profile_command": profile.get("next_safe_command", ""),
         "next_stage": next_stage,
         "next_command": commands.get(next_stage, "Run the gate for the next missing stage and attach evidence."),
         "can_implement": can_implement,
@@ -105,9 +145,10 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_inspect = sub.add_parser("inspect")
     p_inspect.add_argument("--artifact-dir", required=True)
+    p_inspect.add_argument("--profile")
     p_inspect.add_argument("--out")
     args = parser.parse_args()
-    result = inspect(Path(args.artifact_dir))
+    result = inspect(Path(args.artifact_dir), args.profile)
     if args.out:
         Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))

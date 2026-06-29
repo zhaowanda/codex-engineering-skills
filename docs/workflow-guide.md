@@ -40,12 +40,39 @@ requirement source
 -> skill-health / forward-test-runner before publishing
 ```
 
+## Standard Design-First Profile
+
+Use this profile for normal feature work before any Git or edit readiness step:
+
+```text
+requirement-document-ingestor
+-> spec-governor
+-> requirement-question-governor
+-> technical-design-governor
+-> architecture-design-governor
+-> design-architecture-reviewer
+-> delivery-plan-templates
+-> delivery-plan-reviewer
+```
+
+## Workflow Profiles
+
+| Scenario | Required path |
+| --- | --- |
+| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor` |
+| `small_feature` | Standard design-first profile, then Git/edit readiness gates. |
+| `frontend_change` | Standard design-first profile plus `frontend-acceptance-runner` and `test-evidence-gate`. |
+| `cross_repo_api` | Project understanding, standard design-first profile, `traceability-governor`, and release evidence gates. |
+| `data_migration` | Standard design-first profile plus `configuration-governor`, `data-security-governor`, `performance-governor`, and release gates. |
+| `release_readiness` | `implementation-completion-gate -> code-review-gate -> test-evidence-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
+
 ## Coding Is Allowed Only When
 
 - Spec is ready and required open questions are closed.
 - Technical and architecture designs exist.
 - Design review passes or explicitly allows continuation.
 - Delivery plan identifies modify repos, file scope, tests, release order, and rollback.
+- Delivery plan review passes with executable tasks, evidence mapping, risk controls, and rollback.
 - Git worktree is on a non-default working branch.
 - Edit permit exists and file scope is narrow.
 

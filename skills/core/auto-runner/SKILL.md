@@ -1,6 +1,10 @@
 ---
 name: auto-runner
 description: One-command workflow entrypoint for Codex engineering skills. Use when users want Codex to ingest a requirement, optionally understand a repository, generate design/test/plan artifacts, inspect workflow status, and decide the next safe action without manually invoking each skill.
+category: template-runner
+maturity: orchestrator
+stage: workflow-orchestration
+gate: false
 ---
 
 # Auto Runner

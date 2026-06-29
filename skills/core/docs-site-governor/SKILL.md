@@ -1,6 +1,10 @@
 ---
 name: docs-site-governor
 description: Generate and validate open-source documentation-site readiness for Codex engineering skills. Use when publishing docs, checking documentation navigation, generating skill catalogs, scenario guides, FAQ pages, or detecting missing docs and broken local Markdown links.
+category: meta-governor
+maturity: deterministic-helper
+stage: documentation
+gate: false
 ---
 
 # Docs Site Governor

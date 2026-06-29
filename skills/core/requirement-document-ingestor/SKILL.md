@@ -1,6 +1,10 @@
 ---
 name: requirement-document-ingestor
 description: Ingest and normalize requirement source files before spec-governor. Use when requirements arrive as Markdown, plain text, JSON exports, PDF placeholders, copied online docs, screenshots descriptions, tables, or mixed product notes that need a clean text artifact and source manifest.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: requirements
+gate: false
 ---
 
 # Requirement Document Ingestor

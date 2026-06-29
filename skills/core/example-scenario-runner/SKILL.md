@@ -1,6 +1,10 @@
 ---
 name: example-scenario-runner
 description: Run and validate open-source example scenarios for bugfixes, small features, configuration changes, and frontend changes. Use when demonstrating the framework, adding examples, or forward-testing whether a scenario can produce spec, design, test, traceability, and risk summaries.
+category: template-runner
+maturity: orchestrator
+stage: workflow-orchestration
+gate: false
 ---
 
 # Example Scenario Runner

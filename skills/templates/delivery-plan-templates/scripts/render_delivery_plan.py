@@ -121,6 +121,19 @@ def acceptance_from_design(technical: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
+def task_steps(repo_name: str, responsibility: str, modules: list[dict[str, Any]], tests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    module_refs = [str(item.get("module")) for item in modules if item.get("module")]
+    test_refs = [str(item.get("id")) for item in tests if item.get("id")]
+    return [
+        {"task_id": f"{repo_name}-read", "phase": "read", "summary": "Read scoped modules and existing tests before editing.", "modules": module_refs, "exit_criteria": ["owner files and dependencies understood"]},
+        {"task_id": f"{repo_name}-confirm", "phase": "confirm", "summary": "Confirm API/UI/data/permission impact matches reviewed design.", "modules": module_refs, "exit_criteria": ["scope still matches architecture responsibilities"]},
+        {"task_id": f"{repo_name}-edit", "phase": "edit", "summary": responsibility or "Implement scoped change.", "modules": module_refs, "change_type": sorted({str(item.get("change_type")) for item in modules if item.get("change_type")}), "exit_criteria": ["changes stay within allowed_files"]},
+        {"task_id": f"{repo_name}-test", "phase": "test", "summary": "Run mapped validation commands and acceptance checks.", "test_refs": test_refs, "exit_criteria": ["required tests pass"]},
+        {"task_id": f"{repo_name}-evidence", "phase": "evidence", "summary": "Capture command logs and acceptance evidence.", "test_refs": test_refs, "exit_criteria": ["evidence artifacts are attached to delivery"]},
+        {"task_id": f"{repo_name}-rollback", "phase": "rollback", "summary": "Verify rollback path is executable for this repo.", "modules": module_refs, "exit_criteria": ["rollback owner and steps are known"]},
+    ]
+
+
 def allowed_files_hint(repo: str, architecture: dict[str, Any]) -> list[str]:
     hints: list[str] = []
     for item in topology_by_repo(architecture).get(repo, []):
@@ -152,9 +165,10 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
             "repo_path": repo_path,
             "role": role,
             "responsibility": repo["responsibility"],
-            "tasks": [
+            "tasks": task_steps(repo_name, repo["responsibility"], modules, tests) if role == "modify" else [
                 {
-                    "task_id": f"{repo_name}-1",
+                    "task_id": f"{repo_name}-confirm",
+                    "phase": "confirm",
                     "summary": repo["responsibility"] or "Confirm repository impact",
                     "modules": [str(item.get("module")) for item in modules if item.get("module")],
                     "change_type": sorted({str(item.get("change_type")) for item in modules if item.get("change_type")}),
@@ -164,8 +178,8 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
             "allowed_files": allowed if role == "modify" else [],
             "test_commands": test_commands,
             "acceptance_evidence": acceptance,
-            "risks": [],
-            "rollback": [],
+            "risks": [{"risk": "scope drift during implementation", "mitigation": "enforce allowed_files with edit-readiness and workspace-write-guard"}] if role == "modify" else [],
+            "rollback": [{"step": "revert repo changes and redeploy previous artifact", "data_risk": "use architecture rollback_strategy for data/config changes"}] if role == "modify" else [],
         }
         if role == "modify":
             if not repo_path:

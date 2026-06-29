@@ -1,6 +1,10 @@
 ---
 name: workspace-write-guard
 description: Audit workspace writes against edit permits. Use before and after AI-assisted file edits, in pre-commit hooks, or when built-in edit tools may bypass the edit-readiness wrapper.
+category: workflow-gate
+maturity: expert-gate
+stage: edit-readiness
+gate: true
 ---
 
 # Workspace Write Guard

@@ -1,6 +1,10 @@
 ---
 name: change-risk-governor
 description: Classify engineering change risk from diff impact, delivery plan, configuration, security, performance, frontend, database, permission, and release signals. Use after diff-impact analysis or before release planning to choose lightweight, standard, heavy, or high-risk delivery controls.
+category: workflow-gate
+maturity: expert-gate
+stage: post-implementation-review
+gate: true
 ---
 
 # Change Risk Governor

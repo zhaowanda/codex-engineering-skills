@@ -1,6 +1,10 @@
 ---
 name: evidence-auto-collector
 description: Collect conservative evidence gaps from diff impact and command logs before code review or release. Use after implementation to generate evidence_gap_summary.json from diff impact areas, required evidence, CI/test log status, and missing validation artifacts.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: post-implementation-review
+gate: false
 ---
 
 # Evidence Auto Collector

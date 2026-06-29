@@ -1,6 +1,10 @@
 ---
 name: config-surface-extractor
 description: Extract configuration surface hints from a source repository without exposing secret values. Use when reverse-engineering config files, environment keys, Docker/CI config, feature flag hints, or private overlay baseline docs.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: project-understanding
+gate: false
 ---
 
 # Config Surface Extractor

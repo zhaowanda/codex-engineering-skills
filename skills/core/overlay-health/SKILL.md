@@ -1,6 +1,10 @@
 ---
 name: overlay-health
 description: Check private overlay consistency for project registry, project skills, indexes, baseline docs, and delivery docs manifests. Use in private repositories before team rollout or after project onboarding.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Overlay Health

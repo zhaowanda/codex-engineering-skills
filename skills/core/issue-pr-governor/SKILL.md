@@ -1,6 +1,10 @@
 ---
 name: issue-pr-governor
 description: Govern open-source GitHub issue and pull request readiness for engineering-skill changes. Use when creating issue templates, preparing PR descriptions, reviewing PR evidence, or checking whether a contribution has linked issue, scope, tests, risks, rollback, and release notes.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Issue PR Governor

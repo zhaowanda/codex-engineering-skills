@@ -1,6 +1,10 @@
 ---
 name: traceability-governor
 description: Build and validate requirement-to-delivery traceability across requirements, acceptance criteria, technical design, architecture design, delivery plan, implementation diff, test design, and evidence. Use before implementation, before review, or before release to prevent untracked work and uncovered acceptance criteria.
+category: workflow-gate
+maturity: expert-gate
+stage: post-implementation-review
+gate: true
 ---
 
 # Traceability Governor

@@ -1,6 +1,10 @@
 ---
 name: delivery-plan-templates
 description: Generate delivery plan JSON artifacts from reviewed technical and architecture designs. Use after design-architecture-reviewer passes and before Git preparation, edit readiness, implementation, testing, or release planning.
+category: template-runner
+maturity: template
+stage: delivery-planning
+gate: false
 ---
 
 # Delivery Plan Templates

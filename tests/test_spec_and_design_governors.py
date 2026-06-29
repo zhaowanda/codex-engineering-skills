@@ -34,6 +34,7 @@ def test_spec_normalize_ready_for_design() -> None:
     Admin needs to export orders.
     Rule: only admin can export filtered results.
     AC: exported file contains order id and status.
+    AC: non-admin cannot export filtered results.
     """
     spec = spec_governor.normalize("REQ-1", "Order export", text)
     assert spec["schema"] == "codex-spec-v1"
@@ -69,6 +70,37 @@ def test_spec_extracts_multiple_requirements_scope_risks_and_questions() -> None
     assert spec["scope"]["assumptions"] == ["existing order API remains available."]
     assert spec["risks"]
     assert spec["open_questions"]
+
+
+def test_spec_adds_expert_quality_fields() -> None:
+    text = """
+    Goal: reduce manual export work.
+    Scenario: Admin exports filtered orders from the orders page.
+    Req: Admin exports filtered orders.
+    Rule: only admin can export filtered results.
+    AC: exported file contains order id and status.
+    AC: non-admin cannot see export action.
+    """
+    spec = spec_governor.normalize("REQ-21", "Order export", text)
+    assert spec["personas"]
+    assert spec["user_scenarios"]
+    assert spec["business_objectives"]
+    assert spec["negative_acceptance_criteria"]
+    assert any(item["area"] == "permission" for item in spec["impact_surface"])
+    validation = spec_governor.validate_spec(spec)
+    assert validation["decision"] == "pass"
+
+
+def test_spec_blocks_permission_requirement_without_negative_acceptance() -> None:
+    text = """
+    Req: Admin exports filtered orders.
+    Rule: only admin can export filtered results.
+    AC: exported file contains order id and status.
+    """
+    spec = spec_governor.normalize("REQ-22", "Order export", text)
+    validation = spec_governor.validate_spec(spec)
+    assert validation["decision"] == "block"
+    assert any(item["source"] == "negative_acceptance_criteria" for item in validation["blockers"])
 
 
 def test_technical_and_architecture_design_render_core_sections() -> None:
@@ -119,6 +151,7 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
             "technical_design",
             "architecture_design",
             "delivery_plan",
+            "delivery_plan_review",
             "design_architecture_review",
             "git_worktree_evidence",
             "edit_permit",
@@ -130,14 +163,28 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
         assert status["next_stage"] == "implementation"
 
 
+def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for name in ["spec", "technical_design", "architecture_design", "delivery_plan", "design_architecture_review"]:
+            write_json(root / f"{name}.json", {"decision": "pass"})
+        status = delivery_runner.inspect(root)
+        assert status["can_implement"] is False
+        assert status["next_stage"] == "delivery_plan_review"
+        assert "delivery_plan_review.py" in status["next_command"]
+
+
 def run_all() -> None:
     test_spec_normalize_ready_for_design()
     test_spec_blocks_open_questions()
     test_spec_extracts_multiple_requirements_scope_risks_and_questions()
+    test_spec_adds_expert_quality_fields()
+    test_spec_blocks_permission_requirement_without_negative_acceptance()
     test_technical_and_architecture_design_render_core_sections()
     test_project_understanding_informs_design_and_architecture()
     test_delivery_runner_reports_next_stage()
     test_delivery_runner_allows_implementation_when_pre_edit_gates_pass()
+    test_delivery_runner_requires_delivery_plan_review_before_git_edit()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,10 @@
 ---
 name: design-doc-templates
 description: Generate technical design and architecture design JSON artifacts that are compatible with the design-architecture-reviewer gate. Use when drafting design-first delivery artifacts before delivery planning, Git preparation, edit readiness, or implementation.
+category: template-runner
+maturity: template
+stage: design
+gate: false
 ---
 
 # Design Doc Templates

@@ -62,6 +62,7 @@ def main() -> int:
     p_auto.add_argument("--repo")
     p_auto.add_argument("--project")
     p_auto.add_argument("--out")
+    p_auto.add_argument("--profile")
     p_auto.add_argument("--force", action="store_true")
     p_project = sub.add_parser("project")
     p_project.add_argument("mode", choices=["new", "legacy"])
@@ -75,6 +76,7 @@ def main() -> int:
     p_project.add_argument("--out")
     p_inspect = sub.add_parser("inspect")
     p_inspect.add_argument("--artifact-dir", required=True)
+    p_inspect.add_argument("--profile")
     p_e2e = sub.add_parser("synthetic-e2e")
     p_e2e.add_argument("--out-dir", required=True)
     p_passthrough = sub.add_parser("run")
@@ -84,7 +86,7 @@ def main() -> int:
 
     if args.cmd == "auto":
         command = ["python3", "skills/core/auto-runner/scripts/auto_runner.py", "--input", args.input]
-        for flag in ["doc_id", "title", "repo", "project", "out"]:
+        for flag in ["doc_id", "title", "repo", "project", "out", "profile"]:
             value = getattr(args, flag)
             if value:
                 command.extend([f"--{flag.replace('_', '-')}", value])
@@ -115,7 +117,10 @@ def main() -> int:
             command.extend(["--out", args.out])
         return run_command(command)
     if args.cmd == "inspect":
-        return run_command(COMMANDS["inspect"] + ["--artifact-dir", args.artifact_dir])
+        command = COMMANDS["inspect"] + ["--artifact-dir", args.artifact_dir]
+        if args.profile:
+            command.extend(["--profile", args.profile])
+        return run_command(command)
     if args.cmd == "synthetic-e2e":
         return run_command(["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", args.out_dir])
     if args.cmd == "run":

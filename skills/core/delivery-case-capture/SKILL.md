@@ -1,6 +1,10 @@
 ---
 name: delivery-case-capture
 description: Capture a completed or attempted delivery as a reusable anonymized learning case. Use after implementation, review, release, blocked runs, Codex confusion, missed gates, or successful end-to-end delivery to improve future skills and examples.
+category: artifact-generator
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Delivery Case Capture

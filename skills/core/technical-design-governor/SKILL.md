@@ -1,6 +1,10 @@
 ---
 name: technical-design-governor
 description: Generate a structured technical design draft from a normalized spec before implementation. Use when a requirement needs process flow, module decomposition, logical data flow, API contracts, UI/UX behavior, solution options, test strategy, and traceability.
+category: artifact-generator
+maturity: deterministic-helper
+stage: design
+gate: false
 ---
 
 # Technical Design Governor

@@ -1,6 +1,10 @@
 ---
 name: requirement-question-governor
 description: Generate and validate open requirement questions before design or implementation. Use when spec-governor finds ambiguity, product docs contain TBDs, acceptance criteria are missing, or Codex must stop instead of guessing.
+category: workflow-gate
+maturity: expert-gate
+stage: requirements
+gate: true
 ---
 
 # Requirement Question Governor

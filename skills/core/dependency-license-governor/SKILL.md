@@ -1,6 +1,10 @@
 ---
 name: dependency-license-governor
 description: Review open-source dependency and license readiness before publishing, accepting dependency changes, or cutting releases. Use to check LICENSE presence, project license metadata, dependency manifest presence, and obvious high-risk license signals in pyproject, requirements, package, or lock files.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: release
+gate: false
 ---
 
 # Dependency License Governor

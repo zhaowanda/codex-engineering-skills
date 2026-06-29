@@ -1,6 +1,10 @@
 ---
 name: performance-governor
 description: Generate and validate performance review evidence for design, implementation, and release. Use when requirements or diffs may affect latency, SQL/query count, loops, exports, reports, frontend bundle/runtime, MQ throughput, external calls, or batch processing.
+category: workflow-gate
+maturity: expert-gate
+stage: release
+gate: true
 ---
 
 # Performance Governor

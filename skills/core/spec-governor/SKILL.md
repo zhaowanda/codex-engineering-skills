@@ -1,6 +1,10 @@
 ---
 name: spec-governor
 description: Normalize one-line requests, long PRDs, pasted notes, or imported requirement text into a structured spec artifact with scope, acceptance criteria, rules, risks, and open questions before technical design or coding.
+category: workflow-gate
+maturity: expert-gate
+stage: requirements
+gate: true
 ---
 
 # Spec Governor

@@ -103,6 +103,17 @@ python3 scripts/codex_eng.py auto \
 
 The auto runner ingests the requirement, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
+Select a workflow profile when the scenario is known:
+
+```bash
+python3 scripts/codex_eng.py auto \
+  --input examples/synthetic-e2e-case/requirement.md \
+  --profile small_feature \
+  --out /tmp/codex-auto-demo
+```
+
+Profiles are defined in `config/workflow-profiles.example.yaml` and include `bugfix`, `small_feature`, `frontend_change`, `cross_repo_api`, `data_migration`, and `release_readiness`.
+
 Install all skills:
 
 ```bash
@@ -135,7 +146,7 @@ python3 scripts/codex_eng.py run sync-local-skills --prune-legacy --force
 
 - [Getting Started](docs/getting-started.md): run the synthetic workflow end to end.
 - [Workflow Guide](docs/workflow-guide.md): understand the gates, allowed implementation conditions, release conditions, and private overlay boundary.
-- [Skill Catalog](docs/skill-catalog.md): browse generated skill inventory.
+- [Skill Catalog](docs/skill-catalog.md): browse skills by delivery stage, maturity, and category.
 - [Scenario Guide](docs/scenario-guide.md): browse synthetic example scenarios.
 - [FAQ](docs/faq.md): common open-core usage and boundary questions.
 - [Deprecation Policy](docs/deprecation-policy.md): public contract deprecation and migration rules.
@@ -172,12 +183,15 @@ The project runner creates the project skill, `projects.yaml`, canonical code in
 
 ## Available Core Skills
 
+Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` frontmatter. See the [Skill Catalog](docs/skill-catalog.md) for the stage-grouped taxonomy; the list below is a compact inventory.
+
 - `skills/core/auto-runner`: one-command safe workflow runner that ingests a requirement, optionally understands a repository, generates artifacts, inspects status, and reports the next action.
 - `skills/core/requirement-document-ingestor`: ingests Markdown, text, JSON, copied docs, and PDF placeholders into normalized requirement text and source manifest.
 - `skills/core/spec-governor`: normalizes one-line requests or long requirement text into `spec.json` with scope, acceptance criteria, rules, risks, and open questions.
 - `skills/core/requirement-question-governor`: generates and validates focused open questions so unresolved ambiguity blocks design or implementation instead of being guessed.
 - `skills/core/technical-design-governor`: generates a structured technical design draft with process flow, module decomposition, data flow, API/UI behavior, options, tests, and traceability.
 - `skills/core/architecture-design-governor`: generates an architecture design draft with boundaries, repo responsibilities, contracts, data ownership, deployment, rollback, and option comparison.
+- `skills/core/delivery-plan-reviewer`: reviews delivery plans for executable task depth, narrow file scope, evidence mapping, rollback controls, and unresolved gates before Git or edit readiness.
 - `skills/core/delivery-runner`: one-command status inspector that reports current stage, blockers, next command, and whether implementation/release is allowed.
 - `skills/core/test-design-governor`: generates and validates test design before implementation, including acceptance mapping, regression, integration, permission, and frontend scope.
 - `skills/core/configuration-governor`: detects and gates runtime configuration readiness for database, MQ, email, SMS, payment, callbacks, secrets, certificates, and feature flags.

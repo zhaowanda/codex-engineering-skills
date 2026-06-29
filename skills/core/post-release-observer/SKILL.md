@@ -1,6 +1,10 @@
 ---
 name: post-release-observer
 description: Generate and validate post-release observation evidence. Use after deployment when APIs, frontend pages, reports, permissions, payments, devices, logs, metrics, alerts, or business indicators need observation before closing release.
+category: release-governor
+maturity: expert-gate
+stage: release
+gate: true
 ---
 
 # Post Release Observer

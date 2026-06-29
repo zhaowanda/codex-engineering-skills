@@ -1,6 +1,10 @@
 ---
 name: baseline-quality-governor
 description: Review quality of generated project baseline artifacts. Use after project-baseline-reverser or project-understanding-runner to verify repository overview, modules, API surface, config surface, dependency surface, tests, risks, limitations, and human follow-up points are present.
+category: reviewer
+maturity: advisory-review
+stage: project-understanding
+gate: true
 ---
 
 # Baseline Quality Governor

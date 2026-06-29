@@ -1,6 +1,10 @@
 ---
 name: docs-readability-governor
 description: Review open-source documentation readability and onboarding clarity. Use when publishing README or docs changes to check start path, installation and validation commands, boundary explanation, scenario coverage, FAQ presence, local-path safety, link health, and overly thin docs.
+category: meta-governor
+maturity: deterministic-helper
+stage: documentation
+gate: false
 ---
 
 # Docs Readability Governor

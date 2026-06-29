@@ -1,6 +1,10 @@
 ---
 name: mcp-integration-governor
 description: Govern generic MCP integration readiness and evidence for open-core workflows. Use when documenting or validating Chrome DevTools, GitHub, filesystem, knowledge, API, or browser MCP usage boundaries, acceptance evidence, and safe fallback rules.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # MCP Integration Governor

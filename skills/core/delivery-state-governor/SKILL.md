@@ -1,6 +1,10 @@
 ---
 name: delivery-state-governor
 description: Maintain one canonical delivery_state.json for AI-assisted engineering workflows. Use to initialize, inspect, advance, block, unblock, and validate requirement stage state across requirement docs, design, Git, implementation, review, test, release, and post-release gates.
+category: workflow-gate
+maturity: expert-gate
+stage: delivery-planning
+gate: true
 ---
 
 # Delivery State Governor

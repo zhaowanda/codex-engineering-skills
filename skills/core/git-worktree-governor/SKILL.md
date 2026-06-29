@@ -1,6 +1,10 @@
 ---
 name: git-worktree-governor
 description: Prepare and verify clean Git worktrees before AI-assisted code edits. Use after delivery planning and before implementation to fetch latest base branch, create feature branches, prepare all modify repositories from a delivery plan, and block edits on default branches or dirty worktrees.
+category: workflow-gate
+maturity: expert-gate
+stage: edit-readiness
+gate: true
 ---
 
 # Git Worktree Governor

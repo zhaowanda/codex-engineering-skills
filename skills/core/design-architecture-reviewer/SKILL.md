@@ -1,6 +1,10 @@
 ---
 name: design-architecture-reviewer
 description: Review technical design and architecture design artifacts before delivery planning or implementation. Use to score design depth, requirement coverage, process flow, data flow, module boundaries, API contracts, UI/UX behavior, option comparison, security, performance, cohesion/coupling, rollback, observability, and testability.
+category: workflow-gate
+maturity: expert-gate
+stage: design
+gate: true
 ---
 
 # Design Architecture Reviewer

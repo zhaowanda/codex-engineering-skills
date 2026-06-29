@@ -1,6 +1,10 @@
 ---
 name: project-onboard
 description: Onboard a repository into a private overlay by creating a generic project skill skeleton and project registry entry. Use when adding a new project to Codex engineering skills without publishing private indexes or business semantics.
+category: artifact-generator
+maturity: orchestrator
+stage: project-understanding
+gate: false
 ---
 
 # Project Onboard

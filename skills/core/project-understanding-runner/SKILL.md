@@ -1,6 +1,10 @@
 ---
 name: project-understanding-runner
 description: Run a full generic project-understanding pipeline for an existing source repository. Use when onboarding or reverse-engineering a codebase to produce repository analysis, API surface, config surface, dependency surface, git history, code index, baseline, baseline quality, and human baseline documentation in a private overlay or artifact directory.
+category: template-runner
+maturity: orchestrator
+stage: project-understanding
+gate: false
 ---
 
 # Project Understanding Runner

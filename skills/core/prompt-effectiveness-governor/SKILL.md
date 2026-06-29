@@ -1,6 +1,10 @@
 ---
 name: prompt-effectiveness-governor
 description: Review reusable prompt effectiveness for reducing Codex rework. Use when adding or changing prompts to ensure they enforce design-first delivery, scope boundaries, Git readiness, test evidence, stop conditions, artifact outputs, and token-saving behavior appropriate to each prompt scenario.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Prompt Effectiveness Governor

@@ -1,6 +1,10 @@
 ---
 name: project-runner
 description: Unified project entrypoint for new and legacy project setup. Use when creating or refreshing project-level skills, projects.yaml registration, canonical code indexes, and baseline evidence in a private overlay.
+category: template-runner
+maturity: orchestrator
+stage: project-understanding
+gate: false
 ---
 
 # Project Runner

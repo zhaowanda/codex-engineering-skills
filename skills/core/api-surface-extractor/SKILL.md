@@ -1,6 +1,10 @@
 ---
 name: api-surface-extractor
 description: Extract generic API and route surface hints from a source repository. Use when reverse-engineering backend or frontend routes for private baseline docs without publishing real endpoint maps in open core.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: project-understanding
+gate: false
 ---
 
 # API Surface Extractor

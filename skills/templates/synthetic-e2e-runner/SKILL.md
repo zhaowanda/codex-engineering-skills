@@ -1,6 +1,10 @@
 ---
 name: synthetic-e2e-runner
 description: Run the synthetic end-to-end example through requirement ingestion, spec normalization, design generation, test design, specialist reviews, delivery plan, and delivery status inspection. Use to validate the open-core workflow without private repositories.
+category: template-runner
+maturity: template
+stage: workflow-orchestration
+gate: false
 ---
 
 # Synthetic E2E Runner

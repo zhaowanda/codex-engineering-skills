@@ -1,6 +1,10 @@
 ---
 name: skill-health
 description: Check open-core skill repository health. Use before release or contribution review to validate SKILL.md frontmatter, script presence, Python compilation, README skill listing, roadmap status, tests, and privacy scan readiness.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Skill Health
@@ -19,6 +23,10 @@ skill/documentation changes
 ## Rules
 
 - Every skill must have valid frontmatter with `name` and `description`.
+- Every skill must declare `category`, `maturity`, `stage`, and `gate`.
+- `expert-gate` skills must declare `gate=true` and have direct test coverage.
+- Template, helper, extractor, and orchestrator skills must not be marked as `expert-gate`.
+- Gate skills must document or emit `schema`, `decision`, and `blockers`.
 - Skill names should align with folder paths.
 - Skills should be listed in README by path, folder, or name.
 - Python scripts under skill folders must compile.

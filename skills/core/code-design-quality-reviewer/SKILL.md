@@ -1,6 +1,10 @@
 ---
 name: code-design-quality-reviewer
 description: Review implemented or proposed code diffs for design quality before bug-first review, testing, or release. Use to detect cohesion, coupling, responsibility boundary, abstraction, API contract, permission, transaction, performance, security, configuration, financial correctness, testability, and maintainability risks.
+category: workflow-gate
+maturity: expert-gate
+stage: post-implementation-review
+gate: true
 ---
 
 # Code Design Quality Reviewer

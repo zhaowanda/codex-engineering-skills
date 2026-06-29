@@ -1,0 +1,172 @@
+schema: codex-workflow-profiles-v1
+profiles:
+  - name: bugfix
+    trigger_lanes:
+      - bugfix
+    required_skills:
+      - requirement-document-ingestor
+      - spec-governor
+      - requirement-question-governor
+      - technical-design-governor
+      - design-architecture-reviewer
+      - delivery-plan-templates
+      - delivery-plan-reviewer
+      - git-worktree-governor
+      - edit-readiness-governor
+    optional_skills:
+      - diff-impact-analyzer
+      - test-evidence-gate
+    expected_artifacts:
+      - spec.json
+      - technical_design.json
+      - design_architecture_review.json
+      - delivery_plan.json
+      - delivery_plan_review.json
+    next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
+    implementation_allowed_conditions:
+      - required artifacts exist
+      - delivery plan review passes
+      - git evidence is ready
+      - edit permit is ready
+  - name: small_feature
+    trigger_lanes:
+      - small_change
+      - standard_requirement
+      - large_prd
+    required_skills:
+      - requirement-document-ingestor
+      - spec-governor
+      - requirement-question-governor
+      - technical-design-governor
+      - architecture-design-governor
+      - design-architecture-reviewer
+      - delivery-plan-templates
+      - delivery-plan-reviewer
+    optional_skills:
+      - test-design-governor
+      - traceability-governor
+    expected_artifacts:
+      - spec.json
+      - technical_design.json
+      - architecture_design.json
+      - design_architecture_review.json
+      - delivery_plan.json
+      - delivery_plan_review.json
+    next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
+    implementation_allowed_conditions:
+      - design review passes
+      - delivery plan review passes
+      - git evidence is ready
+      - edit permit is ready
+  - name: frontend_change
+    trigger_impacts:
+      - ui
+    required_skills:
+      - spec-governor
+      - technical-design-governor
+      - architecture-design-governor
+      - design-architecture-reviewer
+      - delivery-plan-templates
+      - delivery-plan-reviewer
+      - frontend-acceptance-runner
+      - test-evidence-gate
+    optional_skills:
+      - code-review-gate
+    expected_artifacts:
+      - spec.json
+      - technical_design.json
+      - architecture_design.json
+      - design_architecture_review.json
+      - delivery_plan.json
+      - delivery_plan_review.json
+      - frontend_acceptance.json
+      - test_evidence_gate.json
+    next_safe_command: python3 skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py template --out artifacts/REQ-001/frontend_acceptance.json
+    implementation_allowed_conditions:
+      - frontend acceptance scope is planned
+      - delivery plan review passes
+      - edit permit is ready
+  - name: cross_repo_api
+    trigger_impacts:
+      - api
+    required_skills:
+      - project-understanding-runner
+      - spec-governor
+      - technical-design-governor
+      - architecture-design-governor
+      - design-architecture-reviewer
+      - delivery-plan-templates
+      - delivery-plan-reviewer
+      - traceability-governor
+      - release-evidence-binder
+    optional_skills:
+      - api-surface-extractor
+      - code-review-gate
+    expected_artifacts:
+      - project_understanding/baseline_quality.json
+      - spec.json
+      - technical_design.json
+      - architecture_design.json
+      - design_architecture_review.json
+      - delivery_plan.json
+      - delivery_plan_review.json
+    next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
+    implementation_allowed_conditions:
+      - project understanding exists
+      - cross-repo contracts are reviewed
+      - delivery plan review passes
+  - name: data_migration
+    trigger_impacts:
+      - data
+    required_skills:
+      - spec-governor
+      - technical-design-governor
+      - architecture-design-governor
+      - design-architecture-reviewer
+      - delivery-plan-templates
+      - delivery-plan-reviewer
+      - configuration-governor
+      - data-security-governor
+      - performance-governor
+      - release-evidence-binder
+    optional_skills:
+      - environment-promotion-governor
+      - uat-acceptance-governor
+    expected_artifacts:
+      - spec.json
+      - technical_design.json
+      - architecture_design.json
+      - design_architecture_review.json
+      - delivery_plan.json
+      - delivery_plan_review.json
+      - release_gate.json
+    next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
+    implementation_allowed_conditions:
+      - data design and rollback are reviewed
+      - configuration/security/performance evidence is planned
+  - name: release_readiness
+    trigger_lanes:
+      - release
+    required_skills:
+      - implementation-completion-gate
+      - code-review-gate
+      - test-evidence-gate
+      - environment-promotion-governor
+      - uat-acceptance-governor
+      - release-change-governor
+      - release-evidence-binder
+    optional_skills:
+      - post-release-observer
+    expected_artifacts:
+      - implementation_completion_gate.json
+      - code_review_gate.json
+      - test_evidence_gate.json
+      - environment_promotion.json
+      - uat_acceptance.json
+      - release_change.json
+      - release_gate.json
+    next_safe_command: python3 skills/core/release-evidence-binder/scripts/bind_release.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/release_gate.json
+    implementation_allowed_conditions:
+      - implementation is complete
+      - review and tests pass
+      - release evidence binder returns go

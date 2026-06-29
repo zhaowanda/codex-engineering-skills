@@ -1,6 +1,10 @@
 ---
 name: artifact-splitter
 description: Split machine-readable delivery artifacts from human-readable review documents. Use when technical designs, architecture designs, delivery plans, review results, permits, or test evidence need readable summaries without leaking local paths or replacing gate JSON.
+category: template-runner
+maturity: template
+stage: documentation
+gate: false
 ---
 
 # Artifact Splitter

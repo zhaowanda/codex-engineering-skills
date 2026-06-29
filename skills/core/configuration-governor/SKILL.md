@@ -1,6 +1,10 @@
 ---
 name: configuration-governor
 description: Generate and validate configuration readiness evidence for engineering delivery. Use when requirements, designs, code changes, tests, or releases involve environment variables, database, MQ, email, SMS, payment, callbacks, certificates, feature flags, secrets, or provider configuration.
+category: workflow-gate
+maturity: expert-gate
+stage: release
+gate: true
 ---
 
 # Configuration Governor

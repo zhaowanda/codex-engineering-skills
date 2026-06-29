@@ -31,7 +31,10 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert (out / "architecture_design.json").exists()
         assert (out / "test_design.json").exists()
         assert (out / "delivery_plan.json").exists()
+        assert (out / "delivery_plan_review.json").exists()
         assert (out / "auto_run_summary.json").exists()
+        assert result["workflow_profile"]["name"] in {"small_feature", "cross_repo_api", "bugfix", "frontend_change"}
+        assert "delivery-plan-reviewer" in result["required_gates"]
         assert result["next_stage"]
         assert result["can_implement"] is False
 
@@ -74,6 +77,33 @@ def test_auto_runner_project_understanding_optional() -> None:
         assert any(step["name"] == "project_understanding" for step in result["steps"])
 
 
+def test_auto_runner_explicit_profile_selects_required_gates() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "artifacts"
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-PROFILE",
+            out=out,
+            profile="frontend_change",
+        )
+        assert result["workflow_profile"]["name"] == "frontend_change"
+        assert "frontend-acceptance-runner" in result["required_gates"]
+        assert "test-evidence-gate" in result["required_gates"]
+
+
+def test_auto_runner_infers_frontend_profile_from_requirement() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text(
+            "User needs a new page button. AC: UI button is visible on the orders page.",
+            encoding="utf-8",
+        )
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-AUTO-FE", out=out)
+        assert result["workflow_profile"]["name"] == "frontend_change"
+
+
 def test_codex_eng_auto_cli_runs() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "artifacts"
@@ -102,6 +132,8 @@ def run_all() -> None:
     test_auto_runner_is_idempotent_without_force()
     test_auto_runner_force_regenerates_existing_artifacts()
     test_auto_runner_project_understanding_optional()
+    test_auto_runner_explicit_profile_selects_required_gates()
+    test_auto_runner_infers_frontend_profile_from_requirement()
     test_codex_eng_auto_cli_runs()
 
 

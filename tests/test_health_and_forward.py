@@ -86,11 +86,93 @@ def test_all_skill_docs_declare_output_section() -> None:
     assert not offenders
 
 
+def test_all_skill_docs_declare_taxonomy_frontmatter() -> None:
+    offenders = []
+    required = {"category", "maturity", "stage", "gate"}
+    for path in sorted((ROOT / "skills").glob("*/*/SKILL.md")):
+        fm = skill_health.parse_frontmatter(path.read_text(encoding="utf-8"))
+        missing = sorted(required - set(fm))
+        if missing:
+            offenders.append({"path": path.relative_to(ROOT).as_posix(), "missing": missing})
+    assert not offenders
+
+
+def test_skill_health_blocks_invalid_expert_gate_metadata() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        skill = root / "skills/core/bad-gate/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(
+            "---\n"
+            "name: bad-gate\n"
+            "description: Bad gate.\n"
+            "category: template-runner\n"
+            "maturity: expert-gate\n"
+            "stage: design\n"
+            "gate: false\n"
+            "---\n"
+            "# Bad Gate\n\n## Output\nschema decision blockers\n",
+            encoding="utf-8",
+        )
+        (root / "README.md").write_text("bad-gate\n", encoding="utf-8")
+        docs = root / "docs"
+        docs.mkdir()
+        (docs / "open-source-roadmap.md").write_text("`done`\n", encoding="utf-8")
+        tests = root / "tests"
+        tests.mkdir()
+        (tests / "test_bad_gate.py").write_text("bad_gate\n", encoding="utf-8")
+        result = skill_health.check(root)
+        assert result["decision"] == "block"
+        messages = " ".join(item["message"] for item in result["blockers"])
+        assert "expert-gate skills must declare gate=true" in messages
+        assert "template and extractor skills must not be marked expert-gate" in messages
+
+
+def test_workflow_profiles_reference_existing_skills() -> None:
+    profiles = skill_health.load_restricted_yaml(ROOT / "config/workflow-profiles.example.yaml")
+    assert profiles["schema"] == "codex-workflow-profiles-v1"
+    skill_names = {
+        skill_health.parse_frontmatter(path.read_text(encoding="utf-8"))["name"]
+        for path in (ROOT / "skills").glob("*/*/SKILL.md")
+    }
+    profile_names = {item["name"] for item in profiles["profiles"]}
+    assert {"bugfix", "small_feature", "frontend_change", "cross_repo_api", "data_migration", "release_readiness"}.issubset(profile_names)
+    for profile in profiles["profiles"]:
+        required = profile.get("required_skills", [])
+        assert required
+        assert all(item in skill_names for item in required)
+    frontend = next(item for item in profiles["profiles"] if item["name"] == "frontend_change")
+    assert "frontend-acceptance-runner" in frontend["required_skills"]
+    assert "test-evidence-gate" in frontend["required_skills"]
+    release = next(item for item in profiles["profiles"] if item["name"] == "release_readiness")
+    assert "release-evidence-binder" in release["required_skills"]
+
+
 def test_readme_uses_current_validation_commands() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "python3 -m pytest -q" in readme
     assert "python3 -m compileall -q scripts skills tests" in readme
     assert "python3 scripts/skill_health.py --root ." in readme
+
+
+def test_architecture_documents_skill_taxonomy_and_gate_contract() -> None:
+    architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
+    assert "## Skill Taxonomy" in architecture
+    assert "## Gate Contract" in architecture
+    assert "`expert-gate`" in architecture
+    assert "`schema`" in architecture
+    assert "`decision`" in architecture
+    assert "`blockers`" in architecture
+
+
+def test_skill_catalog_lists_all_skills_with_maturity() -> None:
+    catalog = (ROOT / "docs/skill-catalog.md").read_text(encoding="utf-8")
+    for path in sorted((ROOT / "skills").glob("*/*/SKILL.md")):
+        rel = path.parent.relative_to(ROOT).as_posix()
+        fm = skill_health.parse_frontmatter(path.read_text(encoding="utf-8"))
+        assert rel in catalog
+        assert fm["maturity"] in catalog
+        assert fm["category"] in catalog
 
 
 def test_previously_b_level_skill_docs_have_operational_guidance() -> None:
@@ -129,7 +211,7 @@ def test_skill_quality_distribution_is_all_a_level() -> None:
         score = score_skill_doc(text, len(list((path.parent / "scripts").glob("*.py"))), len(schemas), test_refs)
         level = "A" if score >= 90 else "B+" if score >= 82 else "B" if score >= 75 else "C+" if score >= 68 else "C"
         levels[level].append(path.relative_to(ROOT).as_posix())
-    assert len(levels["A"]) == 72
+    assert len(levels["A"]) == len(list((ROOT / "skills").glob("*/*/SKILL.md")))
     assert levels["B+"] == []
     assert levels["B"] == []
     assert levels["C+"] == []
@@ -173,7 +255,12 @@ def run_all() -> None:
     test_skill_health_runs_on_repo()
     test_root_skill_health_wrapper_exists_for_readme_command()
     test_all_skill_docs_declare_output_section()
+    test_all_skill_docs_declare_taxonomy_frontmatter()
+    test_skill_health_blocks_invalid_expert_gate_metadata()
+    test_workflow_profiles_reference_existing_skills()
     test_readme_uses_current_validation_commands()
+    test_architecture_documents_skill_taxonomy_and_gate_contract()
+    test_skill_catalog_lists_all_skills_with_maturity()
     test_previously_b_level_skill_docs_have_operational_guidance()
     test_final_target_skill_docs_have_operational_guidance()
     test_skill_quality_distribution_is_all_a_level()

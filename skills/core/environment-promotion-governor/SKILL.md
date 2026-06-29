@@ -1,6 +1,10 @@
 ---
 name: environment-promotion-governor
 description: Generate and validate DEV/SIT/UAT/PRE/PROD environment promotion evidence. Use before release when a change needs environment entry criteria, exit criteria, configuration differences, validation evidence, blockers, and rollback readiness.
+category: release-governor
+maturity: expert-gate
+stage: release
+gate: true
 ---
 
 # Environment Promotion Governor

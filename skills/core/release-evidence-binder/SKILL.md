@@ -1,6 +1,10 @@
 ---
 name: release-evidence-binder
 description: Bind delivery evidence into a final release gate report. Use before release approval to aggregate design review, implementation completion, write audit, code review, test evidence, CI, frontend acceptance, configuration readiness, environment promotion, UAT, rollback, and post-release checks into go, conditional_go, or no_go.
+category: release-governor
+maturity: expert-gate
+stage: release
+gate: true
 ---
 
 # Release Evidence Binder

@@ -1,6 +1,10 @@
 ---
 name: prompt-pack-governor
 description: Provide and validate reusable prompt packs for using Codex engineering skills on one-line requests, long PRDs, bugfixes, code review, release readiness, and low-rework implementation. Use when users need standardized prompts that drive the workflow without excessive back-and-forth.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Prompt Pack Governor

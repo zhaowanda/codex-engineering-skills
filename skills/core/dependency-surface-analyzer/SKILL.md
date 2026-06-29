@@ -1,6 +1,10 @@
 ---
 name: dependency-surface-analyzer
 description: Analyze dependency and build surface for a source repository. Use when reverse-engineering package managers, dependency files, build command hints, test command hints, and runtime ecosystem before creating private baseline docs.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: project-understanding
+gate: false
 ---
 
 # Dependency Surface Analyzer

@@ -1,6 +1,10 @@
 ---
 name: human-doc-reviewer
 description: Review human-readable delivery documents for clarity, substance, decision traceability, option comparison, risk explanation, evidence references, and local path leakage. Use before sharing design, release, baseline, or case documents across teams.
+category: meta-governor
+maturity: deterministic-helper
+stage: documentation
+gate: false
 ---
 
 # Human Doc Reviewer

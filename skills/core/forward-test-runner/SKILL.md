@@ -1,6 +1,10 @@
 ---
 name: forward-test-runner
 description: Run forward tests for synthetic open-core cases and validate expected schemas, decisions, blockers, and next commands. Use before releases to ensure skills still work end to end without relying on private context.
+category: template-runner
+maturity: orchestrator
+stage: workflow-orchestration
+gate: false
 ---
 
 # Forward Test Runner

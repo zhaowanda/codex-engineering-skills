@@ -1,6 +1,10 @@
 ---
 name: contribution-governor
 description: Govern open-source contribution readiness for Codex engineering skills. Use when adding or reviewing CONTRIBUTING.md, contribution workflow docs, local development commands, PR review requirements, issue templates, CI requirements, or maintainer contribution rules.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Contribution Governor

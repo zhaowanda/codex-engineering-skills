@@ -1,6 +1,10 @@
 ---
 name: edit-readiness-governor
 description: Enforce the final pre-edit gate before AI-assisted source, config, test, or documentation writes. Use immediately before file edits to verify doc id, design artifacts, delivery plan scope, delivery state, Git branch readiness, and a short-lived edit permit.
+category: workflow-gate
+maturity: expert-gate
+stage: edit-readiness
+gate: true
 ---
 
 # Edit Readiness Governor

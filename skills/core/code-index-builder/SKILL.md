@@ -1,6 +1,10 @@
 ---
 name: code-index-builder
 description: Build a compact local code index for a project repository. Use when onboarding a project, reducing token-heavy source searches, refreshing private overlay indexes, or preparing code-index-lookup for requirement routing.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: project-understanding
+gate: false
 ---
 
 # Code Index Builder

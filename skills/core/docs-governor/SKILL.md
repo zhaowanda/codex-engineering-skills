@@ -1,6 +1,10 @@
 ---
 name: docs-governor
 description: Initialize and validate a delivery documentation repository structure that separates human-readable documents from machine-readable artifacts. Use when teams need long-lived specs, designs, plans, reviews, releases, baseline docs, and cross-project indexes outside the open core.
+category: meta-governor
+maturity: deterministic-helper
+stage: documentation
+gate: false
 ---
 
 # Docs Governor

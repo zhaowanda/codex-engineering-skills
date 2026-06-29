@@ -26,6 +26,43 @@ requirement input
 - Project-specific knowledge is an overlay, not part of the open core.
 - Source-code indexes are generated assets and must stay private by default.
 - The platform command should answer: current stage, blockers, next command, and whether coding/release is allowed.
+- Skills declare `category`, `maturity`, `stage`, and `gate` in frontmatter so orchestration and health checks can distinguish expert gates from helpers and templates.
+
+## Runtime Layers
+
+- Workflow orchestration: `auto-runner`, `project-runner`, `project-understanding-runner`, `delivery-runner`, and synthetic/example runners choose the next safe command.
+- Expert gates: requirement, design, delivery-plan, Git/edit, implementation, review, test, and release gates block shallow or unsafe progress.
+- Evidence builders: extractors, analyzers, templates, and documentation helpers create structured inputs for gates without claiming expert-gate authority.
+- Overlay/runtime: private project knowledge and per-requirement artifacts stay outside open core unless fully synthetic.
+
+## Skill Taxonomy
+
+- `workflow-gate`: blocks or allows a delivery stage.
+- `release-governor`: blocks or allows release and post-release decisions.
+- `reviewer`: advisory review with warnings or blocking findings when applicable.
+- `extractor-analyzer`: deterministic repository or artifact analysis.
+- `artifact-generator`: creates draft artifacts that still require review.
+- `template-runner`: renders templates or orchestrates example workflows.
+- `meta-governor`: validates the open-core framework, docs, prompts, packaging, or compatibility.
+
+Maturity values are intentionally distinct from quality claims:
+
+- `expert-gate`: must be a gate, have direct tests, and expose `schema`, `decision`, and `blockers`.
+- `advisory-review`: can gate thin artifacts but does not represent final implementation authority.
+- `deterministic-helper`: creates evidence or validates repository health with deterministic checks.
+- `template`: provides reusable skeletons or renderers.
+- `orchestrator`: selects and sequences skills without replacing downstream gates.
+
+## Gate Contract
+
+Gate-like skills must document or emit these fields:
+
+- `schema`
+- `decision`
+- `blockers`
+- `warnings` when non-blocking concerns exist
+- `next_action` when a human or agent must continue
+- `readiness_gate.implementation_allowed` when the gate controls implementation
 
 ## Extension Points
 
@@ -35,4 +72,3 @@ requirement input
 - Browser acceptance provider.
 - Semantic knowledge provider.
 - Privacy pattern configuration.
-

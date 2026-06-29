@@ -1,6 +1,10 @@
 ---
 name: delivery-runner
 description: Inspect a delivery artifact folder and report current workflow stage, blockers, next command, and whether implementation or release is allowed. Use as the one-command entrypoint after spec/design/plan/git/review/test/release artifacts exist or when the user asks where the process is.
+category: template-runner
+maturity: orchestrator
+stage: delivery-planning
+gate: false
 ---
 
 # Delivery Runner

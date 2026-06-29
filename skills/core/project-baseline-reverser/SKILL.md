@@ -1,6 +1,10 @@
 ---
 name: project-baseline-reverser
 description: Generate baseline project documentation from source structure and Git history. Use when a repository lacks design docs and teams need a private baseline overview, module map, API/route hints, configuration hints, test hints, and recent change summary.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: project-understanding
+gate: false
 ---
 
 # Project Baseline Reverser

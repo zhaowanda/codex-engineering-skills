@@ -1,6 +1,10 @@
 ---
 name: security-policy-governor
 description: Govern open-source security policy readiness. Use when adding or reviewing SECURITY.md, vulnerability reporting process, supported versions, private data rules, secret handling, privacy scan expectations, dependency license checks, or security response commitments.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Security Policy Governor

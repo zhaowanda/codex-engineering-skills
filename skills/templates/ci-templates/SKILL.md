@@ -1,6 +1,10 @@
 ---
 name: ci-templates
 description: Generate CI templates for Codex engineering skills repositories. Use when setting up GitHub Actions or GitLab CI to run Python compilation, framework tests, and privacy scanning for the open-core or a private overlay repository.
+category: template-runner
+maturity: template
+stage: meta
+gate: false
 ---
 
 # CI Templates

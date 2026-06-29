@@ -1,6 +1,10 @@
 ---
 name: test-design-governor
 description: Generate and validate test design artifacts before implementation. Use when a spec, technical design, architecture design, or delivery plan needs functional, regression, integration, permission, frontend, configuration, performance, and release test scope before coding.
+category: workflow-gate
+maturity: expert-gate
+stage: testing
+gate: true
 ---
 
 # Test Design Governor

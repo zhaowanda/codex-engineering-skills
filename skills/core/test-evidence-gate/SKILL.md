@@ -1,6 +1,10 @@
 ---
 name: test-evidence-gate
 description: Validate real test and CI execution evidence before release evidence binding. Use after implementation review when a change needs proof that functional tests, regression scope, CI commands, and optional frontend acceptance actually ran and passed.
+category: workflow-gate
+maturity: expert-gate
+stage: testing
+gate: true
 ---
 
 # Test Evidence Gate

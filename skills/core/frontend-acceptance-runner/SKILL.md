@@ -1,6 +1,10 @@
 ---
 name: frontend-acceptance-runner
 description: Generate and validate frontend browser acceptance evidence for UI changes. Use when a route, page, table, form, detail view, export flow, permission visibility, or browser interaction changed and release needs DOM, network, console, screenshot, and interaction evidence.
+category: workflow-gate
+maturity: expert-gate
+stage: testing
+gate: true
 ---
 
 # Frontend Acceptance Runner

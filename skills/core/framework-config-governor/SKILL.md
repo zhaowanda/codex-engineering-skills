@@ -1,6 +1,10 @@
 ---
 name: framework-config-governor
 description: Validate Codex engineering skills framework configuration and private overlay wiring. Use when setting up the open-core repository, connecting a private project registry, checking required delivery gates, or preparing the framework for team use.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Framework Config Governor

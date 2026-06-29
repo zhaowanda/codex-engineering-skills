@@ -1,6 +1,10 @@
 ---
 name: diff-impact-analyzer
 description: Analyze a git diff and classify engineering impact areas before review, testing, or release. Use after implementation to detect API, database, configuration, permission, performance, frontend, docs, tests, migration, and release risks from changed files and diff content.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: post-implementation-review
+gate: false
 ---
 
 # Diff Impact Analyzer

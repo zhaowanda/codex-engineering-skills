@@ -1,6 +1,10 @@
 ---
 name: implementation-completion-gate
 description: Validate that implementation is complete before review, testing, or release. Use after code edits to require real diff evidence, delivery-plan scope alignment, changed files, implementation summary, and follow-up evidence plan.
+category: workflow-gate
+maturity: expert-gate
+stage: post-implementation-review
+gate: true
 ---
 
 # Implementation Completion Gate

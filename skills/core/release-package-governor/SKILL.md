@@ -1,6 +1,10 @@
 ---
 name: release-package-governor
 description: Validate open-source release package readiness for Codex engineering skills. Use before tagging or publishing releases to check required repository files, version consistency, changelog entries, package manifest contents, installability signals, and release dry-run evidence without creating a real release.
+category: meta-governor
+maturity: deterministic-helper
+stage: release
+gate: false
 ---
 
 # Release Package Governor

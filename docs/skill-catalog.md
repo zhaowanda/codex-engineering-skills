@@ -1,74 +1,109 @@
 # Skill Catalog
 
-- `skills/core/auto-runner`: auto-runner
-- `skills/core/api-surface-extractor`: api-surface-extractor
-- `skills/core/architecture-design-governor`: architecture-design-governor
-- `skills/core/artifact-schema-governor`: artifact-schema-governor
-- `skills/core/baseline-quality-governor`: baseline-quality-governor
-- `skills/core/benchmark-governor`: benchmark-governor
-- `skills/core/change-risk-governor`: change-risk-governor
-- `skills/core/code-design-quality-reviewer`: code-design-quality-reviewer
-- `skills/core/code-index-builder`: code-index-builder
-- `skills/core/code-index-lookup`: code-index-lookup
-- `skills/core/code-review-gate`: code-review-gate
-- `skills/core/compatibility-governor`: compatibility-governor
-- `skills/core/config-surface-extractor`: config-surface-extractor
-- `skills/core/configuration-governor`: configuration-governor
-- `skills/core/contribution-governor`: contribution-governor
-- `skills/core/data-security-governor`: data-security-governor
-- `skills/core/delivery-case-capture`: delivery-case-capture
-- `skills/core/delivery-runner`: delivery-runner
-- `skills/core/delivery-state-governor`: delivery-state-governor
-- `skills/core/dependency-license-governor`: dependency-license-governor
-- `skills/core/dependency-surface-analyzer`: dependency-surface-analyzer
-- `skills/core/deprecation-governor`: deprecation-governor
-- `skills/core/design-architecture-reviewer`: design-architecture-reviewer
-- `skills/core/diff-impact-analyzer`: diff-impact-analyzer
-- `skills/core/docs-governor`: docs-governor
-- `skills/core/docs-readability-governor`: docs-readability-governor
-- `skills/core/docs-site-governor`: docs-site-governor
-- `skills/core/edit-readiness-governor`: edit-readiness-governor
-- `skills/core/environment-promotion-governor`: environment-promotion-governor
-- `skills/core/evidence-auto-collector`: evidence-auto-collector
-- `skills/core/example-scenario-runner`: example-scenario-runner
-- `skills/core/forward-test-runner`: forward-test-runner
-- `skills/core/framework-config-governor`: framework-config-governor
-- `skills/core/frontend-acceptance-runner`: frontend-acceptance-runner
-- `skills/core/git-history-miner`: git-history-miner
-- `skills/core/git-worktree-governor`: git-worktree-governor
-- `skills/core/human-doc-reviewer`: human-doc-reviewer
-- `skills/core/implementation-completion-gate`: implementation-completion-gate
-- `skills/core/issue-pr-governor`: issue-pr-governor
-- `skills/core/mcp-integration-governor`: mcp-integration-governor
-- `skills/core/overlay-health`: overlay-health
-- `skills/core/performance-governor`: performance-governor
-- `skills/core/post-release-observer`: post-release-observer
-- `skills/core/project-baseline-reverser`: project-baseline-reverser
-- `skills/core/project-onboard`: project-onboard
-- `skills/core/project-runner`: project-runner
-- `skills/core/project-understanding-runner`: project-understanding-runner
-- `skills/core/prompt-effectiveness-governor`: prompt-effectiveness-governor
-- `skills/core/prompt-pack-governor`: prompt-pack-governor
-- `skills/core/release-change-governor`: release-change-governor
-- `skills/core/release-evidence-binder`: release-evidence-binder
-- `skills/core/release-package-governor`: release-package-governor
-- `skills/core/repository-analyzer`: repository-analyzer
-- `skills/core/requirement-document-ingestor`: requirement-document-ingestor
-- `skills/core/requirement-question-governor`: requirement-question-governor
-- `skills/core/roadmap-governor`: roadmap-governor
-- `skills/core/security-policy-governor`: security-policy-governor
-- `skills/core/skill-health`: skill-health
-- `skills/core/skill-installation-governor`: skill-installation-governor
-- `skills/core/spec-governor`: spec-governor
-- `skills/core/technical-design-governor`: technical-design-governor
-- `skills/core/test-design-governor`: test-design-governor
-- `skills/core/test-evidence-gate`: test-evidence-gate
-- `skills/core/traceability-governor`: traceability-governor
-- `skills/core/uat-acceptance-governor`: uat-acceptance-governor
-- `skills/core/version-release-governor`: version-release-governor
-- `skills/core/workspace-write-guard`: workspace-write-guard
-- `skills/templates/artifact-splitter`: artifact-splitter
-- `skills/templates/ci-templates`: ci-templates
-- `skills/templates/delivery-plan-templates`: delivery-plan-templates
-- `skills/templates/design-doc-templates`: design-doc-templates
-- `skills/templates/synthetic-e2e-runner`: synthetic-e2e-runner
+Skills are grouped by delivery stage. Each entry shows maturity and category from `SKILL.md` frontmatter.
+
+## Requirements
+
+- `skills/core/requirement-document-ingestor`: requirement-document-ingestor (deterministic-helper, extractor-analyzer)
+- `skills/core/requirement-question-governor`: requirement-question-governor (expert-gate, workflow-gate)
+- `skills/core/spec-governor`: spec-governor (expert-gate, workflow-gate)
+
+## Project Understanding
+
+- `skills/core/api-surface-extractor`: api-surface-extractor (deterministic-helper, extractor-analyzer)
+- `skills/core/baseline-quality-governor`: baseline-quality-governor (advisory-review, reviewer)
+- `skills/core/code-index-builder`: code-index-builder (deterministic-helper, extractor-analyzer)
+- `skills/core/code-index-lookup`: code-index-lookup (deterministic-helper, extractor-analyzer)
+- `skills/core/config-surface-extractor`: config-surface-extractor (deterministic-helper, extractor-analyzer)
+- `skills/core/dependency-surface-analyzer`: dependency-surface-analyzer (deterministic-helper, extractor-analyzer)
+- `skills/core/git-history-miner`: git-history-miner (deterministic-helper, extractor-analyzer)
+- `skills/core/project-baseline-reverser`: project-baseline-reverser (deterministic-helper, extractor-analyzer)
+- `skills/core/project-onboard`: project-onboard (orchestrator, artifact-generator)
+- `skills/core/project-runner`: project-runner (orchestrator, template-runner)
+- `skills/core/project-understanding-runner`: project-understanding-runner (orchestrator, template-runner)
+- `skills/core/repository-analyzer`: repository-analyzer (deterministic-helper, extractor-analyzer)
+
+## Design
+
+- `skills/core/architecture-design-governor`: architecture-design-governor (deterministic-helper, artifact-generator)
+- `skills/core/design-architecture-reviewer`: design-architecture-reviewer (expert-gate, workflow-gate)
+- `skills/templates/design-doc-templates`: design-doc-templates (template, template-runner)
+- `skills/core/technical-design-governor`: technical-design-governor (deterministic-helper, artifact-generator)
+
+## Delivery Planning
+
+- `skills/core/delivery-plan-reviewer`: delivery-plan-reviewer (expert-gate, workflow-gate)
+- `skills/templates/delivery-plan-templates`: delivery-plan-templates (template, template-runner)
+- `skills/core/delivery-runner`: delivery-runner (orchestrator, template-runner)
+- `skills/core/delivery-state-governor`: delivery-state-governor (expert-gate, workflow-gate)
+
+## Edit Readiness
+
+- `skills/core/edit-readiness-governor`: edit-readiness-governor (expert-gate, workflow-gate)
+- `skills/core/git-worktree-governor`: git-worktree-governor (expert-gate, workflow-gate)
+- `skills/core/workspace-write-guard`: workspace-write-guard (expert-gate, workflow-gate)
+
+## Post Implementation Review
+
+- `skills/core/change-risk-governor`: change-risk-governor (expert-gate, workflow-gate)
+- `skills/core/code-design-quality-reviewer`: code-design-quality-reviewer (expert-gate, workflow-gate)
+- `skills/core/code-review-gate`: code-review-gate (expert-gate, workflow-gate)
+- `skills/core/diff-impact-analyzer`: diff-impact-analyzer (deterministic-helper, extractor-analyzer)
+- `skills/core/evidence-auto-collector`: evidence-auto-collector (deterministic-helper, extractor-analyzer)
+- `skills/core/implementation-completion-gate`: implementation-completion-gate (expert-gate, workflow-gate)
+- `skills/core/traceability-governor`: traceability-governor (expert-gate, workflow-gate)
+
+## Testing
+
+- `skills/core/frontend-acceptance-runner`: frontend-acceptance-runner (expert-gate, workflow-gate)
+- `skills/core/test-design-governor`: test-design-governor (expert-gate, workflow-gate)
+- `skills/core/test-evidence-gate`: test-evidence-gate (expert-gate, workflow-gate)
+
+## Release
+
+- `skills/core/configuration-governor`: configuration-governor (expert-gate, workflow-gate)
+- `skills/core/data-security-governor`: data-security-governor (expert-gate, workflow-gate)
+- `skills/core/dependency-license-governor`: dependency-license-governor (deterministic-helper, extractor-analyzer)
+- `skills/core/environment-promotion-governor`: environment-promotion-governor (expert-gate, release-governor)
+- `skills/core/performance-governor`: performance-governor (expert-gate, workflow-gate)
+- `skills/core/post-release-observer`: post-release-observer (expert-gate, release-governor)
+- `skills/core/release-change-governor`: release-change-governor (expert-gate, release-governor)
+- `skills/core/release-evidence-binder`: release-evidence-binder (expert-gate, release-governor)
+- `skills/core/release-package-governor`: release-package-governor (deterministic-helper, meta-governor)
+- `skills/core/uat-acceptance-governor`: uat-acceptance-governor (expert-gate, release-governor)
+- `skills/core/version-release-governor`: version-release-governor (deterministic-helper, meta-governor)
+
+## Documentation
+
+- `skills/templates/artifact-splitter`: artifact-splitter (template, template-runner)
+- `skills/core/docs-governor`: docs-governor (deterministic-helper, meta-governor)
+- `skills/core/docs-readability-governor`: docs-readability-governor (deterministic-helper, meta-governor)
+- `skills/core/docs-site-governor`: docs-site-governor (deterministic-helper, meta-governor)
+- `skills/core/human-doc-reviewer`: human-doc-reviewer (deterministic-helper, meta-governor)
+
+## Workflow Orchestration
+
+- `skills/core/auto-runner`: auto-runner (orchestrator, template-runner)
+- `skills/core/example-scenario-runner`: example-scenario-runner (orchestrator, template-runner)
+- `skills/core/forward-test-runner`: forward-test-runner (orchestrator, template-runner)
+- `skills/templates/synthetic-e2e-runner`: synthetic-e2e-runner (template, template-runner)
+
+## Meta
+
+- `skills/core/artifact-schema-governor`: artifact-schema-governor (deterministic-helper, meta-governor)
+- `skills/core/benchmark-governor`: benchmark-governor (deterministic-helper, meta-governor)
+- `skills/templates/ci-templates`: ci-templates (template, template-runner)
+- `skills/core/compatibility-governor`: compatibility-governor (deterministic-helper, meta-governor)
+- `skills/core/contribution-governor`: contribution-governor (deterministic-helper, meta-governor)
+- `skills/core/delivery-case-capture`: delivery-case-capture (deterministic-helper, artifact-generator)
+- `skills/core/deprecation-governor`: deprecation-governor (deterministic-helper, meta-governor)
+- `skills/core/framework-config-governor`: framework-config-governor (deterministic-helper, meta-governor)
+- `skills/core/issue-pr-governor`: issue-pr-governor (deterministic-helper, meta-governor)
+- `skills/core/mcp-integration-governor`: mcp-integration-governor (deterministic-helper, meta-governor)
+- `skills/core/overlay-health`: overlay-health (deterministic-helper, meta-governor)
+- `skills/core/prompt-effectiveness-governor`: prompt-effectiveness-governor (deterministic-helper, meta-governor)
+- `skills/core/prompt-pack-governor`: prompt-pack-governor (deterministic-helper, meta-governor)
+- `skills/core/roadmap-governor`: roadmap-governor (deterministic-helper, meta-governor)
+- `skills/core/security-policy-governor`: security-policy-governor (deterministic-helper, meta-governor)
+- `skills/core/skill-health`: skill-health (deterministic-helper, meta-governor)
+- `skills/core/skill-installation-governor`: skill-installation-governor (deterministic-helper, meta-governor)

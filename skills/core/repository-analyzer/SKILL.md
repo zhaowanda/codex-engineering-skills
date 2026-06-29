@@ -1,6 +1,10 @@
 ---
 name: repository-analyzer
 description: Analyze a source repository structure for generic project understanding. Use when reverse-engineering an unfamiliar codebase to identify languages, frameworks, top-level modules, entrypoint hints, test hints, CI files, configuration files, and build files before generating private baseline docs.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: project-understanding
+gate: false
 ---
 
 # Repository Analyzer

@@ -1,6 +1,10 @@
 ---
 name: git-history-miner
 description: Mine generic Git history signals for a source repository. Use when reverse-engineering recent change themes, hotspot files, hotspot directories, and evolution hints without exposing author emails or private remote metadata.
+category: extractor-analyzer
+maturity: deterministic-helper
+stage: project-understanding
+gate: false
 ---
 
 # Git History Miner

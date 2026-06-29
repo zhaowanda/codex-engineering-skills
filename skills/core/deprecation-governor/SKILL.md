@@ -1,6 +1,10 @@
 ---
 name: deprecation-governor
 description: Review deprecation and migration readiness for Codex engineering skills. Use when skill names, schemas, CLI commands, prompts, or public workflows may be renamed, removed, or replaced and need notices, migration paths, compatibility windows, and removal policy.
+category: meta-governor
+maturity: deterministic-helper
+stage: meta
+gate: false
 ---
 
 # Deprecation Governor
