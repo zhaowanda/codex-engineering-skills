@@ -141,11 +141,17 @@ def test_workflow_profiles_reference_existing_skills() -> None:
         required = profile.get("required_skills", [])
         assert required
         assert all(item in skill_names for item in required)
+        assert profile.get("required_gate_artifacts")
+        gate_artifacts = {item["artifact"] for item in profile["required_gate_artifacts"]}
+        assert gate_artifacts.issubset(set(profile.get("expected_artifacts", [])))
     frontend = next(item for item in profiles["profiles"] if item["name"] == "frontend_change")
     assert "frontend-acceptance-runner" in frontend["required_skills"]
     assert "test-evidence-gate" in frontend["required_skills"]
     release = next(item for item in profiles["profiles"] if item["name"] == "release_readiness")
     assert "release-evidence-binder" in release["required_skills"]
+    stages = skill_health.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")
+    assert stages["schema"] == "codex-workflow-stages-v1"
+    assert {"spec", "delivery_plan_review", "edit_permit", "release"}.issubset({item["name"] for item in stages["stages"]})
 
 
 def test_readme_uses_current_validation_commands() -> None:

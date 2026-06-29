@@ -35,6 +35,7 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert (out / "auto_run_summary.json").exists()
         assert result["workflow_profile"]["name"] in {"small_feature", "cross_repo_api", "bugfix", "frontend_change"}
         assert "delivery-plan-reviewer" in result["required_gates"]
+        assert "profile_gate_gaps" in result
         assert result["next_stage"]
         assert result["can_implement"] is False
 
@@ -89,6 +90,7 @@ def test_auto_runner_explicit_profile_selects_required_gates() -> None:
         assert result["workflow_profile"]["name"] == "frontend_change"
         assert "frontend-acceptance-runner" in result["required_gates"]
         assert "test-evidence-gate" in result["required_gates"]
+        assert any(gap["artifact"] == "frontend_acceptance.json" for gap in result["profile_gate_gaps"])
 
 
 def test_auto_runner_infers_frontend_profile_from_requirement() -> None:

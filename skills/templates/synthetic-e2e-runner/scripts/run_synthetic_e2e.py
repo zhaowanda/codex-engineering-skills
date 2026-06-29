@@ -43,10 +43,12 @@ def run(out_dir: Path) -> dict[str, Any]:
         run_step("technical_design", ["python3", "skills/core/technical-design-governor/scripts/technical_design.py", "--spec", str(out_dir / "spec.json"), "--out", str(out_dir / "technical_design.json")]),
         run_step("architecture_design", ["python3", "skills/core/architecture-design-governor/scripts/architecture_design.py", "--spec", str(out_dir / "spec.json"), "--technical-design", str(out_dir / "technical_design.json"), "--out", str(out_dir / "architecture_design.json")]),
         run_step("test_design", ["python3", "skills/core/test-design-governor/scripts/test_design.py", "render", "--spec", str(out_dir / "spec.json"), "--technical-design", str(out_dir / "technical_design.json"), "--architecture-design", str(out_dir / "architecture_design.json"), "--out", str(out_dir / "test_design.json")]),
+        run_step("design_review", ["python3", "skills/core/design-architecture-reviewer/scripts/design_arch_review.py", "review", "--technical-design", str(out_dir / "technical_design.json"), "--architecture-design", str(out_dir / "architecture_design.json"), "--out", str(out_dir / "design_architecture_review.json")], allow_fail=True),
         run_step("delivery_plan", ["python3", "skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py", "--doc-id", "REQ-SYN-001", "--technical-design", str(out_dir / "technical_design.json"), "--architecture-design", str(out_dir / "architecture_design.json"), "--out", str(out_dir / "delivery_plan.json")], allow_fail=True),
+        run_step("delivery_plan_review", ["python3", "skills/core/delivery-plan-reviewer/scripts/delivery_plan_review.py", "review", "--file", str(out_dir / "delivery_plan.json"), "--out", str(out_dir / "delivery_plan_review.json")], allow_fail=True),
     ]
     write_release_governance_examples(out_dir)
-    steps.append(run_step("inspect", ["python3", "skills/core/delivery-runner/scripts/delivery_runner.py", "inspect", "--artifact-dir", str(out_dir)]))
+    steps.append(run_step("inspect", ["python3", "skills/core/delivery-runner/scripts/delivery_runner.py", "inspect", "--artifact-dir", str(out_dir)], allow_fail=True))
     return {
         "schema": "codex-synthetic-e2e-run-v1",
         "out_dir": str(out_dir),

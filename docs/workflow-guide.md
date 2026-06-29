@@ -14,6 +14,7 @@ requirement source
 -> configuration/performance/data-security governors
 -> design-architecture-reviewer
 -> delivery-plan-templates
+-> delivery-plan-reviewer
 -> git-worktree-governor
 -> edit-readiness-governor
 -> implementation
@@ -65,6 +66,8 @@ requirement-document-ingestor
 | `cross_repo_api` | Project understanding, standard design-first profile, `traceability-governor`, and release evidence gates. |
 | `data_migration` | Standard design-first profile plus `configuration-governor`, `data-security-governor`, `performance-governor`, and release gates. |
 | `release_readiness` | `implementation-completion-gate -> code-review-gate -> test-evidence-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
+
+Profiles are machine-validated contracts, not only documentation. Each profile declares required skills, expected artifacts, required gate artifacts, accepted decisions, and readiness fields. Stage order and next commands are defined in `config/workflow-stages.example.yaml`.
 
 ## Coding Is Allowed Only When
 

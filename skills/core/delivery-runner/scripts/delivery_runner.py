@@ -9,7 +9,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[4]
-ORDER = [
+FALLBACK_ORDER = [
     ("spec", "spec.json"),
     ("technical_design", "technical_design.json"),
     ("architecture_design", "architecture_design.json"),
@@ -27,8 +27,8 @@ ORDER = [
     ("release", "release_gate.json"),
     ("post_release", "post_release_observation.json"),
 ]
-IMPLEMENTATION_REQUIRED = ["spec", "technical_design", "architecture_design", "delivery_plan", "delivery_plan_review", "design_review", "git", "edit_permit"]
-RELEASE_REQUIRED = ["implementation", "review", "test", "environment", "uat", "release_change", "release"]
+FALLBACK_IMPLEMENTATION_REQUIRED = ["spec", "technical_design", "architecture_design", "delivery_plan", "delivery_plan_review", "design_review", "git", "edit_permit"]
+FALLBACK_RELEASE_REQUIRED = ["implementation", "review", "test", "environment", "uat", "release_change", "release"]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -59,6 +59,25 @@ def load_auto_runner_module() -> Any:
     return module
 
 
+def load_stage_registry() -> list[dict[str, Any]]:
+    try:
+        auto_runner = load_auto_runner_module()
+        data = auto_runner.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")
+    except Exception:
+        data = {}
+    stages = data.get("stages", []) if isinstance(data, dict) else []
+    if not isinstance(stages, list) or not stages:
+        return [
+            {"name": name, "artifact": filename, "implementation_required": name in FALLBACK_IMPLEMENTATION_REQUIRED, "release_required": name in FALLBACK_RELEASE_REQUIRED}
+            for name, filename in FALLBACK_ORDER
+        ]
+    normalized: list[dict[str, Any]] = []
+    for item in stages:
+        if isinstance(item, dict) and item.get("name") and item.get("artifact"):
+            normalized.append(item)
+    return normalized
+
+
 def selected_profile(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
     auto_summary = load_json(artifact_dir / "auto_run_summary.json")
     if isinstance(auto_summary.get("workflow_profile"), dict) and not profile_name:
@@ -81,13 +100,55 @@ def missing_profile_artifacts(profile: dict[str, Any], artifact_dir: Path) -> li
     return [str(item) for item in items if not (artifact_dir / str(item)).exists()]
 
 
+def nested_value(data: dict[str, Any], path: str) -> Any:
+    current: Any = data
+    for part in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
+
+
+def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    gates = profile.get("required_gate_artifacts", [])
+    if not isinstance(gates, list):
+        return blockers
+    for gate in gates:
+        if not isinstance(gate, dict):
+            blockers.append({"source": "workflow_profile", "message": "required_gate_artifacts entries must be objects"})
+            continue
+        artifact_name = str(gate.get("artifact") or "")
+        if not artifact_name:
+            blockers.append({"source": "workflow_profile", "message": "required gate artifact is missing artifact path"})
+            continue
+        path = artifact_dir / artifact_name
+        data = load_json(path)
+        if not data:
+            blockers.append({"source": f"profile_gate.{artifact_name}", "message": "required gate artifact is missing or invalid"})
+            continue
+        accepted = {str(item) for item in gate.get("accepted_decisions", [])} if isinstance(gate.get("accepted_decisions"), list) else set()
+        decision = str(data.get("decision") or data.get("status") or "")
+        if accepted and decision and decision not in accepted:
+            blockers.append({"source": f"profile_gate.{artifact_name}", "message": f"decision {decision} not accepted", "accepted_decisions": sorted(accepted)})
+        readiness_path = str(gate.get("readiness_path") or "")
+        if readiness_path:
+            expected = gate.get("readiness_value")
+            actual = nested_value(data, readiness_path)
+            if actual != expected:
+                blockers.append({"source": f"profile_gate.{artifact_name}", "message": f"{readiness_path} is not {expected}", "actual": actual})
+    return blockers
+
+
 def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
-    artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_dir / filename) for name, filename in ORDER}
+    stages = load_stage_registry()
+    order = [(str(stage["name"]), str(stage["artifact"])) for stage in stages]
+    artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_dir / filename) for name, filename in order}
     state = load_json(artifact_dir / "delivery_state.json")
     profile = selected_profile(artifact_dir, profile_name)
     profile_missing = missing_profile_artifacts(profile, artifact_dir)
-    completed = [name for name, _ in ORDER if is_pass(artifacts[name])]
-    missing = [name for name, _ in ORDER if not artifacts[name]]
+    completed = [name for name, _ in order if is_pass(artifacts[name])]
+    missing = [name for name, _ in order if not artifacts[name]]
     blockers: list[dict[str, Any]] = []
     for name, data in artifacts.items():
         if not data:
@@ -99,28 +160,24 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
             blockers.append({"source": name, "message": f"blocking decision: {data.get('decision')}"})
     if state.get("blockers"):
         blockers.append({"source": "delivery_state", "message": "delivery state has blockers", "count": len(state.get("blockers", []))})
+    blockers.extend(profile_gate_blockers(profile, artifact_dir))
 
     next_stage = "done"
-    for name, _ in ORDER:
+    for name, _ in order:
         if name not in completed:
             next_stage = name
             break
-    implementation_missing = [name for name in IMPLEMENTATION_REQUIRED if name not in completed]
-    release_missing = [name for name in RELEASE_REQUIRED if name not in completed]
+    implementation_required = [str(stage["name"]) for stage in stages if stage.get("implementation_required")]
+    if not implementation_required:
+        implementation_required = FALLBACK_IMPLEMENTATION_REQUIRED
+    release_required = [str(stage["name"]) for stage in stages if stage.get("release_required")]
+    if not release_required:
+        release_required = FALLBACK_RELEASE_REQUIRED
+    implementation_missing = [name for name in implementation_required if name not in completed]
+    release_missing = [name for name in release_required if name not in completed]
     can_implement = not implementation_missing and not blockers
     can_release = not release_missing and not blockers
-    commands = {
-        "spec": "python3 skills/core/spec-governor/scripts/spec_governor.py normalize --doc-id REQ-001 --title \"Title\" --input requirement.txt --out artifacts/REQ-001/spec.json",
-        "technical_design": "python3 skills/core/technical-design-governor/scripts/technical_design.py --spec artifacts/REQ-001/spec.json --out artifacts/REQ-001/technical_design.json",
-        "architecture_design": "python3 skills/core/architecture-design-governor/scripts/architecture_design.py --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --out artifacts/REQ-001/architecture_design.json",
-        "delivery_plan": "python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py --doc-id REQ-001 --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/delivery_plan.json",
-        "delivery_plan_review": "python3 skills/core/delivery-plan-reviewer/scripts/delivery_plan_review.py review --file artifacts/REQ-001/delivery_plan.json --out artifacts/REQ-001/delivery_plan_review.json",
-        "design_review": "python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json",
-        "environment": "python3 skills/core/environment-promotion-governor/scripts/environment_promotion.py template --out artifacts/REQ-001/environment_promotion.json",
-        "uat": "python3 skills/core/uat-acceptance-governor/scripts/uat_acceptance.py template --out artifacts/REQ-001/uat_acceptance.json",
-        "release_change": "python3 skills/core/release-change-governor/scripts/release_change.py template --out artifacts/REQ-001/release_change.json",
-        "post_release": "python3 skills/core/post-release-observer/scripts/post_release_observer.py template --out artifacts/REQ-001/post_release_observation.json",
-    }
+    commands = {str(stage["name"]): str(stage.get("next_command") or "") for stage in stages}
     return {
         "schema": "codex-delivery-runner-status-v1",
         "artifact_dir": str(artifact_dir),
@@ -130,6 +187,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "blockers": blockers,
         "workflow_profile": profile,
         "profile_missing_artifacts": profile_missing,
+        "stage_registry": "config/workflow-stages.example.yaml",
         "next_profile_command": profile.get("next_safe_command", ""),
         "next_stage": next_stage,
         "next_command": commands.get(next_stage, "Run the gate for the next missing stage and attach evidence."),

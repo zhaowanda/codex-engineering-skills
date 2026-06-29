@@ -30,7 +30,7 @@ def complete_design() -> tuple[dict, dict]:
             {"option_id": "T1", "name": "render existing API field", "description": "UI-only render", "pros": ["small"], "cons": ["depends on API"], "risk_level": "low", "validation": "browser evidence", "performance_impact": "none", "rollback_strategy": "revert UI"},
             {"option_id": "T2", "name": "calculate in frontend", "description": "derive discounts in UI", "pros": ["independent"], "cons": ["business logic duplicate"], "risk_level": "high", "validation": "unit tests", "performance_impact": "minor CPU", "rollback_strategy": "revert UI"},
         ],
-        "selected_solution": {"selected_option_id": "T1", "selection_reason": "keeps pricing source of truth", "decision_criteria": ["correctness", "low coupling"], "tradeoffs": ["UI depends on existing field"]},
+        "selected_solution": {"selected_option_id": "T1", "selection_reason": "keeps pricing source of truth", "decision_criteria": ["correctness", "low coupling"], "tradeoffs": ["UI depends on existing field"], "rejected_alternative_reasoning": [{"option_id": "T2", "reason": "duplicates pricing logic"}]},
         "design_traceability_matrix": [{"requirement_id": "REQ-1", "process_flow_refs": ["checkout review"], "module_refs": ["checkout-summary"], "data_flow_refs": ["pricing API->checkout summary"], "api_contract_refs": ["discounts[]"], "ui_ue_refs": ["checkout summary"], "test_refs": ["UI-1"], "acceptance_refs": ["AC-1"], "selected_option_id": "T1", "decision_reason": "lowest risk"}],
         "acceptance_mapping": [{"acceptance_id": "AC-1", "design_refs": ["checkout summary"], "evidence_required": ["browser screenshot"]}],
         "ui_ue_design": [{"page_or_route": "/checkout", "user_goal": "confirm price", "entry_point": "cart checkout", "layout": "summary panel", "interaction_flow": ["open page"], "states": ["loading", "success", "error"], "field_rules": ["show each discount label and amount"], "permission_visibility": "buyer own cart", "acceptance_evidence": "browser screenshot"}],
@@ -42,7 +42,7 @@ def complete_design() -> tuple[dict, dict]:
             {"option_id": "A1", "name": "web only", "description": "render existing contract", "owner_repos": ["web-app"], "confirm_only_repos": ["pricing-service"], "pros": ["safe"], "cons": ["UI local"], "risk_level": "low", "validation": "browser", "performance_impact": "none", "rollback_strategy": "revert web"},
             {"option_id": "A2", "name": "pricing API change", "description": "new endpoint", "owner_repos": ["pricing-service", "web-app"], "confirm_only_repos": ["reporting-service"], "pros": ["explicit"], "cons": ["contract risk"], "risk_level": "medium", "validation": "API+UI", "performance_impact": "extra request", "rollback_strategy": "revert both"},
         ],
-        "selected_architecture": {"selected_option_id": "A1", "selection_reason": "no API change", "decision_criteria": ["compatibility", "low coupling"], "tradeoffs": ["UI renders existing data"]},
+        "selected_architecture": {"selected_option_id": "A1", "selection_reason": "no API change", "decision_criteria": ["compatibility", "low coupling"], "tradeoffs": ["UI renders existing data"], "rejected_alternative_reasoning": [{"option_id": "A2", "reason": "adds contract risk"}]},
         "architecture_traceability_matrix": [{"requirement_id": "REQ-1", "component_boundary_refs": ["web-app owns rendering"], "module_topology_refs": ["web-app/checkout-summary"], "data_flow_refs": ["pricing-service->web-app"], "integration_sequence_refs": ["checkout load"], "contract_refs": ["discounts[]"], "selected_architecture_option_id": "A1", "decision_reason": "lowest integration risk"}],
         "component_boundaries": [{"component": "web-app", "role": "render", "exclusion": "no pricing calculation"}],
         "module_topology": [{"repo": "web-app", "module": "checkout-summary", "responsibility": "display", "depends_on": ["pricing-service"], "boundary_rule": "read-only API consumer", "change_type": "modify"}],
@@ -91,10 +91,28 @@ def test_missing_option_comparison_needs_revision() -> None:
     assert result["severity_counts"]["high"] >= 1
 
 
+def test_missing_rejected_alternative_reasoning_needs_revision() -> None:
+    technical, architecture = complete_design()
+    technical["selected_solution"].pop("rejected_alternative_reasoning")
+    architecture["selected_architecture"].pop("rejected_alternative_reasoning")
+    result = design_arch_review.review(technical, architecture)
+    assert result["decision"] == "needs_revision"
+    assert not result["readiness_gate"]["implementation_allowed"]
+    messages = json_dumps(result)
+    assert "rejected alternative reasoning" in messages
+
+
+def json_dumps(value: dict) -> str:
+    import json
+
+    return json.dumps(value, ensure_ascii=False)
+
+
 def run_all() -> None:
     test_thin_design_blocks()
     test_complete_design_passes()
     test_missing_option_comparison_needs_revision()
+    test_missing_rejected_alternative_reasoning_needs_revision()
 
 
 if __name__ == "__main__":

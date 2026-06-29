@@ -106,15 +106,22 @@ def design_evidence_check(args: argparse.Namespace) -> dict[str, Any]:
         "technical_design": artifact(args.technical_design),
         "architecture_design": artifact(args.architecture_design),
         "delivery_plan": artifact(args.delivery_plan),
+        "delivery_plan_review": artifact(args.delivery_plan_review),
         "design_review": artifact(args.design_review),
         "docs_quality": artifact(args.docs_quality),
         "reproduction": artifact(args.reproduction),
     }
     if lane in FULL_DOC_LANES:
-        required = ["spec", "technical_design", "architecture_design", "delivery_plan", "design_review", "docs_quality"]
+        required = ["spec", "technical_design", "architecture_design", "delivery_plan", "delivery_plan_review", "design_review", "docs_quality"]
         for key in required:
             if not items[key]["exists"]:
                 blockers.append(f"missing required design artifact: {key}")
+        review_data = load_json(args.delivery_plan_review)
+        review_gate = review_data.get("readiness_gate", {}) if isinstance(review_data, dict) else {}
+        if items["delivery_plan_review"]["exists"] and items["delivery_plan_review"]["decision"] not in {"pass", "ready", "approved"}:
+            blockers.append("delivery_plan_review decision is not pass/ready/approved")
+        if items["delivery_plan_review"]["exists"] and review_gate.get("implementation_allowed") is not True:
+            blockers.append("delivery_plan_review does not allow implementation")
         if items["design_review"]["exists"] and items["design_review"]["decision"] not in {"approved", "pass", "ready"}:
             blockers.append("design_review decision is not approved/pass/ready")
         if items["docs_quality"]["exists"] and items["docs_quality"]["decision"] not in {"pass", "ready"}:
@@ -271,6 +278,7 @@ def permit_payload(args: argparse.Namespace, readiness: dict[str, Any]) -> dict[
             "technical_design": args.technical_design,
             "architecture_design": args.architecture_design,
             "delivery_plan": args.delivery_plan,
+            "delivery_plan_review": args.delivery_plan_review,
             "design_review": args.design_review,
             "docs_quality": args.docs_quality,
             "reproduction": args.reproduction,
@@ -356,6 +364,7 @@ def add_common_assert_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--technical-design", default="")
     parser.add_argument("--architecture-design", default="")
     parser.add_argument("--delivery-plan", default="")
+    parser.add_argument("--delivery-plan-review", default="")
     parser.add_argument("--design-review", default="")
     parser.add_argument("--docs-quality", default="")
     parser.add_argument("--reproduction", default="")

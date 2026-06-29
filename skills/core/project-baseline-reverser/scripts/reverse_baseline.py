@@ -44,8 +44,8 @@ def git_log(repo: Path) -> list[str]:
 def reverse(repo: Path, project: str) -> dict[str, Any]:
     suffixes = files_by_suffix(repo)
     modules = [{"module": name, "reason": "top-level directory"} for name in top_dirs(repo)]
-    tests = [path.as_posix() for path in repo.rglob("*test*") if path.is_file() and not any(part in SKIP for part in path.parts)][:50]
-    configs = [path.as_posix() for path in repo.rglob("*") if path.is_file() and path.suffix.lower() in {".yaml", ".yml", ".toml", ".properties", ".env"} and not any(part in SKIP for part in path.parts)][:50]
+    tests = [path.relative_to(repo).as_posix() for path in repo.rglob("*test*") if path.is_file() and not any(part in SKIP for part in path.parts)][:50]
+    configs = [path.relative_to(repo).as_posix() for path in repo.rglob("*") if path.is_file() and path.suffix.lower() in {".yaml", ".yml", ".toml", ".properties", ".env"} and not any(part in SKIP for part in path.parts)][:50]
     return {
         "schema": "codex-project-baseline-v1",
         "project": project,

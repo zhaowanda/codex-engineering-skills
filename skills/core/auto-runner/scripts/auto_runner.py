@@ -200,6 +200,39 @@ def missing_profile_artifacts(profile: dict[str, Any], out: Path) -> list[str]:
     return [str(item) for item in as_list(profile.get("expected_artifacts")) if not (out / str(item)).exists()]
 
 
+def nested_value(data: dict[str, Any], path: str) -> Any:
+    current: Any = data
+    for part in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
+
+
+def profile_gate_gaps(profile: dict[str, Any], out: Path) -> list[dict[str, Any]]:
+    gaps: list[dict[str, Any]] = []
+    for gate in as_list(profile.get("required_gate_artifacts")):
+        if not isinstance(gate, dict):
+            gaps.append({"artifact": "", "message": "required_gate_artifacts entry is not an object"})
+            continue
+        artifact_name = str(gate.get("artifact") or "")
+        if not artifact_name:
+            gaps.append({"artifact": "", "message": "required gate artifact is missing artifact path"})
+            continue
+        data = read_json(out / artifact_name)
+        if not data:
+            gaps.append({"artifact": artifact_name, "message": "artifact is missing or invalid"})
+            continue
+        accepted = {str(item) for item in as_list(gate.get("accepted_decisions"))}
+        decision = str(data.get("decision") or data.get("status") or "")
+        if accepted and decision and decision not in accepted:
+            gaps.append({"artifact": artifact_name, "message": f"decision {decision} not accepted", "accepted_decisions": sorted(accepted)})
+        readiness_path = str(gate.get("readiness_path") or "")
+        if readiness_path and nested_value(data, readiness_path) != gate.get("readiness_value"):
+            gaps.append({"artifact": artifact_name, "message": f"{readiness_path} is not {gate.get('readiness_value')}"})
+    return gaps
+
+
 def run(
     input_path: Path,
     doc_id: str | None = None,
@@ -437,6 +470,7 @@ def run(
     spec_data = read_json(spec)
     selected_profile = select_workflow_profile(spec_data, bool(repo and project), profile)
     missing_profile = missing_profile_artifacts(selected_profile, out)
+    gate_gaps = profile_gate_gaps(selected_profile, out)
     summary = {
         "schema": SCHEMA,
         "decision": "block" if blockers else "pass",
@@ -450,6 +484,7 @@ def run(
         "workflow_profile": selected_profile,
         "required_gates": selected_profile.get("required_skills", []),
         "missing_profile_artifacts": missing_profile,
+        "profile_gate_gaps": gate_gaps,
         "next_profile_command": selected_profile.get("next_safe_command", ""),
         "blockers": blockers,
         "inspect_status": inspect_status,

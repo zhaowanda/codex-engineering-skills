@@ -110,8 +110,10 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     assert tech["schema"] == "codex-technical-design-v1"
     assert tech["process_flow"]
     assert len(tech["solution_options"]) == 2
+    assert tech["selected_solution"]["rejected_alternative_reasoning"]
     assert arch["schema"] == "codex-architecture-design-v1"
     assert arch["architecture_options"]
+    assert arch["selected_architecture"]["rejected_alternative_reasoning"]
     assert arch["repo_responsibilities"][0]["role"] == "modify"
 
 
@@ -150,13 +152,13 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
             "spec",
             "technical_design",
             "architecture_design",
-            "delivery_plan",
-            "delivery_plan_review",
-            "design_architecture_review",
             "git_worktree_evidence",
             "edit_permit",
         ]:
             write_json(root / f"{name}.json", {"decision": "pass"})
+        write_json(root / "delivery_plan.json", {"decision": "pass"})
+        write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
         write_json(root / "git_worktree_evidence.json", {"decision": "ready"})
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is True
@@ -174,6 +176,18 @@ def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None
         assert "delivery_plan_review.py" in status["next_command"]
 
 
+def test_delivery_runner_blocks_when_profile_gate_readiness_fails() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for name in ["spec", "technical_design", "architecture_design", "delivery_plan", "git_worktree_evidence", "edit_permit"]:
+            write_json(root / f"{name}.json", {"decision": "pass"})
+        write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": False}})
+        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+        assert status["can_implement"] is False
+        assert any(item["source"] == "profile_gate.delivery_plan_review.json" for item in status["blockers"])
+
+
 def run_all() -> None:
     test_spec_normalize_ready_for_design()
     test_spec_blocks_open_questions()
@@ -185,6 +199,7 @@ def run_all() -> None:
     test_delivery_runner_reports_next_stage()
     test_delivery_runner_allows_implementation_when_pre_edit_gates_pass()
     test_delivery_runner_requires_delivery_plan_review_before_git_edit()
+    test_delivery_runner_blocks_when_profile_gate_readiness_fails()
 
 
 if __name__ == "__main__":

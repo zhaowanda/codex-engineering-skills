@@ -22,6 +22,23 @@ profiles:
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
+    required_gate_artifacts:
+      - artifact: spec.json
+        accepted_decisions:
+          - ready_for_design
+          - pass
+      - artifact: technical_design.json
+      - artifact: design_architecture_review.json
+        accepted_decisions:
+          - pass
+          - approved
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
+      - artifact: delivery_plan_review.json
+        accepted_decisions:
+          - pass
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     implementation_allowed_conditions:
       - required artifacts exist
@@ -52,6 +69,24 @@ profiles:
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
+    required_gate_artifacts:
+      - artifact: spec.json
+        accepted_decisions:
+          - ready_for_design
+          - pass
+      - artifact: technical_design.json
+      - artifact: architecture_design.json
+      - artifact: design_architecture_review.json
+        accepted_decisions:
+          - pass
+          - approved
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
+      - artifact: delivery_plan_review.json
+        accepted_decisions:
+          - pass
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     implementation_allowed_conditions:
       - design review passes
@@ -81,6 +116,32 @@ profiles:
       - delivery_plan_review.json
       - frontend_acceptance.json
       - test_evidence_gate.json
+    required_gate_artifacts:
+      - artifact: spec.json
+        accepted_decisions:
+          - ready_for_design
+          - pass
+      - artifact: technical_design.json
+      - artifact: architecture_design.json
+      - artifact: design_architecture_review.json
+        accepted_decisions:
+          - pass
+          - approved
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
+      - artifact: delivery_plan_review.json
+        accepted_decisions:
+          - pass
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
+      - artifact: frontend_acceptance.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: test_evidence_gate.json
+        accepted_decisions:
+          - pass
+          - ready
     next_safe_command: python3 skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py template --out artifacts/REQ-001/frontend_acceptance.json
     implementation_allowed_conditions:
       - frontend acceptance scope is planned
@@ -110,6 +171,28 @@ profiles:
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
+    required_gate_artifacts:
+      - artifact: project_understanding/baseline_quality.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: spec.json
+        accepted_decisions:
+          - ready_for_design
+          - pass
+      - artifact: technical_design.json
+      - artifact: architecture_design.json
+      - artifact: design_architecture_review.json
+        accepted_decisions:
+          - pass
+          - approved
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
+      - artifact: delivery_plan_review.json
+        accepted_decisions:
+          - pass
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     implementation_allowed_conditions:
       - project understanding exists
@@ -140,6 +223,28 @@ profiles:
       - delivery_plan.json
       - delivery_plan_review.json
       - release_gate.json
+    required_gate_artifacts:
+      - artifact: spec.json
+        accepted_decisions:
+          - ready_for_design
+          - pass
+      - artifact: technical_design.json
+      - artifact: architecture_design.json
+      - artifact: design_architecture_review.json
+        accepted_decisions:
+          - pass
+          - approved
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
+      - artifact: delivery_plan_review.json
+        accepted_decisions:
+          - pass
+        readiness_path: readiness_gate.implementation_allowed
+        readiness_value: true
+      - artifact: release_gate.json
+        accepted_decisions:
+          - go
+          - conditional_go
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     implementation_allowed_conditions:
       - data design and rollback are reviewed
@@ -165,6 +270,35 @@ profiles:
       - uat_acceptance.json
       - release_change.json
       - release_gate.json
+    required_gate_artifacts:
+      - artifact: implementation_completion_gate.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: code_review_gate.json
+        accepted_decisions:
+          - pass
+          - approved
+      - artifact: test_evidence_gate.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: environment_promotion.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: uat_acceptance.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: release_change.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: release_gate.json
+        accepted_decisions:
+          - go
+          - conditional_go
     next_safe_command: python3 skills/core/release-evidence-binder/scripts/bind_release.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/release_gate.json
     implementation_allowed_conditions:
       - implementation is complete

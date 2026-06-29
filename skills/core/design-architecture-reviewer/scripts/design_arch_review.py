@@ -140,6 +140,8 @@ def review_options(options: list[Any], selected: dict[str, Any], area: str, labe
         findings.append(finding(area, "medium", f"selected {label} lacks decision criteria", selected, "Record criteria used to choose this option."))
     if selected and not selected.get("tradeoffs"):
         findings.append(finding(area, "medium", f"selected {label} lacks explicit tradeoffs", selected, "Record accepted costs and rejected alternatives."))
+    if selected and not selected.get("rejected_alternative_reasoning"):
+        findings.append(finding(area, "high", f"selected {label} lacks rejected alternative reasoning", selected, "Record why each non-selected option was rejected before implementation."))
 
 
 def review_traceability(req_trace: list[Any], rows: list[Any], area: str, kind: str, findings: list[dict[str, Any]]) -> None:

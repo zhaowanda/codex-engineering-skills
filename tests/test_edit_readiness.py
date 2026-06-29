@@ -67,12 +67,14 @@ def ready_standard_args(root: Path, repo: Path) -> Namespace:
     technical = artifacts / "technical_design.json"
     architecture = artifacts / "architecture_design.json"
     plan = artifacts / "delivery_plan.json"
+    plan_review = artifacts / "delivery_plan_review.json"
     review = artifacts / "design_review.json"
     quality = artifacts / "docs_quality.json"
     write_json(spec_file, {"schema": "spec"})
     write_json(technical, {"schema": "technical"})
     write_json(architecture, {"schema": "architecture"})
     write_json(plan, {"repo_tasks": [{"role": "modify", "paths": ["src/service.py"]}]})
+    write_json(plan_review, {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
     write_json(review, {"decision": "approved"})
     write_json(quality, {"decision": "pass"})
     return Namespace(
@@ -86,6 +88,7 @@ def ready_standard_args(root: Path, repo: Path) -> Namespace:
         technical_design=str(technical),
         architecture_design=str(architecture),
         delivery_plan=str(plan),
+        delivery_plan_review=str(plan_review),
         design_review=str(review),
         docs_quality=str(quality),
         reproduction="",
@@ -113,6 +116,7 @@ class EditReadinessTests(unittest.TestCase):
                 technical_design="",
                 architecture_design="",
                 delivery_plan="",
+                delivery_plan_review="",
                 design_review="",
                 docs_quality="",
                 reproduction="",
@@ -121,6 +125,26 @@ class EditReadinessTests(unittest.TestCase):
             result = edit_readiness.assert_readiness(args)
             self.assertEqual(result["decision"], "blocked")
             self.assertTrue(any("missing required design artifact" in item for item in result["blockers"]))
+
+    def test_standard_requirement_requires_delivery_plan_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = make_repo(root)
+            args = ready_standard_args(root, repo)
+            args.delivery_plan_review = ""
+            result = edit_readiness.assert_readiness(args)
+            self.assertEqual(result["decision"], "blocked")
+            self.assertTrue(any("delivery_plan_review" in item for item in result["blockers"]))
+
+    def test_delivery_plan_review_must_allow_implementation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = make_repo(root)
+            args = ready_standard_args(root, repo)
+            write_json(Path(args.delivery_plan_review), {"decision": "pass", "readiness_gate": {"implementation_allowed": False}})
+            result = edit_readiness.assert_readiness(args)
+            self.assertEqual(result["decision"], "blocked")
+            self.assertTrue(any("delivery_plan_review does not allow implementation" in item for item in result["blockers"]))
 
     def test_permit_and_verify_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -22,6 +23,7 @@ lookup_index = load_module("lookup_index", ROOT / "skills/core/code-index-lookup
 project_onboard = load_module("project_onboard", ROOT / "skills/core/project-onboard/scripts/project_onboard.py")
 docs_governor = load_module("docs_governor", ROOT / "skills/core/docs-governor/scripts/docs_governor.py")
 reverse_baseline = load_module("reverse_baseline", ROOT / "skills/core/project-baseline-reverser/scripts/reverse_baseline.py")
+baseline_quality = load_module("baseline_quality_privacy", ROOT / "skills/core/baseline-quality-governor/scripts/baseline_quality.py")
 project_understand = load_module(
     "project_understand", ROOT / "skills/core/project-understanding-runner/scripts/project_understand.py"
 )
@@ -250,6 +252,27 @@ def test_project_baseline_reverser_generates_summary() -> None:
         assert result["limitations"]
 
 
+def test_baseline_quality_blocks_private_paths_and_secrets() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        baseline = Path(tmp) / "baseline.json"
+        data = {
+            "overview": "Leaked " + "/" + "Users/example/private and token=abc123",
+            "module_hints": [{"module": "src"}],
+            "api_surface_ref": "api_surface.json",
+            "config_surface_ref": "config_surface.json",
+            "dependency_surface_ref": "dependency_surface.json",
+            "test_hints": ["tests/test_app.py"],
+            "risk_hints": ["risk"],
+            "limitations": ["owner review required"],
+            "human_followups": ["confirm"],
+        }
+        baseline.write_text(json.dumps(data), encoding="utf-8")
+        result = baseline_quality.review(baseline)
+        assert result["decision"] == "block"
+        sources = {item["source"] for item in result["blockers"]}
+        assert {"local_path", "secret"}.issubset(sources)
+
+
 def run_all() -> None:
     test_code_index_build_and_lookup()
     test_project_onboard_writes_skill_and_manifest()
@@ -258,6 +281,7 @@ def run_all() -> None:
     test_codex_eng_project_cli_uses_relative_project_assets()
     test_docs_governor_init_and_validate()
     test_project_baseline_reverser_generates_summary()
+    test_baseline_quality_blocks_private_paths_and_secrets()
 
 
 if __name__ == "__main__":

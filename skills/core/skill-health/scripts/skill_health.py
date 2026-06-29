@@ -33,6 +33,7 @@ VALID_STAGES = {
 }
 GATE_MATURITY = {"expert-gate", "advisory-review"}
 PROFILE_SCHEMA = "codex-workflow-profiles-v1"
+STAGE_SCHEMA = "codex-workflow-stages-v1"
 
 
 def parse_frontmatter(text: str) -> dict[str, str]:
@@ -208,12 +209,50 @@ def check(root: Path) -> dict[str, Any]:
             missing_skills = [item for item in required if item not in skill_names]
             if missing_skills:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "profile references unknown skills", "missing_skills": missing_skills})
+            expected_artifacts = {str(item) for item in as_list(profile.get("expected_artifacts"))}
+            gates = as_list(profile.get("required_gate_artifacts"))
+            if not gates:
+                blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required_gate_artifacts is required"})
+            for gate in gates:
+                if not isinstance(gate, dict):
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required_gate_artifacts entries must be objects"})
+                    continue
+                artifact_name = str(gate.get("artifact") or "")
+                if not artifact_name:
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required_gate_artifacts artifact is required"})
+                elif expected_artifacts and artifact_name not in expected_artifacts:
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required gate artifact must be listed in expected_artifacts", "artifact": artifact_name})
+                if "accepted_decisions" in gate and not as_list(gate.get("accepted_decisions")):
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "accepted_decisions must not be empty", "artifact": artifact_name})
+                if bool(gate.get("readiness_path")) != ("readiness_value" in gate):
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "readiness_path and readiness_value must be declared together", "artifact": artifact_name})
             if profile_name == "release_readiness" and "release-evidence-binder" not in required:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "release_readiness must include release-evidence-binder"})
             if profile_name == "frontend_change":
                 for required_skill in ["frontend-acceptance-runner", "test-evidence-gate"]:
                     if required_skill not in required:
                         blockers.append({"source": f"workflow_profile.{profile_name}", "message": f"frontend_change must include {required_skill}"})
+    stage_path = root / "config/workflow-stages.example.yaml"
+    if stage_path.exists():
+        stages_doc = load_restricted_yaml(stage_path)
+        if stages_doc.get("schema") != STAGE_SCHEMA:
+            blockers.append({"source": "config/workflow-stages.example.yaml", "message": f"stage schema must be {STAGE_SCHEMA}"})
+        seen_stages: set[str] = set()
+        seen_artifacts: set[str] = set()
+        for stage in stages_doc.get("stages", []) if isinstance(stages_doc.get("stages"), list) else []:
+            if not isinstance(stage, dict):
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage entries must be objects"})
+                continue
+            name = str(stage.get("name") or "")
+            artifact_name = str(stage.get("artifact") or "")
+            if not name or not artifact_name:
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage name and artifact are required"})
+            if name in seen_stages:
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "duplicate stage name", "stage": name})
+            if artifact_name in seen_artifacts:
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "duplicate stage artifact", "artifact": artifact_name})
+            seen_stages.add(name)
+            seen_artifacts.add(artifact_name)
     return {
         "schema": "codex-skill-health-v1",
         "decision": "block" if blockers else "warn" if warnings else "pass",
