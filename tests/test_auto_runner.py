@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,24 @@ spec = importlib.util.spec_from_file_location("auto_runner", SCRIPT)
 auto_runner = importlib.util.module_from_spec(spec)
 assert spec.loader
 spec.loader.exec_module(auto_runner)
+
+
+def write_workspace_docs_config(docs_root: Path) -> str | None:
+    config_file = ROOT / ".codex-engineering-docs.json"
+    original = config_file.read_text(encoding="utf-8") if config_file.exists() else None
+    config_file.write_text(
+        json.dumps({"schema": "codex-docs-workspace-config-v1", "docs_root": str(docs_root), "git_url": ""}),
+        encoding="utf-8",
+    )
+    return original
+
+
+def restore_workspace_docs_config(original: str | None) -> None:
+    config_file = ROOT / ".codex-engineering-docs.json"
+    if original is None:
+        config_file.unlink(missing_ok=True)
+    else:
+        config_file.write_text(original, encoding="utf-8")
 
 
 def test_auto_runner_generates_core_artifacts() -> None:
@@ -80,6 +99,28 @@ def test_auto_runner_blocks_docs_root_without_git_repo() -> None:
         )
         assert result["docs_readiness"]["decision"] == "block"
         assert any(item["source"] == "docs_git" for item in result["docs_readiness"]["blockers"])
+
+
+def test_auto_runner_uses_configured_docs_root_by_default() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-AUTO-CONFIG.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        original = write_workspace_docs_config(docs_root)
+        try:
+            result = auto_runner.run(
+                input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+                doc_id="REQ-AUTO-CONFIG",
+                title="Order export",
+                out=root / "artifacts",
+            )
+            assert result["docs_readiness"]["decision"] == "pass"
+            assert result["docs_readiness"]["docs_root"] == str(docs_root)
+        finally:
+            restore_workspace_docs_config(original)
 
 
 def test_auto_runner_is_idempotent_without_force() -> None:

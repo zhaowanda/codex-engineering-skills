@@ -31,6 +31,17 @@ delivery docs repository setup
 
 ## Command
 
+Configure the delivery docs repository once per workspace:
+
+```bash
+python3 scripts/docs_governor.py \
+  configure \
+  --docs-root delivery-docs \
+  --git-url git@github.com:your-org/delivery-docs.git
+```
+
+Initialize one delivery doc id in the configured docs repository:
+
 ```bash
 python3 scripts/docs_governor.py \
   init \

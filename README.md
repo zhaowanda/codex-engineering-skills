@@ -114,17 +114,22 @@ python3 scripts/codex_eng.py scenarios --format markdown
 Run the safe one-command workflow:
 
 ```bash
-python3 scripts/codex_eng.py run docs-governor init \
+python3 scripts/codex_eng.py docs configure \
+  --docs-root /tmp/codex-delivery-docs \
+  --git-url git@github.com:your-org/delivery-docs.git
+
+python3 scripts/codex_eng.py docs init \
   --docs-root /tmp/codex-delivery-docs \
   --doc-id REQ-DEMO
 
 python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
   --doc-id REQ-DEMO \
-  --docs-root /tmp/codex-delivery-docs \
   --out /tmp/codex-auto-demo \
   --format human
 ```
+
+Configure the delivery docs repository once per workspace. Later requirements reuse the configured docs repo by `doc_id`; pass `--docs-root` only when overriding the workspace default.
 
 The auto runner ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 

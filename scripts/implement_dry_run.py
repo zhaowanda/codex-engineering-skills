@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
 
 
 SCHEMA = "codex-implement-dry-run-v1"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -18,6 +20,22 @@ def load_json(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def load_docs_config_module() -> Any:
+    path = ROOT / "scripts/docs_config.py"
+    spec = importlib.util.spec_from_file_location("docs_config", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def default_docs_root() -> Path | None:
+    try:
+        return load_docs_config_module().configured_docs_root(ROOT)
+    except Exception:
+        return None
 
 
 def as_list(value: Any) -> list[Any]:
@@ -114,6 +132,8 @@ def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> 
         docs_status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
         if docs_status.get("docs_root"):
             docs_root = Path(str(docs_status["docs_root"]))
+    if not docs_root:
+        docs_root = default_docs_root()
     allowed_files, test_commands, repo_tasks = collect_plan_scope(plan)
     missing_gates: list[str] = []
     _, git_blockers, git_evidence_items = git_ready_for_edit(artifact_dir, git_evidence)

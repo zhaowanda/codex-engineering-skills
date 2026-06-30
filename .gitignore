@@ -3,6 +3,6 @@ __pycache__/
 .venv/
 .codex-artifacts/
 .codex-sandbox/
+.codex-engineering-docs.json
 *.pyc
 *.log
-

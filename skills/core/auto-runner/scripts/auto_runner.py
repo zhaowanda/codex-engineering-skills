@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
@@ -45,6 +46,22 @@ def read_json(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def load_docs_config_module() -> Any:
+    path = ROOT / "scripts/docs_config.py"
+    spec = importlib.util.spec_from_file_location("docs_config", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def default_docs_root() -> Path | None:
+    try:
+        return load_docs_config_module().configured_docs_root(ROOT)
+    except Exception:
+        return None
 
 
 def docs_readiness(docs_root: Path | None, doc_id: str) -> dict[str, Any]:
@@ -551,7 +568,8 @@ def run(
     title = title or default_title(input_path)
     out = (out or default_out(doc_id)).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    docs_status = docs_readiness(docs_root.resolve() if docs_root else None, doc_id)
+    effective_docs_root = docs_root.resolve() if docs_root else default_docs_root()
+    docs_status = docs_readiness(effective_docs_root, doc_id)
     write_json(out / "auto_run_summary.json", {
         "schema": SCHEMA,
         "decision": "in_progress",

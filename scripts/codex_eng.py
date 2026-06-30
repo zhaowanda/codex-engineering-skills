@@ -270,6 +270,12 @@ def main() -> int:
     p_next.add_argument("--artifact-dir", required=True)
     p_next.add_argument("--profile")
     p_next.add_argument("--format", choices=["json", "human"], default="human")
+    p_docs = sub.add_parser("docs")
+    p_docs.add_argument("mode", choices=["configure", "init", "validate"])
+    p_docs.add_argument("--docs-root", required=True)
+    p_docs.add_argument("--doc-id", default="")
+    p_docs.add_argument("--git-url", default="")
+    p_docs.add_argument("--require-git", action="store_true")
     p_implement = sub.add_parser("implement")
     p_implement.add_argument("--artifact-dir", required=True)
     p_implement.add_argument("--docs-root")
@@ -359,6 +365,18 @@ def main() -> int:
             print(stdout, end="")
             print(stderr, end="", file=sys.stderr)
         return 0 if result else code
+    if args.cmd == "docs":
+        command = COMMANDS["docs-governor"] + [args.mode, "--docs-root", args.docs_root]
+        if args.mode in {"init", "validate"}:
+            if not args.doc_id:
+                print("--doc-id is required for docs init/validate", file=sys.stderr)
+                return 2
+            command.extend(["--doc-id", args.doc_id])
+        if args.git_url:
+            command.extend(["--git-url", args.git_url])
+        if args.require_git:
+            command.append("--require-git")
+        return run_command(command)
     if args.cmd == "implement":
         command = ["python3", "scripts/implement_dry_run.py", "--artifact-dir", args.artifact_dir]
         if args.docs_root:

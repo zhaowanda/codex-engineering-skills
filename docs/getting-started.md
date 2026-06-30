@@ -25,14 +25,17 @@ python3 scripts/codex_eng.py scenarios --format markdown
 For normal requirement handling, run one command:
 
 ```bash
-python3 scripts/codex_eng.py run docs-governor init \
+python3 scripts/codex_eng.py docs configure \
+  --docs-root /tmp/codex-delivery-docs \
+  --git-url git@github.com:your-org/delivery-docs.git
+
+python3 scripts/codex_eng.py docs init \
   --docs-root /tmp/codex-delivery-docs \
   --doc-id REQ-DEMO
 
 python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
   --doc-id REQ-DEMO \
-  --docs-root /tmp/codex-delivery-docs \
   --out /tmp/codex-auto-demo \
   --format human
 ```
@@ -45,10 +48,11 @@ python3 scripts/codex_eng.py auto \
   --doc-id REQ-DEMO \
   --repo examples/synthetic-repos/basic-web-service \
   --project basic-web-service \
-  --docs-root /tmp/codex-delivery-docs \
   --out /tmp/codex-auto-demo \
   --format human
 ```
+
+Configure the delivery docs repository once per workspace. Later requirements reuse the configured docs repo by `doc_id`; pass `--docs-root` only when overriding the workspace default.
 
 The runner decides which artifacts are missing, verifies the delivery docs repository, skips existing artifacts unless `--force` is provided, and writes `auto_run_summary.json` with workflow profile selection, profile selection reason, next stage, next command, blockers, and implementation/release readiness.
 

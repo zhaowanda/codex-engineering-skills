@@ -296,15 +296,44 @@ def test_codex_eng_scenarios_cli_runs() -> None:
 
 
 def test_codex_eng_docs_governor_passthrough_runs() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        proc = subprocess.run(
-            [sys.executable, "scripts/codex_eng.py", "run", "docs-governor", "init", "--docs-root", tmp, "--doc-id", "REQ-DOCS"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-        )
-        assert proc.returncode == 0
-        assert "codex-docs-governor-v1" in proc.stdout
+    config_file = ROOT / ".codex-engineering-docs.json"
+    original = config_file.read_text(encoding="utf-8") if config_file.exists() else None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                [sys.executable, "scripts/codex_eng.py", "run", "docs-governor", "init", "--docs-root", tmp, "--doc-id", "REQ-DOCS"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            assert proc.returncode == 0
+            assert "codex-docs-governor-v1" in proc.stdout
+    finally:
+        if original is None:
+            config_file.unlink(missing_ok=True)
+        else:
+            config_file.write_text(original, encoding="utf-8")
+
+
+def test_codex_eng_docs_configure_cli_runs() -> None:
+    config_file = ROOT / ".codex-engineering-docs.json"
+    original = config_file.read_text(encoding="utf-8") if config_file.exists() else None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                [sys.executable, "scripts/codex_eng.py", "docs", "configure", "--docs-root", tmp],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            assert proc.returncode == 0
+            assert "codex-docs-workspace-config-v1" in proc.stdout
+            assert config_file.exists()
+    finally:
+        if original is None:
+            config_file.unlink(missing_ok=True)
+        else:
+            config_file.write_text(original, encoding="utf-8")
 
 
 def test_codex_eng_doctor_cli_runs() -> None:
@@ -452,6 +481,34 @@ def test_implement_dry_run_accepts_git_plan_summary() -> None:
         assert result["git_evidence_count"] == 2
 
 
+def test_implement_dry_run_uses_configured_docs_root_by_default() -> None:
+    config_file = ROOT / ".codex-engineering-docs.json"
+    original = config_file.read_text(encoding="utf-8") if config_file.exists() else None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs_root = root / "delivery-docs"
+            manifest = docs_root / "indexes/REQ-1.manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("{}", encoding="utf-8")
+            subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+            config_file.write_text(json.dumps({"schema": "codex-docs-workspace-config-v1", "docs_root": str(docs_root)}), encoding="utf-8")
+            (root / "delivery_plan.json").write_text(
+                '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "allowed_files": ["src/app.py"] }] }',
+                encoding="utf-8",
+            )
+            (root / "git_worktree_evidence.json").write_text('{ "decision": "ready", "fetched": true, "base_updated": true }', encoding="utf-8")
+            (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+            result = implement_dry_run.run(root)
+            assert result["decision"] == "ready"
+            assert result["docs_readiness"]["docs_root"] == str(docs_root)
+    finally:
+        if original is None:
+            config_file.unlink(missing_ok=True)
+        else:
+            config_file.write_text(original, encoding="utf-8")
+
+
 def test_codex_eng_implement_dry_run_cli_runs() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         proc = subprocess.run(
@@ -500,6 +557,7 @@ def run_all() -> None:
     test_scenario_catalog_documents_supported_development_scenarios()
     test_codex_eng_scenarios_cli_runs()
     test_codex_eng_docs_governor_passthrough_runs()
+    test_codex_eng_docs_configure_cli_runs()
     test_codex_eng_doctor_cli_runs()
     test_codex_eng_doctor_human_cli_runs()
     test_codex_eng_setup_dry_run_cli_runs()
@@ -507,6 +565,9 @@ def run_all() -> None:
     test_implement_dry_run_blocks_missing_gates()
     test_implement_dry_run_allows_scoped_ready_artifacts()
     test_implement_dry_run_requires_git_fetch_and_pull_evidence()
+    test_implement_dry_run_requires_docs_git_repo()
+    test_implement_dry_run_accepts_git_plan_summary()
+    test_implement_dry_run_uses_configured_docs_root_by_default()
     test_codex_eng_implement_dry_run_cli_runs()
     test_benchmark_reports_scenario_coverage_metrics()
 

@@ -234,12 +234,38 @@ def test_codex_eng_project_cli_uses_relative_project_assets() -> None:
 
 
 def test_docs_governor_init_and_validate() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp) / "docs"
-        manifest = docs_governor.init(root, "REQ-1")
-        assert manifest["schema"] == "codex-docs-governor-v1"
-        validation = docs_governor.validate(root, "REQ-1")
-        assert validation["decision"] == "pass"
+    config_file = ROOT / ".codex-engineering-docs.json"
+    original = config_file.read_text(encoding="utf-8") if config_file.exists() else None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "docs"
+            manifest = docs_governor.init(root, "REQ-1")
+            assert manifest["schema"] == "codex-docs-governor-v1"
+            validation = docs_governor.validate(root, "REQ-1")
+            assert validation["decision"] == "pass"
+    finally:
+        if original is None:
+            config_file.unlink(missing_ok=True)
+        else:
+            config_file.write_text(original, encoding="utf-8")
+
+
+def test_docs_governor_configure_writes_workspace_default() -> None:
+    config_file = ROOT / ".codex-engineering-docs.json"
+    original = config_file.read_text(encoding="utf-8") if config_file.exists() else None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            docs_root = Path(tmp) / "delivery-docs"
+            result = docs_governor.configure(docs_root)
+            assert result["schema"] == "codex-docs-workspace-config-v1"
+            assert result["decision"] == "pass"
+            assert config_file.exists()
+            assert docs_root.joinpath(".git").exists()
+    finally:
+        if original is None:
+            config_file.unlink(missing_ok=True)
+        else:
+            config_file.write_text(original, encoding="utf-8")
 
 
 def test_project_baseline_reverser_generates_summary() -> None:
@@ -280,6 +306,7 @@ def run_all() -> None:
     test_project_runner_new_and_legacy_manage_project_assets()
     test_codex_eng_project_cli_uses_relative_project_assets()
     test_docs_governor_init_and_validate()
+    test_docs_governor_configure_writes_workspace_default()
     test_project_baseline_reverser_generates_summary()
     test_baseline_quality_blocks_private_paths_and_secrets()
 
