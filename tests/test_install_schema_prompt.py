@@ -29,6 +29,7 @@ def test_install_skills_dry_run_counts_core_and_templates() -> None:
         assert result["decision"] == "plan"
         assert result["planned_count"] >= 40
         assert "core/spec-governor" in result["planned_skills"]
+        assert "scripts/docs_config.py" in result["planned_runtime_scripts"]
 
 
 def test_default_target_uses_codex_skills_dir() -> None:
@@ -38,11 +39,16 @@ def test_default_target_uses_codex_skills_dir() -> None:
 
 def test_install_skills_copies_to_empty_target() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "skills"
+        codex_home = Path(tmp) / ".codex"
+        target = codex_home / "skills/codex-engineering-skills"
         result = install_skills.install(ROOT, target, ["core"], dry_run=False)
         assert result["decision"] == "pass"
         assert (target / "spec-governor/SKILL.md").exists()
         assert not (target / "core/spec-governor/SKILL.md").exists()
+        assert (target / "scripts/docs_config.py").exists()
+        assert (codex_home / "scripts/docs_config.py").exists()
+        assert "scripts/docs_config.py" in result["copied_runtime_scripts"]
+        assert result["copied_runtime_scripts"].count("scripts/docs_config.py") == 1
 
 
 def test_artifact_schema_inventory_has_many_schemas() -> None:
