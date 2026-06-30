@@ -27,7 +27,9 @@ spec/design/plan
 - Read-only exploration can happen before this gate.
 - Any source/config/test/doc write requires `decision=ready`.
 - Every non-exploratory change needs a stable `doc_id`.
+- Delivery docs root and doc manifest are required before editing; the docs root must be a Git repository.
 - Git evidence must come from `git-worktree-governor` and be `decision=ready`.
+- Git evidence must prove the base branch was fetched and updated with `pull --ff-only`.
 - Current branch must match the Git evidence branch and must not be `master` or `main`.
 - If a delivery state is provided, it must validate for `implementation`.
 - Standard, large, and migration lanes require design-first evidence before editing.
@@ -47,6 +49,8 @@ python3 scripts/edit_readiness.py \
   --doc-id REQ-001-checkout \
   --lane standard_requirement \
   --git-evidence artifacts/git/repo-a-git_baseline_evidence.json \
+  --docs-root /path/to/delivery-docs \
+  --docs-manifest /path/to/delivery-docs/indexes/REQ-001-checkout.manifest.json \
   --delivery-state artifacts/delivery_state.json \
   --spec artifacts/spec.json \
   --technical-design artifacts/technical_design.json \
@@ -67,6 +71,8 @@ python3 scripts/edit_readiness.py \
   --doc-id REQ-001-checkout \
   --lane standard_requirement \
   --git-evidence artifacts/git/repo-a-git_baseline_evidence.json \
+  --docs-root /path/to/delivery-docs \
+  --docs-manifest /path/to/delivery-docs/indexes/REQ-001-checkout.manifest.json \
   --delivery-state artifacts/delivery_state.json \
   --spec artifacts/spec.json \
   --technical-design artifacts/technical_design.json \

@@ -26,6 +26,7 @@ delivery docs repository setup
 - Require stable doc ids for requirement-specific folders.
 - Keep private project docs outside the open-core repository.
 - Validate expected folders and manifests before teams rely on the docs repository.
+- Before implementation, validate docs root with `--require-git`; a plain local folder is not enough.
 - Do not copy secrets, local absolute paths, or private customer data into shareable docs.
 
 ## Command
@@ -43,7 +44,8 @@ Validate:
 python3 scripts/docs_governor.py \
   validate \
   --docs-root delivery-docs \
-  --doc-id REQ-001
+  --doc-id REQ-001 \
+  --require-git
 ```
 
 ## Output

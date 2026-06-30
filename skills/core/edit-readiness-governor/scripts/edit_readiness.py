@@ -97,6 +97,31 @@ def artifact_ready(path: str, accepted: set[str]) -> bool:
     return not decision or decision in accepted
 
 
+def docs_repo_check(args: argparse.Namespace) -> dict[str, Any]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    docs_root_value = str(getattr(args, "docs_root", "") or "")
+    manifest_value = str(getattr(args, "docs_manifest", "") or "")
+    if not docs_root_value:
+        blockers.append("docs_root is required before editing")
+        return {"decision": "blocked", "docs_root": "", "manifest": manifest_value, "blockers": blockers, "warnings": warnings}
+    docs_root = Path(docs_root_value).expanduser()
+    manifest = Path(manifest_value).expanduser() if manifest_value else docs_root / "indexes" / f"{args.doc_id}.manifest.json"
+    if not docs_root.exists():
+        blockers.append("docs_root does not exist")
+    elif not (docs_root / ".git").exists():
+        blockers.append("docs_root must be a git repository")
+    if not manifest.exists():
+        blockers.append("docs manifest is missing")
+    return {
+        "decision": "ready" if not blockers else "blocked",
+        "docs_root": str(docs_root),
+        "manifest": str(manifest),
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def design_evidence_check(args: argparse.Namespace) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -225,6 +250,11 @@ def assert_readiness(args: argparse.Namespace) -> dict[str, Any]:
     current_branch = str(git.get("current_branch") or "")
     if current_branch in DEFAULT_BRANCHES:
         blockers.append("git: current branch is default branch; editing is not allowed")
+    git_evidence_data = load_json(args.git_evidence)
+    if git_evidence_data.get("fetched") is not True:
+        blockers.append("git: fetch evidence is missing")
+    if git_evidence_data.get("base_updated") is not True:
+        blockers.append("git: pull --ff-only evidence is missing")
 
     design = design_evidence_check(args)
     if design.get("decision") != "ready":
@@ -241,6 +271,11 @@ def assert_readiness(args: argparse.Namespace) -> dict[str, Any]:
         blockers.extend(f"state: {item}" for item in state.get("blockers", []))
     warnings.extend(f"state: {item}" for item in state.get("warnings", []))
 
+    docs = docs_repo_check(args)
+    if docs.get("decision") != "ready":
+        blockers.extend(f"docs: {item}" for item in docs.get("blockers", []))
+    warnings.extend(f"docs: {item}" for item in docs.get("warnings", []))
+
     return {
         "schema": "codex-edit-readiness-v1",
         "decision": "ready" if not blockers else "blocked",
@@ -251,6 +286,7 @@ def assert_readiness(args: argparse.Namespace) -> dict[str, Any]:
         "design": design,
         "scope": scope,
         "delivery_state": state,
+        "docs": docs,
         "blockers": blockers,
         "warnings": warnings,
         "next_action": "create edit permit and proceed within scope" if not blockers else "fix blockers before any file write",
@@ -288,6 +324,7 @@ def permit_payload(args: argparse.Namespace, readiness: dict[str, Any]) -> dict[
             "design": readiness.get("design", {}),
             "scope": readiness.get("scope", {}),
             "delivery_state": readiness.get("delivery_state", {}),
+            "docs": readiness.get("docs", {}),
         }),
         "issued_at": iso_z(issued_at),
         "expires_at": iso_z(expires_at),
@@ -300,6 +337,7 @@ def permit_payload(args: argparse.Namespace, readiness: dict[str, Any]) -> dict[
         "design_decision": readiness.get("design", {}).get("decision"),
         "scope_decision": readiness.get("scope", {}).get("decision"),
         "delivery_state_decision": readiness.get("delivery_state", {}).get("decision"),
+        "docs_decision": readiness.get("docs", {}).get("decision"),
     }
     return payload
 
@@ -367,6 +405,8 @@ def add_common_assert_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--delivery-plan-review", default="")
     parser.add_argument("--design-review", default="")
     parser.add_argument("--docs-quality", default="")
+    parser.add_argument("--docs-root", default="")
+    parser.add_argument("--docs-manifest", default="")
     parser.add_argument("--reproduction", default="")
     parser.add_argument("--allowed-file", action="append", default=[])
     parser.add_argument("--out")

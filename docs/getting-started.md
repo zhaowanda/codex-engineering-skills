@@ -25,8 +25,14 @@ python3 scripts/codex_eng.py scenarios --format markdown
 For normal requirement handling, run one command:
 
 ```bash
+python3 scripts/codex_eng.py run docs-governor init \
+  --docs-root /tmp/codex-delivery-docs \
+  --doc-id REQ-DEMO
+
 python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
+  --doc-id REQ-DEMO \
+  --docs-root /tmp/codex-delivery-docs \
   --out /tmp/codex-auto-demo \
   --format human
 ```
@@ -36,13 +42,15 @@ With repository understanding:
 ```bash
 python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
+  --doc-id REQ-DEMO \
   --repo examples/synthetic-repos/basic-web-service \
   --project basic-web-service \
+  --docs-root /tmp/codex-delivery-docs \
   --out /tmp/codex-auto-demo \
   --format human
 ```
 
-The runner decides which artifacts are missing, skips existing artifacts unless `--force` is provided, and writes `auto_run_summary.json` with workflow profile selection, profile selection reason, next stage, next command, blockers, and implementation/release readiness.
+The runner decides which artifacts are missing, verifies the delivery docs repository, skips existing artifacts unless `--force` is provided, and writes `auto_run_summary.json` with workflow profile selection, profile selection reason, next stage, next command, blockers, and implementation/release readiness.
 
 Check the next safe action later:
 
@@ -55,6 +63,8 @@ Preview implementation scope before editing:
 ```bash
 python3 scripts/codex_eng.py implement --artifact-dir /tmp/codex-auto-demo
 ```
+
+Implementation dry-run blocks until the delivery docs manifest exists and Git evidence proves `fetch` plus `pull --ff-only` on the base branch.
 
 The manual steps below are for debugging individual gates, not the normal path.
 

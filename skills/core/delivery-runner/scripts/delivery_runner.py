@@ -50,6 +50,64 @@ def is_pass(data: dict[str, Any]) -> bool:
     return bool(data) and not any(data.get(key) for key in ["blockers", "active_blockers", "missing_evidence"])
 
 
+def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
+    auto_summary = load_json(artifact_dir / "auto_run_summary.json")
+    status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
+    doc_id = str(auto_summary.get("doc_id") or load_json(artifact_dir / "delivery_plan.json").get("doc_id") or "")
+    docs_root_value = str(status.get("docs_root") or "")
+    blockers: list[dict[str, str]] = []
+    if not docs_root_value:
+        blockers.append({"source": "docs_root", "message": "delivery docs repository root is required before implementation"})
+    manifest = ""
+    if docs_root_value:
+        docs_root = Path(docs_root_value)
+        manifest = str(status.get("manifest") or docs_root / "indexes" / f"{doc_id}.manifest.json")
+        if not docs_root.exists():
+            blockers.append({"source": "docs_root", "message": "delivery docs repository root does not exist"})
+        if doc_id and not Path(manifest).exists():
+            blockers.append({"source": "docs_manifest", "message": "delivery docs manifest is missing"})
+        if not (docs_root / ".git").exists():
+            blockers.append({"source": "docs_git", "message": "delivery docs root must be a git repository"})
+    return {
+        "decision": "pass" if not blockers else "block",
+        "doc_id": doc_id,
+        "docs_root": docs_root_value,
+        "manifest": manifest,
+        "blockers": blockers,
+    }
+
+
+def git_edit_readiness(artifact_dir: Path, git_data: dict[str, Any]) -> dict[str, Any]:
+    summary = load_json(artifact_dir / "git_plan_baseline_summary.json")
+    blockers: list[dict[str, Any]] = []
+    evidence_items: list[dict[str, Any]] = []
+    if summary:
+        results = summary.get("results", [])
+        if isinstance(results, list):
+            evidence_items = [item for item in results if isinstance(item, dict)]
+        if summary.get("decision") != "ready":
+            blockers.append({"source": "git_plan_baseline_summary", "message": "git plan baseline summary is not ready"})
+    elif git_data:
+        evidence_items = [git_data]
+    else:
+        blockers.append({"source": "git", "message": "git evidence is missing"})
+
+    for idx, item in enumerate(evidence_items):
+        label = str(item.get("repo_name") or item.get("repo") or f"repo[{idx}]")
+        if item.get("decision") != "ready":
+            blockers.append({"source": "git", "message": f"{label}: git evidence is not ready"})
+        if item.get("fetched") is not True:
+            blockers.append({"source": "git", "message": f"{label}: git fetch evidence is missing"})
+        if item.get("base_updated") is not True:
+            blockers.append({"source": "git", "message": f"{label}: git pull --ff-only evidence is missing"})
+    return {
+        "decision": "ready" if not blockers else "blocked",
+        "summary_present": bool(summary),
+        "evidence_count": len(evidence_items),
+        "blockers": blockers,
+    }
+
+
 def load_auto_runner_module() -> Any:
     path = ROOT / "skills/core/auto-runner/scripts/auto_runner.py"
     spec = importlib.util.spec_from_file_location("auto_runner_profiles", path)
@@ -226,6 +284,12 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
             blockers.append({"source": name, "message": f"blocking decision: {data.get('decision')}"})
     if state.get("blockers"):
         blockers.append({"source": "delivery_state", "message": "delivery state has blockers", "count": len(state.get("blockers", []))})
+    docs_status = docs_readiness(artifact_dir)
+    if docs_status.get("decision") != "pass":
+        blockers.extend(docs_status.get("blockers", []))
+    git_status = git_edit_readiness(artifact_dir, artifacts.get("git", {}))
+    if git_status.get("decision") != "ready":
+        blockers.extend(git_status.get("blockers", []))
     blockers.extend(profile_gate_blockers(profile, artifact_dir))
     next_required_actions = profile_next_actions(profile, artifact_dir)
 
@@ -258,6 +322,8 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "missing_artifacts": missing,
         "blockers": blockers,
         "workflow_profile": profile,
+        "docs_readiness": docs_status,
+        "git_edit_readiness": git_status,
         "profile_missing_artifacts": profile_missing,
         "stage_registry": "config/workflow-stages.example.yaml",
         "next_profile_command": profile.get("next_safe_command", ""),

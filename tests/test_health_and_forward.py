@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import re
@@ -294,6 +295,18 @@ def test_codex_eng_scenarios_cli_runs() -> None:
     assert "codex-scenario-catalog-v1" in proc.stdout
 
 
+def test_codex_eng_docs_governor_passthrough_runs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = subprocess.run(
+            [sys.executable, "scripts/codex_eng.py", "run", "docs-governor", "init", "--docs-root", tmp, "--doc-id", "REQ-DOCS"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        assert proc.returncode == 0
+        assert "codex-docs-governor-v1" in proc.stdout
+
+
 def test_codex_eng_doctor_cli_runs() -> None:
     proc = subprocess.run(
         [sys.executable, "scripts/codex_eng.py", "doctor"],
@@ -354,17 +367,89 @@ def test_implement_dry_run_blocks_missing_gates() -> None:
 def test_implement_dry_run_allows_scoped_ready_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-1.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
         (root / "delivery_plan.json").write_text(
-            '{ "repo_tasks": [{ "role": "modify", "repo": "app", "repo_path": ".", "allowed_files": ["src/app.py"], "test_commands": ["pytest"] }] }',
+            '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "repo": "app", "repo_path": ".", "allowed_files": ["src/app.py"], "test_commands": ["pytest"] }] }',
+            encoding="utf-8",
+        )
+        (root / "git_worktree_evidence.json").write_text('{ "decision": "ready", "fetched": true, "base_updated": true }', encoding="utf-8")
+        (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+        result = implement_dry_run.run(root, docs_root=docs_root)
+        assert result["decision"] == "ready"
+        assert result["can_edit"] is True
+        assert result["docs_readiness"]["decision"] == "pass"
+        assert result["allowed_files"] == ["src/app.py"]
+        assert result["recommended_validation_commands"] == ["pytest"]
+
+
+def test_implement_dry_run_requires_git_fetch_and_pull_evidence() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-1.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        (root / "delivery_plan.json").write_text(
+            '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "allowed_files": ["src/app.py"] }] }',
             encoding="utf-8",
         )
         (root / "git_worktree_evidence.json").write_text('{ "decision": "ready" }', encoding="utf-8")
         (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
-        result = implement_dry_run.run(root)
+        result = implement_dry_run.run(root, docs_root=docs_root)
+        assert result["decision"] == "blocked"
+        assert any("git fetch evidence is missing" in item for item in result["missing_gates"])
+        assert any("git pull --ff-only evidence is missing" in item for item in result["missing_gates"])
+
+
+def test_implement_dry_run_requires_docs_git_repo() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-1.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        (root / "delivery_plan.json").write_text(
+            '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "allowed_files": ["src/app.py"] }] }',
+            encoding="utf-8",
+        )
+        (root / "git_worktree_evidence.json").write_text('{ "decision": "ready", "fetched": true, "base_updated": true }', encoding="utf-8")
+        (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+        result = implement_dry_run.run(root, docs_root=docs_root)
+        assert result["decision"] == "blocked"
+        assert "docs: docs root must be a git repository" in result["missing_gates"]
+
+
+def test_implement_dry_run_accepts_git_plan_summary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-1.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        (root / "delivery_plan.json").write_text(
+            '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "repo": "api", "allowed_files": ["api/app.py"] }, { "role": "modify", "repo": "web", "allowed_files": ["web/app.ts"] }] }',
+            encoding="utf-8",
+        )
+        (root / "git_plan_baseline_summary.json").write_text(
+            json.dumps({
+                "decision": "ready",
+                "results": [
+                    {"decision": "ready", "repo_name": "api", "fetched": True, "base_updated": True},
+                    {"decision": "ready", "repo_name": "web", "fetched": True, "base_updated": True},
+                ],
+            }),
+            encoding="utf-8",
+        )
+        (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+        result = implement_dry_run.run(root, docs_root=docs_root)
         assert result["decision"] == "ready"
-        assert result["can_edit"] is True
-        assert result["allowed_files"] == ["src/app.py"]
-        assert result["recommended_validation_commands"] == ["pytest"]
+        assert result["git_evidence_count"] == 2
 
 
 def test_codex_eng_implement_dry_run_cli_runs() -> None:
@@ -414,12 +499,14 @@ def run_all() -> None:
     test_forward_test_runner_passes_synthetic_case()
     test_scenario_catalog_documents_supported_development_scenarios()
     test_codex_eng_scenarios_cli_runs()
+    test_codex_eng_docs_governor_passthrough_runs()
     test_codex_eng_doctor_cli_runs()
     test_codex_eng_doctor_human_cli_runs()
     test_codex_eng_setup_dry_run_cli_runs()
     test_codex_eng_next_human_cli_runs()
     test_implement_dry_run_blocks_missing_gates()
     test_implement_dry_run_allows_scoped_ready_artifacts()
+    test_implement_dry_run_requires_git_fetch_and_pull_evidence()
     test_codex_eng_implement_dry_run_cli_runs()
     test_benchmark_reports_scenario_coverage_metrics()
 

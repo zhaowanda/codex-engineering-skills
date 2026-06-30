@@ -39,8 +39,47 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert result["profile_selection_score"] > 0
         assert result["profile_selection_confidence"] in {"high", "medium", "low"}
         assert result["profile_selection_candidates"]
+        assert result["docs_readiness"]["decision"] == "block"
         assert result["next_stage"]
         assert result["can_implement"] is False
+
+
+def test_auto_runner_accepts_ready_docs_repo() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-AUTO-DOCS.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = root / "artifacts"
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-DOCS",
+            title="Order export",
+            out=out,
+            docs_root=docs_root,
+        )
+        assert result["docs_readiness"]["decision"] == "pass"
+
+
+def test_auto_runner_blocks_docs_root_without_git_repo() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-AUTO-DOCS.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        out = root / "artifacts"
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-DOCS",
+            title="Order export",
+            out=out,
+            docs_root=docs_root,
+        )
+        assert result["docs_readiness"]["decision"] == "block"
+        assert any(item["source"] == "docs_git" for item in result["docs_readiness"]["blockers"])
 
 
 def test_auto_runner_is_idempotent_without_force() -> None:
@@ -257,6 +296,7 @@ def test_codex_eng_auto_human_output_runs() -> None:
 
 def run_all() -> None:
     test_auto_runner_generates_core_artifacts()
+    test_auto_runner_accepts_ready_docs_repo()
     test_auto_runner_is_idempotent_without_force()
     test_auto_runner_force_regenerates_existing_artifacts()
     test_auto_runner_project_understanding_optional()

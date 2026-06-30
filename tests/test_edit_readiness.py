@@ -54,8 +54,21 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def make_docs_repo(root: Path, doc_id: str) -> Path:
+    docs_root = root / "delivery-docs"
+    docs_root.mkdir()
+    run(["git", "init"], docs_root)
+    run(["git", "config", "user.email", "test@example.com"], docs_root)
+    run(["git", "config", "user.name", "Test User"], docs_root)
+    write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", {"schema": "codex-docs-governor-v1", "doc_id": doc_id})
+    run(["git", "add", "."], docs_root)
+    run(["git", "commit", "-m", "docs init"], docs_root)
+    return docs_root
+
+
 def ready_standard_args(root: Path, repo: Path) -> Namespace:
     artifacts = root / "artifacts"
+    docs_root = make_docs_repo(root, "REQ-1")
     git_result = git_worktree.prepare(repo, "feature/req-1", base_branch="main")
     git_file = artifacts / "git_baseline_evidence.json"
     git_worktree.write_artifact(str(artifacts), git_result)
@@ -83,6 +96,8 @@ def ready_standard_args(root: Path, repo: Path) -> Namespace:
         lane="standard_requirement",
         branch="feature/req-1",
         git_evidence=str(git_file),
+        docs_root=str(docs_root),
+        docs_manifest=str(docs_root / "indexes/REQ-1.manifest.json"),
         delivery_state=str(state_file),
         spec=str(spec_file),
         technical_design=str(technical),
@@ -111,6 +126,8 @@ class EditReadinessTests(unittest.TestCase):
                 lane="standard_requirement",
                 branch="feature/req-missing",
                 git_evidence=str(git_file),
+                docs_root=str(make_docs_repo(root, "REQ-MISSING")),
+                docs_manifest=str(root / "delivery-docs/indexes/REQ-MISSING.manifest.json"),
                 delivery_state="",
                 spec="",
                 technical_design="",
@@ -145,6 +162,30 @@ class EditReadinessTests(unittest.TestCase):
             result = edit_readiness.assert_readiness(args)
             self.assertEqual(result["decision"], "blocked")
             self.assertTrue(any("delivery_plan_review does not allow implementation" in item for item in result["blockers"]))
+
+    def test_requires_docs_git_repo_before_editing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = make_repo(root)
+            args = ready_standard_args(root, repo)
+            plain_docs = root / "plain-docs"
+            write_json(plain_docs / "indexes/REQ-1.manifest.json", {"doc_id": "REQ-1"})
+            args.docs_root = str(plain_docs)
+            args.docs_manifest = str(plain_docs / "indexes/REQ-1.manifest.json")
+            result = edit_readiness.assert_readiness(args)
+            self.assertEqual(result["decision"], "blocked")
+            self.assertTrue(any("docs_root must be a git repository" in item for item in result["blockers"]))
+
+    def test_requires_git_fetch_and_pull_evidence_before_editing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = make_repo(root)
+            args = ready_standard_args(root, repo)
+            write_json(Path(args.git_evidence), {"decision": "ready", "current_branch": "feature/req-1"})
+            result = edit_readiness.assert_readiness(args)
+            self.assertEqual(result["decision"], "blocked")
+            self.assertTrue(any("fetch evidence is missing" in item for item in result["blockers"]))
+            self.assertTrue(any("pull --ff-only evidence is missing" in item for item in result["blockers"]))
 
     def test_permit_and_verify_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

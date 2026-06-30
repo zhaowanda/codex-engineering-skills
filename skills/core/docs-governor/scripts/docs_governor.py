@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +19,15 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 def init(docs_root: Path, doc_id: str) -> dict[str, Any]:
     for directory in DIRS:
         (docs_root / directory).mkdir(parents=True, exist_ok=True)
+    git_initialized = False
+    if not is_git_repo(docs_root):
+        proc = subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True)
+        git_initialized = proc.returncode == 0
     manifest = {
         "schema": "codex-docs-governor-v1",
         "doc_id": doc_id,
         "docs_root": str(docs_root),
+        "git_initialized": git_initialized,
         "human_docs": {
             "spec": f"human/specs/{doc_id}.md",
             "design": f"human/designs/{doc_id}.md",
@@ -39,7 +45,12 @@ def init(docs_root: Path, doc_id: str) -> dict[str, Any]:
     return manifest
 
 
-def validate(docs_root: Path, doc_id: str) -> dict[str, Any]:
+def is_git_repo(path: Path) -> bool:
+    proc = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=path, text=True, capture_output=True)
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def validate(docs_root: Path, doc_id: str, require_git: bool = False) -> dict[str, Any]:
     manifest_path = docs_root / "indexes" / f"{doc_id}.manifest.json"
     blockers: list[dict[str, str]] = []
     for directory in DIRS:
@@ -47,11 +58,17 @@ def validate(docs_root: Path, doc_id: str) -> dict[str, Any]:
             blockers.append({"source": directory, "message": "required docs directory missing"})
     if not manifest_path.exists():
         blockers.append({"source": "manifest", "message": "doc manifest missing"})
+    if require_git:
+        if not docs_root.exists():
+            blockers.append({"source": "docs_root", "message": "docs root missing"})
+        elif not is_git_repo(docs_root):
+            blockers.append({"source": "docs_git", "message": "docs root must be a git repository"})
     return {
         "schema": "codex-docs-governor-validation-v1",
         "decision": "block" if blockers else "pass",
         "blockers": blockers,
         "manifest": str(manifest_path),
+        "git_required": require_git,
     }
 
 
@@ -62,8 +79,9 @@ def main() -> int:
         p = sub.add_parser(cmd)
         p.add_argument("--docs-root", required=True)
         p.add_argument("--doc-id", required=True)
+        p.add_argument("--require-git", action="store_true")
     args = parser.parse_args()
-    result = init(Path(args.docs_root), args.doc_id) if args.cmd == "init" else validate(Path(args.docs_root), args.doc_id)
+    result = init(Path(args.docs_root), args.doc_id) if args.cmd == "init" else validate(Path(args.docs_root), args.doc_id, args.require_git)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") != "block" else 1
 

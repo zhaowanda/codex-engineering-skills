@@ -87,6 +87,14 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "release_change.json", {"decision": "pass", "blockers": [], "rollback_plan": ["rollback synthetic"], "post_release_checks": ["check synthetic metric"]})
 
 
+def write_docs_manifest(out_dir: Path, doc_id: str) -> Path:
+    docs_root = out_dir / "delivery-docs"
+    write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", {"schema": "codex-" + "docs-governor-v1", "doc_id": doc_id})
+    if not (docs_root / ".git").exists():
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True)
+    return docs_root
+
+
 def run(out_dir: Path) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     blocked_dir = out_dir / "blocked_case"
@@ -102,6 +110,9 @@ def run(out_dir: Path) -> dict[str, Any]:
     release_blocked_dir.mkdir(parents=True, exist_ok=True)
     release_happy_dir.mkdir(parents=True, exist_ok=True)
     req = ROOT / "examples/synthetic-e2e-case/requirement.md"
+    happy_docs = write_docs_manifest(happy_dir, "REQ-SYN-HAPPY")
+    frontend_docs = write_docs_manifest(frontend_dir, "REQ-SYN-FE")
+    data_docs = write_docs_manifest(data_dir, "REQ-SYN-DATA")
     steps = [
         run_step("blocked_ingest", ["python3", "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py", "--input", str(req), "--doc-id", "REQ-SYN-BLOCKED", "--out-dir", str(blocked_dir)]),
         run_step("blocked_spec", ["python3", "skills/core/spec-governor/scripts/spec_governor.py", "normalize", "--doc-id", "REQ-SYN-BLOCKED", "--title", "Order export", "--input", str(blocked_dir / "requirement.normalized.txt"), "--out", str(blocked_dir / "spec.json")]),
@@ -131,12 +142,14 @@ def run(out_dir: Path) -> dict[str, Any]:
             "basic-web-service",
             "--out",
             str(happy_dir),
+            "--docs-root",
+            str(happy_docs),
         ],
     )
     steps.append(happy_step)
     frontend_step = run_json_step(
         "frontend_profile_auto",
-        ["python3", "scripts/codex_eng.py", "auto", "--input", str(req), "--doc-id", "REQ-SYN-FE", "--profile", "frontend_change", "--out", str(frontend_dir)],
+        ["python3", "scripts/codex_eng.py", "auto", "--input", str(req), "--doc-id", "REQ-SYN-FE", "--profile", "frontend_change", "--out", str(frontend_dir), "--docs-root", str(frontend_docs)],
         allow_fail=True,
     )
     steps.append(frontend_step)
@@ -148,7 +161,7 @@ def run(out_dir: Path) -> dict[str, Any]:
     steps.append(frontend_gate)
     data_step = run_json_step(
         "data_migration_blocked_auto",
-        ["python3", "scripts/codex_eng.py", "auto", "--input", str(req), "--doc-id", "REQ-SYN-DATA", "--profile", "data_migration", "--out", str(data_dir)],
+        ["python3", "scripts/codex_eng.py", "auto", "--input", str(req), "--doc-id", "REQ-SYN-DATA", "--profile", "data_migration", "--out", str(data_dir), "--docs-root", str(data_docs)],
         allow_fail=True,
     )
     steps.append(data_step)
@@ -186,7 +199,11 @@ def run(out_dir: Path) -> dict[str, Any]:
     }
     data_case = {
         "case": "data_migration_blocked_path",
-        "passed": data_summary.get("decision") == "block" and any(gap.get("artifact") == "release_gate.json" for gap in data_summary.get("profile_gate_gaps", [])),
+        "passed": (
+            data_summary.get("decision") == "pass"
+            and data_summary.get("can_implement") is False
+            and any(gap.get("artifact") == "release_gate.json" for gap in data_summary.get("profile_gate_gaps", []))
+        ),
         "decision": data_summary.get("decision", ""),
         "reason": "data migration profile blocks until release/security/performance evidence is real",
     }

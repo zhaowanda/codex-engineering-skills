@@ -56,28 +56,92 @@ def decision_ready(data: dict[str, Any], accepted: set[str]) -> bool:
     return not any(data.get(key) for key in ["blockers", "active_blockers", "missing_evidence"])
 
 
-def run(artifact_dir: Path) -> dict[str, Any]:
+def docs_ready(docs_root: Path | None, doc_id: str) -> tuple[bool, str, list[str]]:
+    if not docs_root:
+        return False, "", ["docs_root is required"]
+    manifest = docs_root / "indexes" / f"{doc_id}.manifest.json"
+    blockers: list[str] = []
+    if not docs_root.exists():
+        blockers.append("docs_root does not exist")
+    if not manifest.exists():
+        blockers.append("docs manifest is missing")
+    if docs_root.exists() and not (docs_root / ".git").exists():
+        blockers.append("docs root must be a git repository")
+    return not blockers, str(manifest), blockers
+
+
+def git_evidence_ready(git_evidence: dict[str, Any], label: str) -> list[str]:
+    blockers: list[str] = []
+    if not decision_ready(git_evidence, {"ready", "pass"}):
+        blockers.append(f"{label}: git evidence is not ready")
+    if git_evidence and git_evidence.get("fetched") is not True:
+        blockers.append(f"{label}: git fetch evidence is missing")
+    if git_evidence and git_evidence.get("base_updated") is not True:
+        blockers.append(f"{label}: git pull --ff-only evidence is missing")
+    return blockers
+
+
+def git_ready_for_edit(artifact_dir: Path, fallback_evidence: dict[str, Any]) -> tuple[bool, list[str], list[dict[str, Any]]]:
+    summary = load_json(artifact_dir / "git_plan_baseline_summary.json")
+    blockers: list[str] = []
+    evidence_items: list[dict[str, Any]] = []
+    if summary:
+        results = summary.get("results", [])
+        if isinstance(results, list):
+            evidence_items = [item for item in results if isinstance(item, dict)]
+        if summary.get("decision") != "ready":
+            blockers.append("git_plan_baseline_summary.json is not ready")
+    elif fallback_evidence:
+        evidence_items = [fallback_evidence]
+    else:
+        blockers.append("git_worktree_evidence.json")
+    if not evidence_items:
+        blockers.append("git evidence for modify repositories is missing")
+    for idx, item in enumerate(evidence_items):
+        label = str(item.get("repo_name") or item.get("repo") or f"repo[{idx}]")
+        blockers.extend(git_evidence_ready(item, label))
+    return not blockers, blockers, evidence_items
+
+
+def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> dict[str, Any]:
     plan = load_json(artifact_dir / "delivery_plan.json")
     edit_permit = load_json(artifact_dir / "edit_permit.json")
     git_evidence = load_json(artifact_dir / "git_worktree_evidence.json")
     delivery_status = load_json(artifact_dir / "delivery_status.json")
+    auto_summary = load_json(artifact_dir / "auto_run_summary.json")
+    effective_doc_id = doc_id or str(auto_summary.get("doc_id") or plan.get("doc_id") or "")
+    if not docs_root:
+        docs_status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
+        if docs_status.get("docs_root"):
+            docs_root = Path(str(docs_status["docs_root"]))
     allowed_files, test_commands, repo_tasks = collect_plan_scope(plan)
     missing_gates: list[str] = []
-    if not decision_ready(git_evidence, {"ready", "pass"}):
-        missing_gates.append("git_worktree_evidence.json")
+    _, git_blockers, git_evidence_items = git_ready_for_edit(artifact_dir, git_evidence)
+    missing_gates.extend(git_blockers)
     if not decision_ready(edit_permit, {"ready", "pass"}):
         missing_gates.append("edit_permit.json")
     if not plan:
         missing_gates.append("delivery_plan.json")
     if not allowed_files:
         missing_gates.append("delivery_plan.allowed_files")
+    docs_ok, docs_manifest, docs_blockers = docs_ready(docs_root, effective_doc_id)
+    missing_gates.extend(f"docs: {item}" for item in docs_blockers)
     can_edit = not missing_gates and bool(allowed_files)
     return {
         "schema": SCHEMA,
         "artifact_dir": str(artifact_dir),
+        "doc_id": effective_doc_id,
         "decision": "ready" if can_edit else "blocked",
         "dry_run": True,
         "can_edit": can_edit,
+        "docs_readiness": {
+            "decision": "pass" if docs_ok else "block",
+            "docs_root": str(docs_root) if docs_root else "",
+            "manifest": docs_manifest,
+            "blockers": docs_blockers,
+        },
+        "git_requires_fetch_and_ff_pull": True,
+        "git_evidence_count": len(git_evidence_items),
         "allowed_files": allowed_files,
         "forbidden_files": ["files outside delivery_plan.repo_tasks[].allowed_files"],
         "recommended_validation_commands": test_commands,
@@ -91,9 +155,11 @@ def run(artifact_dir: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Dry-run implementation readiness from delivery artifacts")
     parser.add_argument("--artifact-dir", required=True)
+    parser.add_argument("--docs-root")
+    parser.add_argument("--doc-id")
     parser.add_argument("--out")
     args = parser.parse_args()
-    result = run(Path(args.artifact_dir))
+    result = run(Path(args.artifact_dir), Path(args.docs_root) if args.docs_root else None, args.doc_id or "")
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

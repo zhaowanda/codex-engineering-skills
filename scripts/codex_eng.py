@@ -35,6 +35,7 @@ COMMANDS = {
     "deprecation": ["python3", "skills/core/deprecation-governor/scripts/deprecation.py"],
     "roadmap": ["python3", "skills/core/roadmap-governor/scripts/roadmap.py"],
     "docs-readability": ["python3", "skills/core/docs-readability-governor/scripts/docs_readability.py"],
+    "docs-governor": ["python3", "skills/core/docs-governor/scripts/docs_governor.py"],
     "prompt-effectiveness": ["python3", "skills/core/prompt-effectiveness-governor/scripts/prompt_effectiveness.py"],
     "repository-analyze": ["python3", "skills/core/repository-analyzer/scripts/repository_analyzer.py"],
     "api-surface": ["python3", "skills/core/api-surface-extractor/scripts/api_surface.py"],
@@ -110,6 +111,11 @@ def render_auto_human(result: dict[str, Any]) -> str:
         for item in blockers[:5]:
             if isinstance(item, dict):
                 lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
+    docs = result.get("docs_readiness") if isinstance(result.get("docs_readiness"), dict) else {}
+    if docs:
+        lines.append(f"- docs_readiness: {docs.get('decision', '')}")
+        if docs.get("next_command"):
+            lines.append(f"- docs_next_command: {docs.get('next_command', '')}")
     if gate_gaps:
         lines.append("- profile_gate_gaps:")
         for item in gate_gaps[:5]:
@@ -165,6 +171,11 @@ def render_implement_human(result: dict[str, Any]) -> str:
     allowed = result.get("allowed_files") if isinstance(result.get("allowed_files"), list) else []
     commands = result.get("recommended_validation_commands") if isinstance(result.get("recommended_validation_commands"), list) else []
     missing = result.get("missing_gates") if isinstance(result.get("missing_gates"), list) else []
+    docs = result.get("docs_readiness") if isinstance(result.get("docs_readiness"), dict) else {}
+    if docs:
+        lines.append(f"- docs_readiness: {docs.get('decision', '')}")
+        if docs.get("manifest"):
+            lines.append(f"- docs_manifest: {docs.get('manifest', '')}")
     if allowed:
         lines.append("- allowed_files:")
         lines.extend(f"  - {item}" for item in allowed[:10])
@@ -235,6 +246,7 @@ def main() -> int:
     p_auto.add_argument("--project")
     p_auto.add_argument("--out")
     p_auto.add_argument("--profile")
+    p_auto.add_argument("--docs-root")
     p_auto.add_argument("--force", action="store_true")
     p_auto.add_argument("--format", choices=["json", "human"], default="json")
     p_setup = sub.add_parser("setup")
@@ -260,6 +272,8 @@ def main() -> int:
     p_next.add_argument("--format", choices=["json", "human"], default="human")
     p_implement = sub.add_parser("implement")
     p_implement.add_argument("--artifact-dir", required=True)
+    p_implement.add_argument("--docs-root")
+    p_implement.add_argument("--doc-id")
     p_implement.add_argument("--dry-run", action="store_true", default=True)
     p_implement.add_argument("--format", choices=["json", "human"], default="human")
     p_e2e = sub.add_parser("synthetic-e2e")
@@ -275,7 +289,7 @@ def main() -> int:
 
     if args.cmd == "auto":
         command = ["python3", "skills/core/auto-runner/scripts/auto_runner.py", "--input", args.input]
-        for flag in ["doc_id", "title", "repo", "project", "out", "profile"]:
+        for flag in ["doc_id", "title", "repo", "project", "out", "profile", "docs_root"]:
             value = getattr(args, flag)
             if value:
                 command.extend([f"--{flag.replace('_', '-')}", value])
@@ -347,6 +361,10 @@ def main() -> int:
         return 0 if result else code
     if args.cmd == "implement":
         command = ["python3", "scripts/implement_dry_run.py", "--artifact-dir", args.artifact_dir]
+        if args.docs_root:
+            command.extend(["--docs-root", args.docs_root])
+        if args.doc_id:
+            command.extend(["--doc-id", args.doc_id])
         code, stdout, stderr = run_capture(command)
         result = parse_json_text(stdout)
         if args.format == "json":

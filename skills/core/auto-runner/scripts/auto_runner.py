@@ -47,6 +47,37 @@ def read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def docs_readiness(docs_root: Path | None, doc_id: str) -> dict[str, Any]:
+    if not docs_root:
+        return {
+            "schema": "codex-docs-readiness-v1",
+            "decision": "block",
+            "required": True,
+            "docs_root": "",
+            "blockers": [{"source": "docs_root", "message": "delivery docs repository root is required before implementation"}],
+            "next_command": f"python3 skills/core/docs-governor/scripts/docs_governor.py init --docs-root delivery-docs --doc-id {doc_id}",
+        }
+    manifest = docs_root / "indexes" / f"{doc_id}.manifest.json"
+    blockers: list[dict[str, str]] = []
+    if not docs_root.exists():
+        blockers.append({"source": "docs_root", "message": "delivery docs repository root does not exist"})
+    if not manifest.exists():
+        blockers.append({"source": "manifest", "message": "delivery docs manifest is missing"})
+    if docs_root.exists():
+        proc = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=docs_root, text=True, capture_output=True)
+        if proc.returncode != 0 or proc.stdout.strip() != "true":
+            blockers.append({"source": "docs_git", "message": "delivery docs root must be a git repository"})
+    return {
+        "schema": "codex-docs-readiness-v1",
+        "decision": "pass" if not blockers else "block",
+        "required": True,
+        "docs_root": str(docs_root),
+        "manifest": str(manifest),
+        "blockers": blockers,
+        "next_command": f"python3 skills/core/docs-governor/scripts/docs_governor.py init --docs-root {docs_root} --doc-id {doc_id}",
+    }
+
+
 def parse_scalar(value: str) -> Any:
     value = value.strip().strip('"').strip("'")
     if value.lower() == "true":
@@ -151,7 +182,7 @@ def run_if_needed(name: str, output: Path, command: list[str], force: bool, gene
         generated.append(output.name)
 
 
-def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any]) -> list[dict[str, Any]]:
+def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any], include_inspect: bool = True) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
     for step in steps:
         if step.get("skipped"):
@@ -162,9 +193,10 @@ def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any]
             continue
         if step.get("returncode", 0) != 0:
             blockers.append({"source": step.get("name"), "message": "step returned non-zero", "returncode": step.get("returncode")})
-    for item in inspect_status.get("blockers", []) or []:
-        if isinstance(item, dict):
-            blockers.append(item)
+    if include_inspect:
+        for item in inspect_status.get("blockers", []) or []:
+            if isinstance(item, dict):
+                blockers.append(item)
     return blockers
 
 
@@ -512,12 +544,22 @@ def run(
     out: Path | None = None,
     force: bool = False,
     profile: str | None = None,
+    docs_root: Path | None = None,
 ) -> dict[str, Any]:
     input_path = input_path.resolve()
     doc_id = doc_id or default_doc_id(input_path)
     title = title or default_title(input_path)
     out = (out or default_out(doc_id)).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    docs_status = docs_readiness(docs_root.resolve() if docs_root else None, doc_id)
+    write_json(out / "auto_run_summary.json", {
+        "schema": SCHEMA,
+        "decision": "in_progress",
+        "doc_id": doc_id,
+        "title": title,
+        "out_dir": str(out),
+        "docs_readiness": docs_status,
+    })
 
     generated: list[str] = []
     skipped: list[str] = []
@@ -569,6 +611,7 @@ def run(
             "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
             "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
             "required_gates": selected_profile.get("required_skills", []),
+            "docs_readiness": docs_status,
             "missing_profile_artifacts": missing_profile,
             "profile_gate_gaps": gate_gaps,
             "next_profile_command": selected_profile.get("next_safe_command", ""),
@@ -802,7 +845,10 @@ def run(
         except Exception:
             inspect_status = {}
 
-    blockers = collect_blockers(steps, inspect_status)
+    blockers = collect_blockers(steps, inspect_status, include_inspect=False)
+    readiness_blockers = [item for item in inspect_status.get("blockers", []) or [] if isinstance(item, dict)]
+    if docs_status.get("decision") == "block":
+        blockers.extend(docs_status.get("blockers", []))
     missing_profile = missing_profile_artifacts(selected_profile, out)
     gate_gaps = profile_gate_gaps(selected_profile, out)
     summary = {
@@ -822,6 +868,8 @@ def run(
         "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
         "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
         "required_gates": selected_profile.get("required_skills", []),
+        "docs_readiness": docs_status,
+        "readiness_blockers": readiness_blockers,
         "missing_profile_artifacts": missing_profile,
         "profile_gate_gaps": gate_gaps,
         "next_profile_command": selected_profile.get("next_safe_command", ""),
@@ -846,6 +894,7 @@ def main() -> int:
     parser.add_argument("--project")
     parser.add_argument("--out")
     parser.add_argument("--profile")
+    parser.add_argument("--docs-root")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     result = run(
@@ -857,6 +906,7 @@ def main() -> int:
         out=Path(args.out) if args.out else None,
         force=args.force,
         profile=args.profile,
+        docs_root=Path(args.docs_root) if args.docs_root else None,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

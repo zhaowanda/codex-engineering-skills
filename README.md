@@ -114,13 +114,19 @@ python3 scripts/codex_eng.py scenarios --format markdown
 Run the safe one-command workflow:
 
 ```bash
+python3 scripts/codex_eng.py run docs-governor init \
+  --docs-root /tmp/codex-delivery-docs \
+  --doc-id REQ-DEMO
+
 python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
+  --doc-id REQ-DEMO \
+  --docs-root /tmp/codex-delivery-docs \
   --out /tmp/codex-auto-demo \
   --format human
 ```
 
-The auto runner ingests the requirement, selects a workflow profile, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
+The auto runner ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
 Check the next safe action later:
 
@@ -133,6 +139,8 @@ Preview implementation scope before editing:
 ```bash
 python3 scripts/codex_eng.py implement --artifact-dir /tmp/codex-auto-demo
 ```
+
+Implementation dry-run requires delivery docs readiness plus Git evidence that the target repo fetched the remote and updated the base branch with `pull --ff-only`.
 
 Default target: `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 
