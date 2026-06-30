@@ -94,6 +94,7 @@ def render_auto_human(result: dict[str, Any]) -> str:
     profile = result.get("workflow_profile") if isinstance(result.get("workflow_profile"), dict) else {}
     reason = result.get("profile_selection_reason") if isinstance(result.get("profile_selection_reason"), dict) else {}
     blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
+    readiness_blockers = result.get("readiness_blockers") if isinstance(result.get("readiness_blockers"), list) else []
     gate_gaps = result.get("profile_gate_gaps") if isinstance(result.get("profile_gate_gaps"), list) else []
     lines = [
         "Codex auto summary",
@@ -109,6 +110,11 @@ def render_auto_human(result: dict[str, Any]) -> str:
     if blockers:
         lines.append("- blockers:")
         for item in blockers[:5]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
+    if readiness_blockers:
+        lines.append("- readiness_blockers:")
+        for item in readiness_blockers[:5]:
             if isinstance(item, dict):
                 lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
     docs = result.get("docs_readiness") if isinstance(result.get("docs_readiness"), dict) else {}

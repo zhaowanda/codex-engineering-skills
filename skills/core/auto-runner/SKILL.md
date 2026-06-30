@@ -24,6 +24,10 @@ user requirement
 
 - Default behavior is read-only analysis and artifact generation.
 - Do not create Git branches, edit business source files, commit, deploy, or release.
+- After receiving a requirement, run this read-only workflow before any source/config/test write.
+- Implementation may start only when delivery inspection reports `can_implement=true`.
+- `can_implement=true` requires technical design, architecture design, design review, delivery plan review, Git worktree evidence with fetch plus `pull --ff-only`, and edit permit readiness.
+- If a user asks to implement immediately from a requirement, stop and run this workflow first; do not edit code from requirement intake alone.
 - Skip existing artifacts unless `--force` is provided.
 - Run project understanding only when both `--repo` and `--project` are provided.
 - Always finish by running delivery inspection and writing `auto_run_summary.json`.
