@@ -8,6 +8,7 @@ from typing import Any
 
 
 SCHEMA = "codex-scenario-catalog-v1"
+PRE_EDIT_GATE = "Before editing, require technical_design.json, architecture_design.json, design_architecture_review.json with implementation_allowed=true, delivery_plan_review.json with implementation_allowed=true, Git fetch plus pull --ff-only evidence, and edit_permit.json."
 
 SCENARIOS: list[dict[str, Any]] = [
     {
@@ -16,8 +17,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A small user request arrives as one sentence or a short chat message.",
         "command": "python3 scripts/codex_eng.py auto --input requirement.md --out /tmp/codex-auto",
         "expected_profile": "small_feature",
-        "evidence": ["auto_run_summary.json", "spec.json", "delivery_plan_review.json"],
-        "next_step": "Read auto_run_summary.json for the selected profile, blockers, and next safe command.",
+        "evidence": ["auto_run_summary.json", "technical_design.json", "architecture_design.json", "delivery_plan_review.json"],
+        "next_step": "Read auto_run_summary.json for next_stage, readiness_blockers, and next_command. " + PRE_EDIT_GATE,
     },
     {
         "id": "long_prd",
@@ -26,7 +27,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "command": "python3 scripts/codex_eng.py auto --input prd.md --out /tmp/codex-auto",
         "expected_profile": "small_feature",
         "evidence": ["spec.json", "technical_design.json", "architecture_design.json", "delivery_plan.json"],
-        "next_step": "Resolve open questions first; otherwise continue with the next command in auto_run_summary.json.",
+        "next_step": "Resolve open questions first; otherwise continue only with auto_run_summary.next_command. " + PRE_EDIT_GATE,
     },
     {
         "id": "bugfix",
@@ -34,8 +35,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A defect or regression needs a lightweight but gated fix path.",
         "command": "python3 scripts/codex_eng.py auto --input bug.md --profile bugfix --out /tmp/codex-auto",
         "expected_profile": "bugfix",
-        "evidence": ["spec.json", "technical_design.json", "delivery_plan_review.json"],
-        "next_step": "Add reproduction, Git readiness, edit permit, implementation, review, and test evidence before release.",
+        "evidence": ["spec.json", "technical_design.json", "architecture_design.json", "delivery_plan_review.json"],
+        "next_step": "Add reproduction evidence, then follow the pre-edit gate before any fix. " + PRE_EDIT_GATE,
     },
     {
         "id": "frontend_change",
@@ -44,7 +45,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "command": "python3 scripts/codex_eng.py auto --input ui.md --profile frontend_change --out /tmp/codex-auto",
         "expected_profile": "frontend_change",
         "evidence": ["frontend_acceptance.json", "test_evidence_gate.json", "auto_run_summary.json"],
-        "next_step": "Replace template browser evidence with real frontend acceptance before review or release.",
+        "next_step": "Replace template browser evidence with real frontend acceptance before review or release. " + PRE_EDIT_GATE,
     },
     {
         "id": "cross_repo_api",
@@ -52,8 +53,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A backend API, route contract, producer/consumer boundary, or existing repository context matters.",
         "command": "python3 scripts/codex_eng.py auto --input api.md --repo /path/to/repo --project project-name --out /tmp/codex-auto",
         "expected_profile": "cross_repo_api",
-        "evidence": ["project_understanding/baseline_quality.json", "technical_design.json", "delivery_plan_review.json"],
-        "next_step": "Use project understanding and traceability evidence before implementation.",
+        "evidence": ["project_understanding/baseline_quality.json", "technical_design.json", "architecture_design.json", "delivery_plan_review.json"],
+        "next_step": "Use project understanding and traceability evidence before implementation. " + PRE_EDIT_GATE,
     },
     {
         "id": "data_migration",
@@ -62,7 +63,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "command": "python3 scripts/codex_eng.py auto --input data.md --profile data_migration --out /tmp/codex-auto",
         "expected_profile": "data_migration",
         "evidence": ["configuration_readiness.json", "data_security_review.json", "performance_review.json", "release_gate.json"],
-        "next_step": "Complete real security, performance, configuration, rollback, and release evidence before implementation/release.",
+        "next_step": "Complete real security, performance, configuration, rollback, and release evidence before implementation/release. " + PRE_EDIT_GATE,
     },
     {
         "id": "release_readiness",
@@ -111,6 +112,7 @@ def render_markdown() -> str:
         "",
         "For normal requirement handling, prefer `python3 scripts/codex_eng.py auto --input requirement.md` first.",
         "Use explicit `--profile` only when the scenario is already known or the automatic profile choice needs to be constrained.",
+        f"Pre-edit gate: {PRE_EDIT_GATE}",
     ])
     return "\n".join(lines) + "\n"
 
