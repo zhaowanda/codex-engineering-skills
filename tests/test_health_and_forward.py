@@ -182,6 +182,8 @@ def test_docs_describe_full_pre_edit_gate() -> None:
         "implementation_allowed=true",
         "pull --ff-only",
         "edit_permit",
+        "write_guard_snapshot",
+        "write_guard_audit",
     ]
     for path in paths:
         text = path.read_text(encoding="utf-8")
@@ -311,6 +313,8 @@ def test_scenario_catalog_documents_supported_development_scenarios() -> None:
             assert "architecture_design.json" in next_step
             assert "pull --ff-only" in next_step
             assert "edit_permit.json" in next_step
+            assert "write_guard_snapshot.json" in next_step
+            assert "write_guard_audit.json" in next_step
 
 
 def test_codex_eng_scenarios_cli_runs() -> None:
