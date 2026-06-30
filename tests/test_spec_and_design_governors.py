@@ -91,6 +91,60 @@ def test_spec_adds_expert_quality_fields() -> None:
     assert validation["decision"] == "pass"
 
 
+def test_spec_handles_one_line_request_with_inferred_acceptance() -> None:
+    spec = spec_governor.normalize("REQ-ONE", "Checkout copy", "Change checkout button text to Pay now.")
+    assert spec["lane"] == "small_change"
+    assert spec["requirements"][0]["summary"] == "Change checkout button text to Pay now."
+    assert spec["acceptance_criteria"][0]["source_evidence"] == "inferred from first line"
+    assert spec["source"]["line_count"] == 1
+
+
+def test_spec_handles_long_prd_without_collapsing_traceability() -> None:
+    lines = [
+        "Goal: reduce manual operations.",
+        "Req: Admin exports filtered orders.",
+        "Req: Operator reviews export history.",
+        "Req: Customer service audits export failures.",
+        "Rule: only admin can export filtered results.",
+        "Rule: operators can view export history only.",
+        "AC: exported file contains order id and status.",
+        "AC: non-admin cannot export filtered results.",
+        "Risk: large exports may be slow.",
+        "Out of scope: scheduled exports.",
+    ]
+    lines.extend(f"Detail {idx}: preserve existing report behavior." for idx in range(1, 28))
+    spec = spec_governor.normalize("REQ-LONG", "Long order export PRD", "\n".join(lines))
+    assert spec["lane"] == "large_prd"
+    assert len(spec["requirements"]) == 3
+    assert len(spec["business_rules"]) >= 2
+    assert len(spec["source_trace"]) > 30
+    assert spec["risks"]
+    assert spec["scope"]["out_of_scope"] == ["scheduled exports."]
+
+
+def test_spec_exposes_complex_multi_impact_requirements() -> None:
+    text = """
+    Goal: reduce failed payment support work.
+    Scenario: Admin reviews payment export failures from the dashboard page.
+    Req: Add an API endpoint for payment export failures.
+    Req: Add a dashboard page for admins.
+    Req: Add a database migration for failure reason and retry count.
+    Rule: only admin role can access payment failure data.
+    Rule: export must finish within the existing latency budget.
+    AC: API returns payment failure rows.
+    AC: dashboard page shows retry count.
+    AC: non-admin cannot view payment failure data.
+    AC: export latency remains within the performance budget.
+    Risk: payment data may contain sensitive fields.
+    """
+    spec = spec_governor.normalize("REQ-COMPLEX", "Payment failure dashboard", text)
+    impacts = {item["area"] for item in spec["impact_surface"]}
+    assert {"api", "ui", "data", "permission", "performance", "security"}.issubset(impacts)
+    assert spec["data_classification"]["requires_security_review"] is True
+    assert spec["permission_scope"]["negative_cases_required"] is True
+    assert spec["negative_acceptance_criteria"]
+
+
 def test_spec_blocks_permission_requirement_without_negative_acceptance() -> None:
     text = """
     Req: Admin exports filtered orders.
@@ -193,6 +247,9 @@ def run_all() -> None:
     test_spec_blocks_open_questions()
     test_spec_extracts_multiple_requirements_scope_risks_and_questions()
     test_spec_adds_expert_quality_fields()
+    test_spec_handles_one_line_request_with_inferred_acceptance()
+    test_spec_handles_long_prd_without_collapsing_traceability()
+    test_spec_exposes_complex_multi_impact_requirements()
     test_spec_blocks_permission_requirement_without_negative_acceptance()
     test_technical_and_architecture_design_render_core_sections()
     test_project_understanding_informs_design_and_architecture()

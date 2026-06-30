@@ -176,24 +176,73 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
-def select_workflow_profile(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> dict[str, Any]:
+def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     profiles = load_profile_registry()
     if explicit_profile and explicit_profile in profiles:
-        return profiles[explicit_profile]
+        return profiles[explicit_profile], {
+            "mode": "explicit_profile",
+            "selected_profile": explicit_profile,
+            "reason": "Profile was explicitly requested.",
+        }
     lane = str(spec.get("lane") or "")
     impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
     if has_repo and "cross_repo_api" in profiles:
-        return profiles["cross_repo_api"]
-    if "ui" in impacts and "frontend_change" in profiles:
-        return profiles["frontend_change"]
-    if "api" in impacts and "cross_repo_api" in profiles:
-        return profiles["cross_repo_api"]
-    if "data" in impacts and "data_migration" in profiles:
-        return profiles["data_migration"]
+        return profiles["cross_repo_api"], {
+            "mode": "repo_context",
+            "selected_profile": "cross_repo_api",
+            "reason": "Project understanding was requested, so cross-repo/API contract gates are required.",
+            "lane": lane,
+            "impacts": sorted(impacts),
+        }
+    if lane in {"bugfix", "hotfix"}:
+        for profile in profiles.values():
+            if lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
+                profile_name = str(profile.get("name") or "")
+                return profile, {
+                    "mode": "lane",
+                    "selected_profile": profile_name,
+                    "reason": f"Spec lane {lane} takes precedence over impact routing for defect containment.",
+                    "lane": lane,
+                    "impacts": sorted(impacts),
+                }
+    priority = [
+        ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
+        ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
+        ("api", "cross_repo_api", "API changes require contract and traceability gates."),
+        ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
+    ]
+    for impact, profile_name, reason in priority:
+        if impact in impacts and profile_name in profiles:
+            return profiles[profile_name], {
+                "mode": "impact_surface",
+                "selected_profile": profile_name,
+                "reason": reason,
+                "matched_impact": impact,
+                "lane": lane,
+                "impacts": sorted(impacts),
+            }
     for profile in profiles.values():
         if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
-            return profile
-    return profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
+            profile_name = str(profile.get("name") or "")
+            return profile, {
+                "mode": "lane",
+                "selected_profile": profile_name,
+                "reason": f"Spec lane {lane} is declared in profile trigger_lanes.",
+                "lane": lane,
+                "impacts": sorted(impacts),
+            }
+    fallback = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
+    return fallback, {
+        "mode": "fallback",
+        "selected_profile": str(fallback.get("name") or "small_feature"),
+        "reason": "No explicit, repository, impact, or lane trigger matched; using default small feature workflow.",
+        "lane": lane,
+        "impacts": sorted(impacts),
+    }
+
+
+def select_workflow_profile(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> dict[str, Any]:
+    return select_workflow_profile_with_reason(spec, has_repo, explicit_profile)[0]
 
 
 def missing_profile_artifacts(profile: dict[str, Any], out: Path) -> list[str]:
@@ -443,7 +492,13 @@ def run(
     steps: list[dict[str, Any]] = []
     explicit_profiles = load_profile_registry()
     selected_profile = explicit_profiles.get(profile, {}) if profile else {}
+    profile_selection_reason: dict[str, Any] = {}
     if selected_profile.get("profile_stage_mode") == "release_only":
+        profile_selection_reason = {
+            "mode": "explicit_profile",
+            "selected_profile": str(selected_profile.get("name") or profile or ""),
+            "reason": "Release-only profile was explicitly requested.",
+        }
         run_registry_artifact_steps(selected_profile, out, force, generated, skipped, steps)
         delivery_status = out / "delivery_status.json"
         inspect_result = run_command(
@@ -476,6 +531,7 @@ def run(
             "skipped_artifacts": skipped,
             "steps": steps,
             "workflow_profile": selected_profile,
+            "profile_selection_reason": profile_selection_reason,
             "required_gates": selected_profile.get("required_skills", []),
             "missing_profile_artifacts": missing_profile,
             "profile_gate_gaps": gate_gaps,
@@ -558,7 +614,7 @@ def run(
         steps,
     )
     spec_data = read_json(spec)
-    selected_profile = select_workflow_profile(spec_data, bool(repo and project), profile)
+    selected_profile, profile_selection_reason = select_workflow_profile_with_reason(spec_data, bool(repo and project), profile)
 
     technical = out / "technical_design.json"
     technical_command = ["python3", "skills/core/technical-design-governor/scripts/technical_design.py", "--spec", str(spec), "--out", str(technical)]
@@ -724,6 +780,7 @@ def run(
         "skipped_artifacts": skipped,
         "steps": steps,
         "workflow_profile": selected_profile,
+        "profile_selection_reason": profile_selection_reason,
         "required_gates": selected_profile.get("required_skills", []),
         "missing_profile_artifacts": missing_profile,
         "profile_gate_gaps": gate_gaps,

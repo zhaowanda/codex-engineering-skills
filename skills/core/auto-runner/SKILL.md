@@ -57,4 +57,4 @@ python3 scripts/codex_eng.py auto --input requirement.md
 
 The output uses schema `codex-auto-runner-summary-v1`.
 
-The artifact reports doc id, output directory, executed steps, generated artifacts, skipped artifacts, blockers, inspect status, next stage, next command, and implementation/release readiness.
+The artifact reports doc id, output directory, executed steps, generated artifacts, skipped artifacts, workflow profile, profile selection reason, blockers, inspect status, next stage, next command, and implementation/release readiness.

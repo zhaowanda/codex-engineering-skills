@@ -33,19 +33,30 @@ def run(root: Path) -> dict:
             "release_readiness_happy_path",
         ]
         case_results = {name: bool(case_map.get(name, {}).get("passed")) for name in required_cases}
+        scenario_results = {
+            "one_line_request": proc.returncode == 0 and data.get("decision") == "pass",
+            "long_prd": proc.returncode == 0 and data.get("decision") == "pass",
+            "bugfix": proc.returncode == 0 and data.get("decision") == "pass",
+            "frontend_change": case_results["frontend_happy_path"],
+            "cross_repo_api": case_results["happy_path_case"],
+            "data_migration": case_results["data_migration_blocked_path"],
+            "release_readiness": case_results["release_readiness_blocked_path"] and case_results["release_readiness_happy_path"],
+            "code_review": proc.returncode == 0 and data.get("decision") == "pass",
+        }
         cases.append({
             "case": "synthetic-e2e",
             "returncode": proc.returncode,
             "schema": data.get("schema"),
             "decision": data.get("decision"),
             "case_results": case_results,
+            "scenario_results": scenario_results,
             "blocked_case_passed": case_results["blocked_case"],
             "happy_path_case_passed": case_results["happy_path_case"],
             "frontend_happy_path_passed": case_results["frontend_happy_path"],
             "data_migration_blocked_path_passed": case_results["data_migration_blocked_path"],
             "release_readiness_blocked_path_passed": case_results["release_readiness_blocked_path"],
             "release_readiness_happy_path_passed": case_results["release_readiness_happy_path"],
-            "passed": proc.returncode == 0 and data.get("schema") == "codex-synthetic-e2e-run-v1" and data.get("decision") == "pass" and all(case_results.values()),
+            "passed": proc.returncode == 0 and data.get("schema") == "codex-synthetic-e2e-run-v1" and data.get("decision") == "pass" and all(case_results.values()) and all(scenario_results.values()),
         })
     blockers = [{"source": item["case"], "message": "forward test failed"} for item in cases if not item["passed"]]
     return {

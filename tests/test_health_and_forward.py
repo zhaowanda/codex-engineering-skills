@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
+import sys
 import re
 import tempfile
 from pathlib import Path
@@ -61,6 +63,8 @@ skill_health = load_module("skill_health", ROOT / "skills/core/skill-health/scri
 overlay_health = load_module("overlay_health", ROOT / "skills/core/overlay-health/scripts/overlay_health.py")
 human_doc_review = load_module("human_doc_review", ROOT / "skills/core/human-doc-reviewer/scripts/human_doc_review.py")
 forward_test = load_module("forward_test", ROOT / "skills/core/forward-test-runner/scripts/forward_test.py")
+scenario_catalog = load_module("scenario_catalog", ROOT / "scripts/scenario_catalog.py")
+benchmark = load_module("benchmark", ROOT / "skills/core/benchmark-governor/scripts/benchmark.py")
 
 
 def test_skill_health_runs_on_repo() -> None:
@@ -257,6 +261,57 @@ def test_forward_test_runner_passes_synthetic_case() -> None:
     assert result["cases"][0]["passed"] is True
     assert result["cases"][0]["blocked_case_passed"] is True
     assert result["cases"][0]["happy_path_case_passed"] is True
+    assert all(result["cases"][0]["scenario_results"].values())
+
+
+def test_scenario_catalog_documents_supported_development_scenarios() -> None:
+    result = scenario_catalog.catalog()
+    scenario_ids = {item["id"] for item in result["scenarios"]}
+    assert {
+        "one_line_request",
+        "long_prd",
+        "bugfix",
+        "frontend_change",
+        "cross_repo_api",
+        "data_migration",
+        "release_readiness",
+        "code_review",
+    }.issubset(scenario_ids)
+    guide = (ROOT / "docs/scenario-guide.md").read_text(encoding="utf-8")
+    for scenario_id in scenario_ids:
+        assert scenario_id in guide
+
+
+def test_codex_eng_scenarios_cli_runs() -> None:
+    proc = subprocess.run(
+        [sys.executable, "scripts/codex_eng.py", "scenarios"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 0
+    assert "codex-scenario-catalog-v1" in proc.stdout
+
+
+def test_codex_eng_doctor_cli_runs() -> None:
+    proc = subprocess.run(
+        [sys.executable, "scripts/codex_eng.py", "doctor"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 0
+    assert "codex-doctor-v1" in proc.stdout
+
+
+def test_benchmark_reports_scenario_coverage_metrics() -> None:
+    result = benchmark.report(ROOT)
+    metrics = result["metrics"]
+    assert result["decision"] == "pass"
+    assert metrics["workflow_profile_count"] >= 6
+    assert metrics["scenario_catalog_count"] >= 8
+    assert metrics["documented_scenario_count"] == metrics["scenario_catalog_count"]
+    assert metrics["forward_tested_scenario_count"] >= 8
 
 
 def run_all() -> None:
@@ -276,6 +331,10 @@ def run_all() -> None:
     test_human_doc_review_detects_local_path()
     test_human_doc_review_warns_thin_doc()
     test_forward_test_runner_passes_synthetic_case()
+    test_scenario_catalog_documents_supported_development_scenarios()
+    test_codex_eng_scenarios_cli_runs()
+    test_codex_eng_doctor_cli_runs()
+    test_benchmark_reports_scenario_coverage_metrics()
 
 
 if __name__ == "__main__":

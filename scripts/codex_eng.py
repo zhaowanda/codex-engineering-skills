@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,42 @@ def run_command(args: list[str]) -> int:
     return proc.returncode
 
 
+def run_json_step(name: str, args: list[str]) -> dict[str, Any]:
+    proc = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
+    data: Any = {}
+    try:
+        data = json.loads(proc.stdout)
+    except Exception:
+        data = {}
+    return {
+        "name": name,
+        "command": args,
+        "returncode": proc.returncode,
+        "passed": proc.returncode == 0,
+        "schema": data.get("schema") if isinstance(data, dict) else "",
+        "decision": data.get("decision") if isinstance(data, dict) else "",
+        "stdout_tail": proc.stdout[-1000:],
+        "stderr_tail": proc.stderr[-1000:],
+    }
+
+
+def doctor() -> dict[str, Any]:
+    checks = [
+        run_json_step("skill_health", ["python3", "scripts/skill_health.py", "--root", "."]),
+        run_json_step("privacy_scan", ["python3", "scripts/privacy_scan.py", "--root", ".", "--patterns", "config/private-patterns.example.yaml"]),
+        run_json_step("forward_test", ["python3", "skills/core/forward-test-runner/scripts/forward_test.py", "--root", "."]),
+        run_json_step("benchmark", ["python3", "skills/core/benchmark-governor/scripts/benchmark.py", "--root", "."]),
+    ]
+    blockers = [{"source": item["name"], "message": "doctor check failed"} for item in checks if not item["passed"]]
+    return {
+        "schema": "codex-doctor-v1",
+        "decision": "block" if blockers else "pass",
+        "checks": checks,
+        "blockers": blockers,
+        "next_action": "Fix failed checks before publishing or relying on the local skill set." if blockers else "Skills are ready for local use.",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Unified CLI for Codex engineering skills")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -79,6 +116,9 @@ def main() -> int:
     p_inspect.add_argument("--profile")
     p_e2e = sub.add_parser("synthetic-e2e")
     p_e2e.add_argument("--out-dir", required=True)
+    p_scenarios = sub.add_parser("scenarios")
+    p_scenarios.add_argument("--format", choices=["json", "markdown"], default="json")
+    p_doctor = sub.add_parser("doctor")
     p_passthrough = sub.add_parser("run")
     p_passthrough.add_argument("tool", choices=sorted(COMMANDS))
     p_passthrough.add_argument("args", nargs=argparse.REMAINDER)
@@ -123,6 +163,12 @@ def main() -> int:
         return run_command(command)
     if args.cmd == "synthetic-e2e":
         return run_command(["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", args.out_dir])
+    if args.cmd == "scenarios":
+        return run_command(["python3", "scripts/scenario_catalog.py", "--format", args.format])
+    if args.cmd == "doctor":
+        result = doctor()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["decision"] == "pass" else 1
     if args.cmd == "run":
         return run_command(COMMANDS[args.tool] + args.args)
     print(json.dumps({"error": "unknown command"}))

@@ -93,6 +93,24 @@ The scanner blocks absolute user paths, private project names, internal workspac
 
 ## Start Here
 
+Install all skills:
+
+```bash
+python3 install.py --force
+```
+
+Check the local skill set:
+
+```bash
+python3 scripts/codex_eng.py doctor
+```
+
+List supported development scenarios:
+
+```bash
+python3 scripts/codex_eng.py scenarios --format markdown
+```
+
 Run the safe one-command workflow:
 
 ```bash
@@ -101,32 +119,7 @@ python3 scripts/codex_eng.py auto \
   --out /tmp/codex-auto-demo
 ```
 
-The auto runner ingests the requirement, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
-
-Select a workflow profile when the scenario is known:
-
-```bash
-python3 scripts/codex_eng.py auto \
-  --input examples/synthetic-e2e-case/requirement.md \
-  --profile small_feature \
-  --out /tmp/codex-auto-demo
-```
-
-Profiles are defined in `config/workflow-profiles.example.yaml` and include `bugfix`, `small_feature`, `frontend_change`, `cross_repo_api`, `data_migration`, and `release_readiness`.
-Profiles declare executable gate artifact checks. Stage order and next commands are defined in `config/workflow-stages.example.yaml`.
-Use the smallest matching profile first; add security, performance, frontend, or release skills only when the requirement or diff impact needs those gates.
-
-Install all skills:
-
-```bash
-python3 install.py --force
-```
-
-Preview install without writing:
-
-```bash
-python3 install.py --dry-run
-```
+The auto runner ingests the requirement, selects a workflow profile, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
 Default target: `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
@@ -11,6 +12,14 @@ from typing import Any
 
 SCHEMA = "codex-benchmark-report-v1"
 SCHEMA_RE = re.compile(r"codex-[a-z0-9-]+-v\d+")
+
+
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_json(root: Path, cmd: list[str]) -> dict[str, Any]:
@@ -32,13 +41,34 @@ def report(root: Path) -> dict[str, Any]:
     prompts = list((root / "prompts").glob("*.md"))
     scenarios = list((root / "examples/scenarios").glob("*/requirement.md"))
     tests = list((root / "tests").glob("test_*.py"))
+    profiles = run_json(root, ["python3", "scripts/codex_eng.py", "scenarios"])["json"]
+    scenario_catalog_count = int(profiles.get("scenario_count") or 0)
+    documented_text = (root / "docs/scenario-guide.md").read_text(encoding="utf-8") if (root / "docs/scenario-guide.md").exists() else ""
+    documented_scenarios = [
+        item for item in profiles.get("scenarios", []) if isinstance(item, dict) and str(item.get("id") or "") in documented_text
+    ] if isinstance(profiles.get("scenarios"), list) else []
+    workflow_profiles = []
+    try:
+        skill_health = load_module("skill_health_for_benchmark", root / "skills/core/skill-health/scripts/skill_health.py")
+        workflow_profiles = skill_health.load_restricted_yaml(root / "config/workflow-profiles.example.yaml").get("profiles", [])
+    except Exception:
+        workflow_profiles = []
     privacy = run_json(root, ["python3", "scripts/privacy_scan.py", "--root", ".", "--patterns", "config/private-patterns.example.yaml"])
     health = run_json(root, ["python3", "skills/core/skill-health/scripts/skill_health.py", "--root", "."])
+    forward = run_json(root, ["python3", "skills/core/forward-test-runner/scripts/forward_test.py", "--root", "."])
+    forward_scenario_results = {}
+    forward_cases = forward["json"].get("cases", []) if isinstance(forward["json"].get("cases"), list) else []
+    if forward_cases and isinstance(forward_cases[0], dict):
+        forward_scenario_results = forward_cases[0].get("scenario_results", {}) if isinstance(forward_cases[0].get("scenario_results"), dict) else {}
     blockers: list[dict[str, Any]] = []
     if privacy["returncode"] != 0:
         blockers.append({"source": "privacy_scan", "message": "privacy scan failed"})
     if health["json"].get("decision") == "block":
         blockers.append({"source": "skill_health", "message": "skill health blocked"})
+    if scenario_catalog_count and len(documented_scenarios) != scenario_catalog_count:
+        blockers.append({"source": "scenario_catalog", "message": "not all scenario catalog entries are documented"})
+    if forward["returncode"] != 0:
+        blockers.append({"source": "forward_test", "message": "forward test failed"})
     return {
         "schema": SCHEMA,
         "decision": "block" if blockers else "pass",
@@ -48,9 +78,14 @@ def report(root: Path) -> dict[str, Any]:
             "schema_count": len(schemas),
             "prompt_count": len(prompts),
             "scenario_count": len(scenarios),
+            "workflow_profile_count": len(workflow_profiles),
+            "scenario_catalog_count": scenario_catalog_count,
+            "documented_scenario_count": len(documented_scenarios),
+            "forward_tested_scenario_count": sum(1 for value in forward_scenario_results.values() if value),
             "test_file_count": len(tests),
             "privacy_decision": privacy["json"].get("decision"),
             "skill_health_decision": health["json"].get("decision"),
+            "forward_test_decision": forward["json"].get("decision"),
         },
         "blockers": blockers,
     }

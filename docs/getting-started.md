@@ -2,9 +2,22 @@
 
 This guide runs the open-core workflow with the synthetic example.
 
-## 0. One-Command Path
+## 0. Normal Path
 
-For normal use, start with the auto runner:
+Install and check the local skill set:
+
+```bash
+python3 install.py --force
+python3 scripts/codex_eng.py doctor
+```
+
+List supported scenarios:
+
+```bash
+python3 scripts/codex_eng.py scenarios --format markdown
+```
+
+For normal requirement handling, run one command:
 
 ```bash
 python3 scripts/codex_eng.py auto \
@@ -22,15 +35,11 @@ python3 scripts/codex_eng.py auto \
   --out /tmp/codex-auto-demo
 ```
 
-The runner decides which artifacts are missing, skips existing artifacts unless `--force` is provided, and writes `auto_run_summary.json` with next stage, next command, blockers, and implementation/release readiness.
+The runner decides which artifacts are missing, skips existing artifacts unless `--force` is provided, and writes `auto_run_summary.json` with workflow profile selection, profile selection reason, next stage, next command, blockers, and implementation/release readiness.
 
-The manual steps below are mainly for debugging individual gates.
+The manual steps below are for debugging individual gates, not the normal path.
 
-## 1. Install All Skills
-
-```bash
-python3 install.py --force
-```
+## 1. Installation Details
 
 Preview install without writing:
 
@@ -39,12 +48,6 @@ python3 install.py --dry-run
 ```
 
 By default, skills are installed to `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
-
-Alternative CLI form:
-
-```bash
-python3 scripts/codex_eng.py run install-all --dry-run
-```
 
 If you want to install this repository into the local Codex skills directory:
 

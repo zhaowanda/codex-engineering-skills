@@ -107,6 +107,85 @@ def test_auto_runner_infers_frontend_profile_from_requirement() -> None:
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-FE", out=out)
         assert result["workflow_profile"]["name"] == "frontend_change"
+        assert result["profile_selection_reason"]["matched_impact"] == "ui"
+
+
+def test_auto_runner_routes_one_line_request_to_small_feature() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "one-line.md"
+        req.write_text("Change the checkout confirmation copy to Order received.", encoding="utf-8")
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-AUTO-ONE", out=out)
+        assert result["workflow_profile"]["name"] == "small_feature"
+        assert result["profile_selection_reason"]["mode"] == "lane"
+        assert result["profile_selection_reason"]["lane"] == "small_change"
+
+
+def test_auto_runner_routes_bugfix_to_bugfix_profile() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "bugfix.md"
+        req.write_text(
+            """
+            Bug: order detail page shows the wrong status after refund.
+            Rule: preserve existing refund workflow.
+            AC: refunded orders show Refund complete.
+            """,
+            encoding="utf-8",
+        )
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-AUTO-BUG", out=out)
+        assert result["workflow_profile"]["name"] == "bugfix"
+        assert result["profile_selection_reason"]["mode"] == "lane"
+        assert "git-worktree-governor" in result["required_gates"]
+
+
+def test_auto_runner_routes_long_prd_to_small_feature_full_design_path() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "long-prd.md"
+        lines = [
+            "Goal: improve order export operations.",
+            "Req: Admin exports filtered orders.",
+            "Req: Operator reviews export history.",
+            "Rule: only admin can export filtered results.",
+            "AC: exported file contains order id and status.",
+            "AC: non-admin cannot export filtered results.",
+        ]
+        lines.extend(f"Detail {idx}: keep existing behavior compatible." for idx in range(1, 30))
+        req.write_text("\n".join(lines), encoding="utf-8")
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-AUTO-LONG", out=out)
+        assert result["workflow_profile"]["name"] == "small_feature"
+        assert result["profile_selection_reason"]["lane"] == "large_prd"
+        assert "architecture-design-governor" in result["required_gates"]
+
+
+def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "complex.md"
+        req.write_text(
+            """
+            Req: Add an API endpoint and admin page for payment export failures.
+            Req: Add a database migration for retry count.
+            Rule: only admin role can access payment failure data.
+            Rule: export must stay within the latency budget.
+            AC: API returns payment failure rows.
+            AC: dashboard page shows retry count.
+            AC: non-admin cannot view payment failure data.
+            AC: export latency remains within the performance budget.
+            Risk: payment data may contain sensitive fields.
+            """,
+            encoding="utf-8",
+        )
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-AUTO-COMPLEX", out=out)
+        assert result["workflow_profile"]["name"] == "data_migration"
+        assert result["profile_selection_reason"]["matched_impact"] == "data"
+        assert "data-security-governor" in result["required_gates"]
+        assert "performance-governor" in result["required_gates"]
 
 
 def test_auto_runner_release_profile_only_checks_release_artifacts() -> None:
@@ -153,6 +232,10 @@ def run_all() -> None:
     test_auto_runner_project_understanding_optional()
     test_auto_runner_explicit_profile_selects_required_gates()
     test_auto_runner_infers_frontend_profile_from_requirement()
+    test_auto_runner_routes_one_line_request_to_small_feature()
+    test_auto_runner_routes_bugfix_to_bugfix_profile()
+    test_auto_runner_routes_long_prd_to_small_feature_full_design_path()
+    test_auto_runner_routes_complex_multi_impact_to_high_risk_profile()
     test_auto_runner_release_profile_only_checks_release_artifacts()
     test_codex_eng_auto_cli_runs()
 
