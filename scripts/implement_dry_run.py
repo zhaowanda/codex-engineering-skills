@@ -74,6 +74,38 @@ def decision_ready(data: dict[str, Any], accepted: set[str]) -> bool:
     return not any(data.get(key) for key in ["blockers", "active_blockers", "missing_evidence"])
 
 
+def require_artifact(artifact_dir: Path, name: str, filename: str, accepted: set[str] | None = None) -> list[str]:
+    data = load_json(artifact_dir / filename)
+    if not data:
+        return [filename]
+    if accepted is not None and not decision_ready(data, accepted):
+        return [f"{filename} is not ready"]
+    return []
+
+
+def review_allows_implementation(artifact_dir: Path, filename: str) -> list[str]:
+    data = load_json(artifact_dir / filename)
+    if not data:
+        return [filename]
+    blockers: list[str] = []
+    if not decision_ready(data, {"pass", "ready", "approved"}):
+        blockers.append(f"{filename} is not ready")
+    readiness = data.get("readiness_gate", {}) if isinstance(data.get("readiness_gate"), dict) else {}
+    if readiness.get("implementation_allowed") is not True:
+        blockers.append(f"{filename} does not allow implementation")
+    return blockers
+
+
+def design_chain_blockers(artifact_dir: Path) -> list[str]:
+    blockers: list[str] = []
+    blockers.extend(require_artifact(artifact_dir, "spec", "spec.json", {"ready_for_design", "pass"}))
+    blockers.extend(require_artifact(artifact_dir, "technical_design", "technical_design.json"))
+    blockers.extend(require_artifact(artifact_dir, "architecture_design", "architecture_design.json"))
+    blockers.extend(review_allows_implementation(artifact_dir, "design_architecture_review.json"))
+    blockers.extend(review_allows_implementation(artifact_dir, "delivery_plan_review.json"))
+    return blockers
+
+
 def docs_ready(docs_root: Path | None, doc_id: str) -> tuple[bool, str, list[str]]:
     if not docs_root:
         return False, "", ["docs_root is required"]
@@ -136,6 +168,7 @@ def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> 
         docs_root = default_docs_root()
     allowed_files, test_commands, repo_tasks = collect_plan_scope(plan)
     missing_gates: list[str] = []
+    missing_gates.extend(design_chain_blockers(artifact_dir))
     _, git_blockers, git_evidence_items = git_ready_for_edit(artifact_dir, git_evidence)
     missing_gates.extend(git_blockers)
     if not decision_ready(edit_permit, {"ready", "pass"}):
