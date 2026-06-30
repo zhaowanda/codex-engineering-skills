@@ -304,11 +304,52 @@ def test_codex_eng_doctor_cli_runs() -> None:
     assert "codex-doctor-v1" in proc.stdout
 
 
+def test_codex_eng_doctor_human_cli_runs() -> None:
+    proc = subprocess.run(
+        [sys.executable, "scripts/codex_eng.py", "doctor", "--format", "human"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 0
+    assert "Codex doctor" in proc.stdout
+
+
+def test_codex_eng_setup_dry_run_cli_runs() -> None:
+    proc = subprocess.run(
+        [sys.executable, "scripts/codex_eng.py", "setup"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 0
+    assert "Codex setup" in proc.stdout
+    assert "dry_run" in proc.stdout
+
+
+def test_codex_eng_next_human_cli_runs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact_dir = Path(tmp) / "artifacts"
+        artifact_dir.mkdir()
+        proc = subprocess.run(
+            [sys.executable, "scripts/codex_eng.py", "next", "--artifact-dir", str(artifact_dir)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        assert proc.returncode == 0
+        assert "Codex delivery status" in proc.stdout
+        assert "next_stage" in proc.stdout
+
+
 def test_benchmark_reports_scenario_coverage_metrics() -> None:
     result = benchmark.report(ROOT)
     metrics = result["metrics"]
     assert result["decision"] == "pass"
     assert metrics["workflow_profile_count"] >= 6
+    assert metrics["setup_command_available"] is True
+    assert metrics["next_command_available"] is True
+    assert metrics["human_output_available"] is True
     assert metrics["scenario_catalog_count"] >= 8
     assert metrics["documented_scenario_count"] == metrics["scenario_catalog_count"]
     assert metrics["forward_tested_scenario_count"] >= 8
@@ -334,6 +375,9 @@ def run_all() -> None:
     test_scenario_catalog_documents_supported_development_scenarios()
     test_codex_eng_scenarios_cli_runs()
     test_codex_eng_doctor_cli_runs()
+    test_codex_eng_doctor_human_cli_runs()
+    test_codex_eng_setup_dry_run_cli_runs()
+    test_codex_eng_next_human_cli_runs()
     test_benchmark_reports_scenario_coverage_metrics()
 
 

@@ -41,6 +41,7 @@ def report(root: Path) -> dict[str, Any]:
     prompts = list((root / "prompts").glob("*.md"))
     scenarios = list((root / "examples/scenarios").glob("*/requirement.md"))
     tests = list((root / "tests").glob("test_*.py"))
+    cli_text = (root / "scripts/codex_eng.py").read_text(encoding="utf-8") if (root / "scripts/codex_eng.py").exists() else ""
     profiles = run_json(root, ["python3", "scripts/codex_eng.py", "scenarios"])["json"]
     scenario_catalog_count = int(profiles.get("scenario_count") or 0)
     documented_text = (root / "docs/scenario-guide.md").read_text(encoding="utf-8") if (root / "docs/scenario-guide.md").exists() else ""
@@ -79,6 +80,9 @@ def report(root: Path) -> dict[str, Any]:
             "prompt_count": len(prompts),
             "scenario_count": len(scenarios),
             "workflow_profile_count": len(workflow_profiles),
+            "setup_command_available": "sub.add_parser(\"setup\")" in cli_text,
+            "next_command_available": "sub.add_parser(\"next\")" in cli_text,
+            "human_output_available": "--format" in cli_text and "render_auto_human" in cli_text,
             "scenario_catalog_count": scenario_catalog_count,
             "documented_scenario_count": len(documented_scenarios),
             "forward_tested_scenario_count": sum(1 for value in forward_scenario_results.values() if value),

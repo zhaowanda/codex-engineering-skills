@@ -225,6 +225,33 @@ def test_codex_eng_auto_cli_runs() -> None:
         assert (out / "auto_run_summary.json").exists()
 
 
+def test_codex_eng_auto_human_output_runs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "artifacts"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "scripts/codex_eng.py",
+                "auto",
+                "--input",
+                "examples/synthetic-e2e-case/requirement.md",
+                "--doc-id",
+                "REQ-AUTO-HUMAN",
+                "--out",
+                str(out),
+                "--format",
+                "human",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        assert proc.returncode == 0
+        assert "Codex auto summary" in proc.stdout
+        assert "next_command" in proc.stdout
+        assert (out / "auto_run_summary.json").exists()
+
+
 def run_all() -> None:
     test_auto_runner_generates_core_artifacts()
     test_auto_runner_is_idempotent_without_force()
@@ -238,6 +265,7 @@ def run_all() -> None:
     test_auto_runner_routes_complex_multi_impact_to_high_risk_profile()
     test_auto_runner_release_profile_only_checks_release_artifacts()
     test_codex_eng_auto_cli_runs()
+    test_codex_eng_auto_human_output_runs()
 
 
 if __name__ == "__main__":

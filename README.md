@@ -93,16 +93,16 @@ The scanner blocks absolute user paths, private project names, internal workspac
 
 ## Start Here
 
-Install all skills:
+Preview setup and local checks:
 
 ```bash
-python3 install.py --force
+python3 scripts/codex_eng.py setup
 ```
 
-Check the local skill set:
+Install and check the local skill set:
 
 ```bash
-python3 scripts/codex_eng.py doctor
+python3 scripts/codex_eng.py setup --force
 ```
 
 List supported development scenarios:
@@ -116,10 +116,17 @@ Run the safe one-command workflow:
 ```bash
 python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
-  --out /tmp/codex-auto-demo
+  --out /tmp/codex-auto-demo \
+  --format human
 ```
 
 The auto runner ingests the requirement, selects a workflow profile, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
+
+Check the next safe action later:
+
+```bash
+python3 scripts/codex_eng.py next --artifact-dir /tmp/codex-auto-demo
+```
 
 Default target: `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 

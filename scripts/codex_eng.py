@@ -53,6 +53,11 @@ def run_command(args: list[str]) -> int:
     return proc.returncode
 
 
+def run_capture(args: list[str]) -> tuple[int, str, str]:
+    proc = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
 def run_json_step(name: str, args: list[str]) -> dict[str, Any]:
     proc = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
     data: Any = {}
@@ -72,6 +77,87 @@ def run_json_step(name: str, args: list[str]) -> dict[str, Any]:
     }
 
 
+def parse_json_text(text: str) -> dict[str, Any]:
+    try:
+        data = json.loads(text)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def human_bool(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def render_auto_human(result: dict[str, Any]) -> str:
+    profile = result.get("workflow_profile") if isinstance(result.get("workflow_profile"), dict) else {}
+    reason = result.get("profile_selection_reason") if isinstance(result.get("profile_selection_reason"), dict) else {}
+    blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
+    gate_gaps = result.get("profile_gate_gaps") if isinstance(result.get("profile_gate_gaps"), list) else []
+    lines = [
+        "Codex auto summary",
+        f"- decision: {result.get('decision', '')}",
+        f"- doc_id: {result.get('doc_id', '')}",
+        f"- profile: {profile.get('name', '')}",
+        f"- profile_reason: {reason.get('reason', '')}",
+        f"- next_stage: {result.get('next_stage', '')}",
+        f"- can_implement: {human_bool(bool(result.get('can_implement')))}",
+        f"- can_release: {human_bool(bool(result.get('can_release')))}",
+        f"- next_command: {result.get('next_command') or result.get('next_profile_command') or ''}",
+    ]
+    if blockers:
+        lines.append("- blockers:")
+        for item in blockers[:5]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
+    if gate_gaps:
+        lines.append("- profile_gate_gaps:")
+        for item in gate_gaps[:5]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('artifact', '')}: {item.get('message', '')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_status_human(result: dict[str, Any]) -> str:
+    profile = result.get("workflow_profile") if isinstance(result.get("workflow_profile"), dict) else {}
+    blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
+    actions = result.get("next_required_actions") if isinstance(result.get("next_required_actions"), list) else []
+    lines = [
+        "Codex delivery status",
+        f"- artifact_dir: {result.get('artifact_dir', '')}",
+        f"- profile: {profile.get('name', '')}",
+        f"- next_stage: {result.get('next_stage', '')}",
+        f"- can_implement: {human_bool(bool(result.get('can_implement')))}",
+        f"- can_release: {human_bool(bool(result.get('can_release')))}",
+        f"- next_command: {result.get('next_command') or result.get('next_profile_command') or ''}",
+    ]
+    if blockers:
+        lines.append("- blockers:")
+        for item in blockers[:5]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
+    if actions:
+        lines.append("- next_required_actions:")
+        for item in actions[:5]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('artifact', '')}: {item.get('next_command', '')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_doctor_human(result: dict[str, Any]) -> str:
+    checks = result.get("checks") if isinstance(result.get("checks"), list) else []
+    lines = [
+        "Codex doctor",
+        f"- decision: {result.get('decision', '')}",
+        f"- next_action: {result.get('next_action', '')}",
+        "- checks:",
+    ]
+    for item in checks:
+        if isinstance(item, dict):
+            lines.append(f"  - {item.get('name', '')}: {'pass' if item.get('passed') else 'block'} ({item.get('decision', '')})")
+    return "\n".join(lines) + "\n"
+
+
 def doctor() -> dict[str, Any]:
     checks = [
         run_json_step("skill_health", ["python3", "scripts/skill_health.py", "--root", "."]),
@@ -89,6 +175,36 @@ def doctor() -> dict[str, Any]:
     }
 
 
+def setup(force: bool = False, output_format: str = "human") -> tuple[int, dict[str, Any]]:
+    install_args = ["python3", "install.py", "--force" if force else "--dry-run"]
+    install_code, install_stdout, install_stderr = run_capture(install_args)
+    doctor_result = doctor()
+    result = {
+        "schema": "codex-setup-v1",
+        "decision": "pass" if install_code == 0 and doctor_result.get("decision") == "pass" else "block",
+        "install": {
+            "command": install_args,
+            "returncode": install_code,
+            "passed": install_code == 0,
+            "stdout_tail": install_stdout[-1000:],
+            "stderr_tail": install_stderr[-1000:],
+            "mode": "force" if force else "dry_run",
+        },
+        "doctor": doctor_result,
+        "next_action": "Run with --force to install skills." if not force and install_code == 0 else doctor_result.get("next_action", ""),
+    }
+    if output_format == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print("Codex setup")
+        print(f"- decision: {result['decision']}")
+        print(f"- install_mode: {result['install']['mode']}")
+        print(f"- install: {'pass' if result['install']['passed'] else 'block'}")
+        print(f"- doctor: {doctor_result.get('decision', '')}")
+        print(f"- next_action: {result['next_action']}")
+    return (0 if result["decision"] == "pass" else 1), result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Unified CLI for Codex engineering skills")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -101,6 +217,10 @@ def main() -> int:
     p_auto.add_argument("--out")
     p_auto.add_argument("--profile")
     p_auto.add_argument("--force", action="store_true")
+    p_auto.add_argument("--format", choices=["json", "human"], default="json")
+    p_setup = sub.add_parser("setup")
+    p_setup.add_argument("--force", action="store_true")
+    p_setup.add_argument("--format", choices=["json", "human"], default="human")
     p_project = sub.add_parser("project")
     p_project.add_argument("mode", choices=["new", "legacy"])
     p_project.add_argument("--project", required=True)
@@ -114,11 +234,17 @@ def main() -> int:
     p_inspect = sub.add_parser("inspect")
     p_inspect.add_argument("--artifact-dir", required=True)
     p_inspect.add_argument("--profile")
+    p_inspect.add_argument("--format", choices=["json", "human"], default="json")
+    p_next = sub.add_parser("next")
+    p_next.add_argument("--artifact-dir", required=True)
+    p_next.add_argument("--profile")
+    p_next.add_argument("--format", choices=["json", "human"], default="human")
     p_e2e = sub.add_parser("synthetic-e2e")
     p_e2e.add_argument("--out-dir", required=True)
     p_scenarios = sub.add_parser("scenarios")
     p_scenarios.add_argument("--format", choices=["json", "markdown"], default="json")
     p_doctor = sub.add_parser("doctor")
+    p_doctor.add_argument("--format", choices=["json", "human"], default="json")
     p_passthrough = sub.add_parser("run")
     p_passthrough.add_argument("tool", choices=sorted(COMMANDS))
     p_passthrough.add_argument("args", nargs=argparse.REMAINDER)
@@ -132,7 +258,19 @@ def main() -> int:
                 command.extend([f"--{flag.replace('_', '-')}", value])
         if args.force:
             command.append("--force")
-        return run_command(command)
+        if args.format == "json":
+            return run_command(command)
+        code, stdout, stderr = run_capture(command)
+        result = parse_json_text(stdout)
+        if result:
+            print(render_auto_human(result), end="")
+        else:
+            print(stdout, end="")
+            print(stderr, end="", file=sys.stderr)
+        return code
+    if args.cmd == "setup":
+        code, _ = setup(args.force, args.format)
+        return code
     if args.cmd == "project":
         command = [
             "python3",
@@ -160,14 +298,40 @@ def main() -> int:
         command = COMMANDS["inspect"] + ["--artifact-dir", args.artifact_dir]
         if args.profile:
             command.extend(["--profile", args.profile])
-        return run_command(command)
+        if args.format == "json":
+            return run_command(command)
+        code, stdout, stderr = run_capture(command)
+        result = parse_json_text(stdout)
+        if result:
+            print(render_status_human(result), end="")
+        else:
+            print(stdout, end="")
+            print(stderr, end="", file=sys.stderr)
+        return code
+    if args.cmd == "next":
+        command = COMMANDS["inspect"] + ["--artifact-dir", args.artifact_dir]
+        if args.profile:
+            command.extend(["--profile", args.profile])
+        code, stdout, stderr = run_capture(command)
+        result = parse_json_text(stdout)
+        if args.format == "json":
+            print(json.dumps(result, ensure_ascii=False, indent=2) if result else stdout, end="" if result else "")
+        elif result:
+            print(render_status_human(result), end="")
+        else:
+            print(stdout, end="")
+            print(stderr, end="", file=sys.stderr)
+        return 0 if result else code
     if args.cmd == "synthetic-e2e":
         return run_command(["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", args.out_dir])
     if args.cmd == "scenarios":
         return run_command(["python3", "scripts/scenario_catalog.py", "--format", args.format])
     if args.cmd == "doctor":
         result = doctor()
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.format == "json":
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(render_doctor_human(result), end="")
         return 0 if result["decision"] == "pass" else 1
     if args.cmd == "run":
         return run_command(COMMANDS[args.tool] + args.args)

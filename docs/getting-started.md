@@ -4,11 +4,16 @@ This guide runs the open-core workflow with the synthetic example.
 
 ## 0. Normal Path
 
+Preview setup and local checks:
+
+```bash
+python3 scripts/codex_eng.py setup
+```
+
 Install and check the local skill set:
 
 ```bash
-python3 install.py --force
-python3 scripts/codex_eng.py doctor
+python3 scripts/codex_eng.py setup --force
 ```
 
 List supported scenarios:
@@ -22,7 +27,8 @@ For normal requirement handling, run one command:
 ```bash
 python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
-  --out /tmp/codex-auto-demo
+  --out /tmp/codex-auto-demo \
+  --format human
 ```
 
 With repository understanding:
@@ -32,10 +38,17 @@ python3 scripts/codex_eng.py auto \
   --input examples/synthetic-e2e-case/requirement.md \
   --repo examples/synthetic-repos/basic-web-service \
   --project basic-web-service \
-  --out /tmp/codex-auto-demo
+  --out /tmp/codex-auto-demo \
+  --format human
 ```
 
 The runner decides which artifacts are missing, skips existing artifacts unless `--force` is provided, and writes `auto_run_summary.json` with workflow profile selection, profile selection reason, next stage, next command, blockers, and implementation/release readiness.
+
+Check the next safe action later:
+
+```bash
+python3 scripts/codex_eng.py next --artifact-dir /tmp/codex-auto-demo
+```
 
 The manual steps below are for debugging individual gates, not the normal path.
 
