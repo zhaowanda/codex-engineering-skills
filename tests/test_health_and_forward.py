@@ -167,6 +167,28 @@ def test_readme_uses_current_validation_commands() -> None:
     assert "python3 scripts/skill_health.py --root ." in readme
 
 
+def test_docs_describe_full_pre_edit_gate() -> None:
+    paths = [
+        ROOT / "README.md",
+        ROOT / "docs/getting-started.md",
+        ROOT / "docs/workflow-guide.md",
+        ROOT / "docs/scenario-guide.md",
+    ]
+    required = [
+        "technical_design",
+        "architecture_design",
+        "design_architecture_review",
+        "delivery_plan_review",
+        "implementation_allowed=true",
+        "pull --ff-only",
+        "edit_permit",
+    ]
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        missing = [item for item in required if item not in text]
+        assert not missing, f"{path.relative_to(ROOT)} missing {missing}"
+
+
 def test_architecture_documents_skill_taxonomy_and_gate_contract() -> None:
     architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
     assert "## Skill Taxonomy" in architecture
@@ -282,6 +304,13 @@ def test_scenario_catalog_documents_supported_development_scenarios() -> None:
     guide = (ROOT / "docs/scenario-guide.md").read_text(encoding="utf-8")
     for scenario_id in scenario_ids:
         assert scenario_id in guide
+    for item in result["scenarios"]:
+        if item["id"] in {"one_line_request", "long_prd", "bugfix", "frontend_change", "cross_repo_api", "data_migration"}:
+            next_step = item["next_step"]
+            assert "technical_design.json" in next_step
+            assert "architecture_design.json" in next_step
+            assert "pull --ff-only" in next_step
+            assert "edit_permit.json" in next_step
 
 
 def test_codex_eng_scenarios_cli_runs() -> None:
@@ -585,6 +614,7 @@ def run_all() -> None:
     test_skill_health_blocks_invalid_expert_gate_metadata()
     test_workflow_profiles_reference_existing_skills()
     test_readme_uses_current_validation_commands()
+    test_docs_describe_full_pre_edit_gate()
     test_architecture_documents_skill_taxonomy_and_gate_contract()
     test_skill_catalog_lists_all_skills_with_maturity()
     test_previously_b_level_skill_docs_have_operational_guidance()

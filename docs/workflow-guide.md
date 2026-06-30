@@ -74,12 +74,13 @@ Profile `artifact_steps` declare profile-specific artifact generation or inspect
 ## Coding Is Allowed Only When
 
 - Spec is ready and required open questions are closed.
-- Technical and architecture designs exist.
-- Design review passes or explicitly allows continuation.
+- `technical_design.json` and `architecture_design.json` exist.
+- `design_architecture_review.json` has `decision=pass` or `approved` and `readiness_gate.implementation_allowed=true`.
+- `delivery_plan_review.json` has `decision=pass` and `readiness_gate.implementation_allowed=true`.
 - Delivery plan identifies modify repos, file scope, tests, release order, and rollback.
-- Delivery plan review passes with executable tasks, evidence mapping, risk controls, and rollback.
+- Git worktree evidence proves the target repo fetched the remote and updated the base branch with `pull --ff-only`.
 - Git worktree is on a non-default working branch.
-- Edit permit exists and file scope is narrow.
+- `edit_permit.json` exists, is ready, and binds a narrow file scope.
 
 ## Release Is Allowed Only When
 
