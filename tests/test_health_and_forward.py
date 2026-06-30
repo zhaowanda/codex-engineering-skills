@@ -255,6 +255,8 @@ def test_forward_test_runner_passes_synthetic_case() -> None:
     assert result["schema"] == "codex-forward-test-run-v1"
     assert result["decision"] == "pass"
     assert result["cases"][0]["passed"] is True
+    assert result["cases"][0]["blocked_case_passed"] is True
+    assert result["cases"][0]["happy_path_case_passed"] is True
 
 
 def run_all() -> None:

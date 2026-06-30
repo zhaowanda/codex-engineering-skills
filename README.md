@@ -114,6 +114,7 @@ python3 scripts/codex_eng.py auto \
 
 Profiles are defined in `config/workflow-profiles.example.yaml` and include `bugfix`, `small_feature`, `frontend_change`, `cross_repo_api`, `data_migration`, and `release_readiness`.
 Profiles declare executable gate artifact checks. Stage order and next commands are defined in `config/workflow-stages.example.yaml`.
+Use the smallest matching profile first; add security, performance, frontend, or release skills only when the requirement or diff impact needs those gates.
 
 Install all skills:
 

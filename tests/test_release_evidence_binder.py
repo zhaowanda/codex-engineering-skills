@@ -63,6 +63,7 @@ def test_bind_no_go_when_required_evidence_missing() -> None:
         result = bind_release.bind(root)
         assert result["decision"] == "no_go"
         assert "code_review_gate" in result["missing_evidence"]
+        assert any(item["artifact"] == "code_review_gate.json" for item in result["next_required_actions"])
 
 
 def test_bind_no_go_when_review_gate_blocks() -> None:

@@ -84,7 +84,17 @@ def test_synthetic_e2e_runner_completes_core_flow() -> None:
         result = synthetic_e2e.run(Path(tmp))
         assert result["schema"] == "codex-synthetic-e2e-run-v1"
         assert result["decision"] == "pass"
-        assert (Path(tmp) / "spec.json").exists()
+        assert {item["case"] for item in result["cases"]} == {
+            "blocked_case",
+            "happy_path_case",
+            "frontend_happy_path",
+            "data_migration_blocked_path",
+            "release_readiness_blocked_path",
+            "release_readiness_happy_path",
+        }
+        assert all(item["passed"] for item in result["cases"])
+        assert (Path(tmp) / "blocked_case/spec.json").exists()
+        assert (Path(tmp) / "happy_path_case/auto_run_summary.json").exists()
         assert (Path(tmp) / "synthetic_e2e_run.json").exists() is False
 
 

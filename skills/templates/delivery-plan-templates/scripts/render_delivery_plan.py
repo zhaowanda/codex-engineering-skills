@@ -143,6 +143,19 @@ def allowed_files_hint(repo: str, architecture: dict[str, Any]) -> list[str]:
     return sorted(set(hints))
 
 
+def narrow_allowed_files(paths: list[str]) -> list[str]:
+    concrete: list[str] = []
+    for item in paths:
+        path = str(item).strip().strip("/")
+        if not path:
+            continue
+        parts = Path(path).parts
+        if len(parts) <= 1 and "." not in Path(path).name:
+            continue
+        concrete.append(path)
+    return sorted(set(concrete))
+
+
 def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dict[str, Any], project_understanding: dict[str, Any] | None = None) -> dict[str, Any]:
     ctx = project_context(project_understanding or {})
     repos = repo_responsibilities(architecture)
@@ -159,6 +172,7 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
         allowed = allowed_files_hint(repo_name, architecture)
         if ctx["files"] and repo_name in {ctx["project"], "target-repo"}:
             allowed = sorted(set([*allowed, *ctx["entrypoints"], *ctx["files"][:5]]))
+        allowed = narrow_allowed_files(allowed)
         test_commands = ctx["tests"] if repo_name in {ctx["project"], "target-repo"} else []
         task = {
             "repo": repo_name,

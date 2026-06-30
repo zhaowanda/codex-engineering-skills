@@ -225,12 +225,201 @@ def profile_gate_gaps(profile: dict[str, Any], out: Path) -> list[dict[str, Any]
             continue
         accepted = {str(item) for item in as_list(gate.get("accepted_decisions"))}
         decision = str(data.get("decision") or data.get("status") or "")
-        if accepted and decision and decision not in accepted:
+        if accepted and not decision:
+            gaps.append({"artifact": artifact_name, "message": "decision/status is missing", "accepted_decisions": sorted(accepted)})
+        elif accepted and decision not in accepted:
             gaps.append({"artifact": artifact_name, "message": f"decision {decision} not accepted", "accepted_decisions": sorted(accepted)})
         readiness_path = str(gate.get("readiness_path") or "")
         if readiness_path and nested_value(data, readiness_path) != gate.get("readiness_value"):
             gaps.append({"artifact": artifact_name, "message": f"{readiness_path} is not {gate.get('readiness_value')}"})
     return gaps
+
+
+def profile_requires(profile: dict[str, Any], skill: str) -> bool:
+    return skill in {str(item) for item in as_list(profile.get("required_skills"))}
+
+
+def render_command_item(value: Any, artifact_dir: Path) -> str:
+    return str(value).replace("{artifact_dir}", str(artifact_dir))
+
+
+def run_registry_artifact_steps(
+    profile: dict[str, Any],
+    out: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> bool:
+    registry_steps = [item for item in as_list(profile.get("artifact_steps")) if isinstance(item, dict)]
+    if not registry_steps:
+        return False
+    for item in registry_steps:
+        name = str(item.get("name") or item.get("artifact") or "artifact_step")
+        artifact = str(item.get("artifact") or "")
+        command = [render_command_item(part, out) for part in as_list(item.get("command"))]
+        if not artifact or not command:
+            steps.append({"name": name, "returncode": 1, "passed": False, "reason": "artifact_steps entry requires artifact and command"})
+            continue
+        target = out / artifact
+        if target.exists() and not force:
+            skipped.append(target.name)
+            steps.append({"name": name, "skipped": True, "output": str(target), "reason": "artifact exists"})
+            continue
+        result = run_command(name, command)
+        if item.get("allow_fail"):
+            result["allowed_failure"] = True
+            result["passed"] = True
+        steps.append(result | {"output": str(target)})
+        if target.exists():
+            generated.append(target.name)
+    return True
+
+
+def run_profile_artifact_steps(
+    profile: dict[str, Any],
+    out: Path,
+    spec: Path,
+    technical: Path,
+    architecture: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> None:
+    if run_registry_artifact_steps(profile, out, force, generated, skipped, steps):
+        return
+    if profile_requires(profile, "frontend-acceptance-runner"):
+        run_if_needed(
+            "frontend_acceptance_template",
+            out / "frontend_acceptance.json",
+            [
+                "python3",
+                "skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py",
+                "template",
+                "--page-type",
+                "custom",
+                "--target-url",
+                "http://localhost/TBD",
+                "--artifact-dir",
+                str(out),
+                "--out",
+                str(out / "frontend_acceptance.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "configuration-governor"):
+        run_if_needed(
+            "configuration_review",
+            out / "configuration_readiness.json",
+            [
+                "python3",
+                "skills/core/configuration-governor/scripts/configuration.py",
+                "analyze",
+                "--spec",
+                str(spec),
+                "--technical-design",
+                str(technical),
+                "--architecture-design",
+                str(architecture),
+                "--out",
+                str(out / "configuration_readiness.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "data-security-governor"):
+        run_if_needed(
+            "data_security_review",
+            out / "data_security_review.json",
+            [
+                "python3",
+                "skills/core/data-security-governor/scripts/data_security.py",
+                "design",
+                "--spec",
+                str(spec),
+                "--technical-design",
+                str(technical),
+                "--architecture-design",
+                str(architecture),
+                "--out",
+                str(out / "data_security_review.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "performance-governor"):
+        run_if_needed(
+            "performance_review",
+            out / "performance_review.json",
+            [
+                "python3",
+                "skills/core/performance-governor/scripts/performance.py",
+                "design",
+                "--spec",
+                str(spec),
+                "--technical-design",
+                str(technical),
+                "--architecture-design",
+                str(architecture),
+                "--out",
+                str(out / "performance_review.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "test-evidence-gate"):
+        command = [
+            "python3",
+            "skills/core/test-evidence-gate/scripts/test_evidence_gate.py",
+            "--artifact-dir",
+            str(out),
+            "--out",
+            str(out / "test_evidence_gate.json"),
+        ]
+        if profile_requires(profile, "frontend-acceptance-runner"):
+            command.append("--require-frontend")
+        run_if_needed("test_evidence_gate", out / "test_evidence_gate.json", command, force, generated, skipped, steps)
+
+
+def run_release_profile_steps(
+    out: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> None:
+    for name, script, artifact in [
+        ("environment_promotion_template", "skills/core/environment-promotion-governor/scripts/environment_promotion.py", "environment_promotion.json"),
+        ("uat_acceptance_template", "skills/core/uat-acceptance-governor/scripts/uat_acceptance.py", "uat_acceptance.json"),
+        ("release_change_template", "skills/core/release-change-governor/scripts/release_change.py", "release_change.json"),
+    ]:
+        run_if_needed(name, out / artifact, ["python3", script, "template", "--out", str(out / artifact)], force, generated, skipped, steps)
+    run_if_needed(
+        "release_evidence_binder",
+        out / "release_gate.json",
+        [
+            "python3",
+            "skills/core/release-evidence-binder/scripts/bind_release.py",
+            "--artifact-dir",
+            str(out),
+            "--out",
+            str(out / "release_gate.json"),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
 
 
 def run(
@@ -252,6 +441,55 @@ def run(
     generated: list[str] = []
     skipped: list[str] = []
     steps: list[dict[str, Any]] = []
+    explicit_profiles = load_profile_registry()
+    selected_profile = explicit_profiles.get(profile, {}) if profile else {}
+    if selected_profile.get("profile_stage_mode") == "release_only":
+        run_registry_artifact_steps(selected_profile, out, force, generated, skipped, steps)
+        delivery_status = out / "delivery_status.json"
+        inspect_result = run_command(
+            "inspect",
+            [
+                "python3",
+                "skills/core/delivery-runner/scripts/delivery_runner.py",
+                "inspect",
+                "--artifact-dir",
+                str(out),
+                "--profile",
+                profile,
+                "--out",
+                str(delivery_status),
+            ],
+        )
+        steps.append(inspect_result)
+        inspect_status = read_json(delivery_status)
+        blockers = collect_blockers(steps, inspect_status)
+        missing_profile = missing_profile_artifacts(selected_profile, out)
+        gate_gaps = profile_gate_gaps(selected_profile, out)
+        summary = {
+            "schema": SCHEMA,
+            "decision": "block" if blockers else "pass",
+            "doc_id": doc_id,
+            "title": title,
+            "input": str(input_path),
+            "out_dir": str(out),
+            "generated_artifacts": sorted(set(generated)),
+            "skipped_artifacts": skipped,
+            "steps": steps,
+            "workflow_profile": selected_profile,
+            "required_gates": selected_profile.get("required_skills", []),
+            "missing_profile_artifacts": missing_profile,
+            "profile_gate_gaps": gate_gaps,
+            "next_profile_command": selected_profile.get("next_safe_command", ""),
+            "blockers": blockers,
+            "inspect_status": inspect_status,
+            "next_stage": inspect_status.get("next_stage", ""),
+            "next_command": inspect_status.get("next_command", ""),
+            "can_implement": bool(inspect_status.get("can_implement")),
+            "can_release": bool(inspect_status.get("can_release")),
+            "safety_boundary": "release_artifact_inspection_only",
+        }
+        write_json(out / "auto_run_summary.json", summary)
+        return summary
 
     if repo and project:
         project_out = out / "project_understanding"
@@ -319,6 +557,8 @@ def run(
         skipped,
         steps,
     )
+    spec_data = read_json(spec)
+    selected_profile = select_workflow_profile(spec_data, bool(repo and project), profile)
 
     technical = out / "technical_design.json"
     technical_command = ["python3", "skills/core/technical-design-governor/scripts/technical_design.py", "--spec", str(spec), "--out", str(technical)]
@@ -444,19 +684,23 @@ def run(
         skipped,
         steps,
     )
+    run_profile_artifact_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
     delivery_status = out / "delivery_status.json"
+    inspect_command = [
+        "python3",
+        "skills/core/delivery-runner/scripts/delivery_runner.py",
+        "inspect",
+        "--artifact-dir",
+        str(out),
+        "--out",
+        str(delivery_status),
+    ]
+    if profile:
+        inspect_command.extend(["--profile", profile])
     inspect_result = run_command(
         "inspect",
-        [
-            "python3",
-            "skills/core/delivery-runner/scripts/delivery_runner.py",
-            "inspect",
-            "--artifact-dir",
-            str(out),
-            "--out",
-            str(delivery_status),
-        ],
+        inspect_command,
     )
     steps.append(inspect_result)
     inspect_status = read_json(delivery_status)
@@ -467,8 +711,6 @@ def run(
             inspect_status = {}
 
     blockers = collect_blockers(steps, inspect_status)
-    spec_data = read_json(spec)
-    selected_profile = select_workflow_profile(spec_data, bool(repo and project), profile)
     missing_profile = missing_profile_artifacts(selected_profile, out)
     gate_gaps = profile_gate_gaps(selected_profile, out)
     summary = {

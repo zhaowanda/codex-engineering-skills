@@ -12,6 +12,19 @@ from typing import Any
 SCHEMA = "codex-artifact-schema-inventory-v1"
 SCHEMA_RE = re.compile(r"codex-[a-z0-9-]+-v\d+")
 GATE_TERMS = ["governor", "gate", "review", "runner", "binder", "analyzer"]
+def schema_name(stem: str) -> str:
+    return "codex-" + stem + "-v1"
+
+
+ALLOWED_DUPLICATE_SCHEMAS = {
+    schema_name("architecture-design"): "generator and template intentionally share the same artifact contract",
+    schema_name("delivery-plan"): "delivery plan reviewer validates the generated delivery plan contract",
+    schema_name("delivery-runner-status"): "synthetic runner asserts delivery-runner blocking behavior",
+    schema_name("edit-permit"): "write guard validates permits emitted by edit readiness",
+    schema_name("project-registry"): "framework validation and project onboarding share registry contract",
+    schema_name("synthetic-e2e-run"): "forward runner reports the synthetic runner contract",
+    schema_name("technical-design"): "generator and template intentionally share the same artifact contract",
+}
 
 
 def read(path: Path) -> str:
@@ -55,8 +68,11 @@ def inventory(root: Path) -> dict[str, Any]:
         for schema in schemas:
             seen.setdefault(schema, []).append(rel)
         artifacts.append({"script": rel, "schemas": schemas, "gate_like": gate_like})
+    allowed_duplicates: list[dict[str, Any]] = []
     for schema, owners in seen.items():
-        if len(owners) > 1 and not schema.endswith("-validation-v1"):
+        if len(owners) > 1 and schema in ALLOWED_DUPLICATE_SCHEMAS:
+            allowed_duplicates.append({"schema": schema, "reason": ALLOWED_DUPLICATE_SCHEMAS[schema], "owners": owners})
+        elif len(owners) > 1 and not schema.endswith("-validation-v1"):
             warnings.append({"source": schema, "message": "schema appears in multiple scripts", "owners": owners})
     return {
         "schema": SCHEMA,
@@ -64,6 +80,7 @@ def inventory(root: Path) -> dict[str, Any]:
         "script_count": len(scripts),
         "schema_count": len(seen),
         "artifacts": artifacts,
+        "allowed_duplicate_schemas": allowed_duplicates,
         "blockers": blockers,
         "warnings": warnings,
     }

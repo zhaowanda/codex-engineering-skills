@@ -90,6 +90,9 @@ def test_auto_runner_explicit_profile_selects_required_gates() -> None:
         assert result["workflow_profile"]["name"] == "frontend_change"
         assert "frontend-acceptance-runner" in result["required_gates"]
         assert "test-evidence-gate" in result["required_gates"]
+        assert (out / "frontend_acceptance.json").exists()
+        assert (out / "test_evidence_gate.json").exists()
+        assert any(step["name"] == "frontend_acceptance_template" for step in result["steps"])
         assert any(gap["artifact"] == "frontend_acceptance.json" for gap in result["profile_gate_gaps"])
 
 
@@ -104,6 +107,20 @@ def test_auto_runner_infers_frontend_profile_from_requirement() -> None:
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-FE", out=out)
         assert result["workflow_profile"]["name"] == "frontend_change"
+
+
+def test_auto_runner_release_profile_only_checks_release_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "release.md"
+        req.write_text("Release readiness check.", encoding="utf-8")
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-AUTO-REL", out=out, profile="release_readiness")
+        assert result["workflow_profile"]["name"] == "release_readiness"
+        assert result["safety_boundary"] == "release_artifact_inspection_only"
+        assert not (out / "spec.json").exists()
+        assert (out / "release_gate.json").exists()
+        assert result["inspect_status"]["next_release_actions"]
 
 
 def test_codex_eng_auto_cli_runs() -> None:
@@ -136,6 +153,7 @@ def run_all() -> None:
     test_auto_runner_project_understanding_optional()
     test_auto_runner_explicit_profile_selects_required_gates()
     test_auto_runner_infers_frontend_profile_from_requirement()
+    test_auto_runner_release_profile_only_checks_release_artifacts()
     test_codex_eng_auto_cli_runs()
 
 

@@ -10,6 +10,18 @@ from typing import Any
 SCHEMA = "codex-release-gate-v1"
 BLOCK_DECISIONS = {"block", "blocked", "no_go", "fail", "failed", "request_changes", "needs_refactor"}
 WARN_DECISIONS = {"conditional_go", "needs_review", "needs_revision", "needs_evidence", "warning"}
+COMMAND_HINTS = {
+    "implementation_completion_gate": "python3 skills/core/implementation-completion-gate/scripts/implementation_complete.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/implementation_completion_gate.json",
+    "code_review_gate": "python3 skills/core/code-review-gate/scripts/review_gate.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/code_review_gate.json",
+    "test_evidence_gate": "python3 skills/core/test-evidence-gate/scripts/test_evidence_gate.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/test_evidence_gate.json",
+    "ci_execution_evidence": "attach ci_execution_evidence.json with executed command results",
+    "environment_promotion": "python3 skills/core/environment-promotion-governor/scripts/environment_promotion.py template --out artifacts/REQ-001/environment_promotion.json",
+    "uat_acceptance": "python3 skills/core/uat-acceptance-governor/scripts/uat_acceptance.py template --out artifacts/REQ-001/uat_acceptance.json",
+    "release_change": "python3 skills/core/release-change-governor/scripts/release_change.py template --out artifacts/REQ-001/release_change.json",
+    "delivery_plan": "python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py --doc-id REQ-001 --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/delivery_plan.json",
+    "design_architecture_review": "python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py review --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json",
+    "write_guard_audit": "python3 skills/core/workspace-write-guard/scripts/write_guard.py audit --permit artifacts/REQ-001/edit_permit.json --repo /path/to/repo --out artifacts/REQ-001/write_guard_audit.json",
+}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -189,6 +201,14 @@ def bind(artifact_dir: Path, change_type: str = "code") -> dict[str, Any]:
         blockers.append({"source": "post_release_checks", "message": "post-release checks are required"})
 
     missing_evidence = [item["source"] for item in blockers if "is required" in item.get("message", "")]
+    next_required_actions = [
+        {
+            "artifact": f"{name}.json",
+            "reason": f"{name}.json is required for {change_type} release",
+            "next_command": COMMAND_HINTS.get(name, f"create artifacts/REQ-001/{name}.json with real evidence"),
+        }
+        for name in sorted(set(missing_evidence))
+    ]
     if blockers:
         decision = "no_go"
     elif warnings:
@@ -206,6 +226,7 @@ def bind(artifact_dir: Path, change_type: str = "code") -> dict[str, Any]:
         "warnings": warnings,
         "required_evidence": required,
         "missing_evidence": sorted(set(missing_evidence)),
+        "next_required_actions": next_required_actions,
         "rollback_plan": rollback,
         "post_release_checks": post_release,
         "source_files": sorted(set(source_files)),
@@ -215,7 +236,7 @@ def bind(artifact_dir: Path, change_type: str = "code") -> dict[str, Any]:
 
 def validate(data: dict[str, Any]) -> tuple[bool, list[str]]:
     issues: list[str] = []
-    required = ["schema", "decision", "score", "evidence_summary", "blockers", "warnings", "required_evidence", "missing_evidence", "rollback_plan", "post_release_checks", "source_files"]
+    required = ["schema", "decision", "score", "evidence_summary", "blockers", "warnings", "required_evidence", "missing_evidence", "next_required_actions", "rollback_plan", "post_release_checks", "source_files"]
     for key in required:
         if key not in data:
             issues.append(f"missing {key}")

@@ -40,7 +40,7 @@ profiles:
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
-    implementation_allowed_conditions:
+    notes:
       - required artifacts exist
       - delivery plan review passes
       - git evidence is ready
@@ -88,7 +88,7 @@ profiles:
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
-    implementation_allowed_conditions:
+    notes:
       - design review passes
       - delivery plan review passes
       - git evidence is ready
@@ -116,6 +116,32 @@ profiles:
       - delivery_plan_review.json
       - frontend_acceptance.json
       - test_evidence_gate.json
+    artifact_steps:
+      - name: frontend_acceptance_template
+        artifact: frontend_acceptance.json
+        command:
+          - python3
+          - skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py
+          - template
+          - --page-type
+          - custom
+          - --target-url
+          - http://localhost/TBD
+          - --artifact-dir
+          - "{artifact_dir}"
+          - --out
+          - "{artifact_dir}/frontend_acceptance.json"
+      - name: test_evidence_gate
+        artifact: test_evidence_gate.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/test-evidence-gate/scripts/test_evidence_gate.py
+          - --artifact-dir
+          - "{artifact_dir}"
+          - --out
+          - "{artifact_dir}/test_evidence_gate.json"
+          - --require-frontend
     required_gate_artifacts:
       - artifact: spec.json
         accepted_decisions:
@@ -143,7 +169,7 @@ profiles:
           - pass
           - ready
     next_safe_command: python3 skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py template --out artifacts/REQ-001/frontend_acceptance.json
-    implementation_allowed_conditions:
+    notes:
       - frontend acceptance scope is planned
       - delivery plan review passes
       - edit permit is ready
@@ -194,7 +220,7 @@ profiles:
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
-    implementation_allowed_conditions:
+    notes:
       - project understanding exists
       - cross-repo contracts are reviewed
       - delivery plan review passes
@@ -222,7 +248,66 @@ profiles:
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
+      - configuration_readiness.json
+      - data_security_review.json
+      - performance_review.json
       - release_gate.json
+    artifact_steps:
+      - name: configuration_review
+        artifact: configuration_readiness.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/configuration-governor/scripts/configuration.py
+          - analyze
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --architecture-design
+          - "{artifact_dir}/architecture_design.json"
+          - --out
+          - "{artifact_dir}/configuration_readiness.json"
+      - name: data_security_review
+        artifact: data_security_review.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/data-security-governor/scripts/data_security.py
+          - design
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --architecture-design
+          - "{artifact_dir}/architecture_design.json"
+          - --out
+          - "{artifact_dir}/data_security_review.json"
+      - name: performance_review
+        artifact: performance_review.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/performance-governor/scripts/performance.py
+          - design
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --architecture-design
+          - "{artifact_dir}/architecture_design.json"
+          - --out
+          - "{artifact_dir}/performance_review.json"
+      - name: release_evidence_binder
+        artifact: release_gate.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/release-evidence-binder/scripts/bind_release.py
+          - --artifact-dir
+          - "{artifact_dir}"
+          - --out
+          - "{artifact_dir}/release_gate.json"
     required_gate_artifacts:
       - artifact: spec.json
         accepted_decisions:
@@ -246,7 +331,7 @@ profiles:
           - go
           - conditional_go
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
-    implementation_allowed_conditions:
+    notes:
       - data design and rollback are reviewed
       - configuration/security/performance evidence is planned
   - name: release_readiness
@@ -270,6 +355,42 @@ profiles:
       - uat_acceptance.json
       - release_change.json
       - release_gate.json
+    profile_stage_mode: release_only
+    artifact_steps:
+      - name: environment_promotion_template
+        artifact: environment_promotion.json
+        command:
+          - python3
+          - skills/core/environment-promotion-governor/scripts/environment_promotion.py
+          - template
+          - --out
+          - "{artifact_dir}/environment_promotion.json"
+      - name: uat_acceptance_template
+        artifact: uat_acceptance.json
+        command:
+          - python3
+          - skills/core/uat-acceptance-governor/scripts/uat_acceptance.py
+          - template
+          - --out
+          - "{artifact_dir}/uat_acceptance.json"
+      - name: release_change_template
+        artifact: release_change.json
+        command:
+          - python3
+          - skills/core/release-change-governor/scripts/release_change.py
+          - template
+          - --out
+          - "{artifact_dir}/release_change.json"
+      - name: release_evidence_binder
+        artifact: release_gate.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/release-evidence-binder/scripts/bind_release.py
+          - --artifact-dir
+          - "{artifact_dir}"
+          - --out
+          - "{artifact_dir}/release_gate.json"
     required_gate_artifacts:
       - artifact: implementation_completion_gate.json
         accepted_decisions:
@@ -300,7 +421,7 @@ profiles:
           - go
           - conditional_go
     next_safe_command: python3 skills/core/release-evidence-binder/scripts/bind_release.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/release_gate.json
-    implementation_allowed_conditions:
+    notes:
       - implementation is complete
       - review and tests pass
       - release evidence binder returns go

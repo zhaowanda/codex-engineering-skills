@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 
+SCHEMA = "codex-ci-template-render-v1"
 PY_COMPILE = """python3 - <<'PY'
 from pathlib import Path
 import py_compile

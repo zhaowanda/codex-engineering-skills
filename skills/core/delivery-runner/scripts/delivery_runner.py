@@ -129,7 +129,9 @@ def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[d
             continue
         accepted = {str(item) for item in gate.get("accepted_decisions", [])} if isinstance(gate.get("accepted_decisions"), list) else set()
         decision = str(data.get("decision") or data.get("status") or "")
-        if accepted and decision and decision not in accepted:
+        if accepted and not decision:
+            blockers.append({"source": f"profile_gate.{artifact_name}", "message": "decision/status is missing", "accepted_decisions": sorted(accepted)})
+        elif accepted and decision not in accepted:
             blockers.append({"source": f"profile_gate.{artifact_name}", "message": f"decision {decision} not accepted", "accepted_decisions": sorted(accepted)})
         readiness_path = str(gate.get("readiness_path") or "")
         if readiness_path:
@@ -138,6 +140,26 @@ def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[d
             if actual != expected:
                 blockers.append({"source": f"profile_gate.{artifact_name}", "message": f"{readiness_path} is not {expected}", "actual": actual})
     return blockers
+
+
+def profile_next_actions(profile: dict[str, Any], artifact_dir: Path) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    gate_blockers = profile_gate_blockers(profile, artifact_dir)
+    command_by_artifact = {
+        str(step.get("artifact")): " ".join(str(part).replace("{artifact_dir}", str(artifact_dir)) for part in step.get("command", []))
+        for step in profile.get("artifact_steps", [])
+        if isinstance(step, dict) and step.get("artifact") and isinstance(step.get("command"), list)
+    }
+    for item in gate_blockers:
+        source = str(item.get("source") or "")
+        artifact = source.replace("profile_gate.", "", 1) if source.startswith("profile_gate.") else ""
+        actions.append({
+            "artifact": artifact,
+            "blocker": item.get("message", ""),
+            "accepted_decisions": item.get("accepted_decisions", []),
+            "next_command": command_by_artifact.get(artifact, profile.get("next_safe_command", "")),
+        })
+    return actions
 
 
 def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
@@ -161,6 +183,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     if state.get("blockers"):
         blockers.append({"source": "delivery_state", "message": "delivery state has blockers", "count": len(state.get("blockers", []))})
     blockers.extend(profile_gate_blockers(profile, artifact_dir))
+    next_required_actions = profile_next_actions(profile, artifact_dir)
 
     next_stage = "done"
     for name, _ in order:
@@ -189,6 +212,8 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "profile_missing_artifacts": profile_missing,
         "stage_registry": "config/workflow-stages.example.yaml",
         "next_profile_command": profile.get("next_safe_command", ""),
+        "next_required_actions": next_required_actions,
+        "next_release_actions": next_required_actions if profile.get("name") == "release_readiness" else [],
         "next_stage": next_stage,
         "next_command": commands.get(next_stage, "Run the gate for the next missing stage and attach evidence."),
         "can_implement": can_implement,

@@ -210,6 +210,21 @@ def check(root: Path) -> dict[str, Any]:
             if missing_skills:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "profile references unknown skills", "missing_skills": missing_skills})
             expected_artifacts = {str(item) for item in as_list(profile.get("expected_artifacts"))}
+            for step in as_list(profile.get("artifact_steps")):
+                if not isinstance(step, dict):
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "artifact_steps entries must be objects"})
+                    continue
+                step_name = str(step.get("name") or "")
+                artifact_name = str(step.get("artifact") or "")
+                command = as_list(step.get("command"))
+                if not step_name or not artifact_name:
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "artifact_steps name and artifact are required"})
+                elif expected_artifacts and artifact_name not in expected_artifacts:
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "artifact_steps artifact must be listed in expected_artifacts", "artifact": artifact_name})
+                if not command:
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "artifact_steps command is required", "artifact": artifact_name})
+                if command and str(command[0]) != "python3":
+                    warnings.append({"source": f"workflow_profile.{profile_name}", "message": "artifact_steps command should usually start with python3", "artifact": artifact_name})
             gates = as_list(profile.get("required_gate_artifacts"))
             if not gates:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required_gate_artifacts is required"})

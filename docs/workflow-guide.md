@@ -68,6 +68,8 @@ requirement-document-ingestor
 | `release_readiness` | `implementation-completion-gate -> code-review-gate -> test-evidence-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
 
 Profiles are machine-validated contracts, not only documentation. Each profile declares required skills, expected artifacts, required gate artifacts, accepted decisions, and readiness fields. Stage order and next commands are defined in `config/workflow-stages.example.yaml`.
+Profile `notes` are human guidance only; executable readiness is defined by `required_gate_artifacts` and the stage registry.
+Profile `artifact_steps` declare profile-specific artifact generation or inspection commands. `auto-runner` interprets these steps instead of hard-coding frontend, data, or release behavior.
 
 ## Coding Is Allowed Only When
 
@@ -132,6 +134,7 @@ MCP usage must stay inside the current task boundary and must produce evidence t
 - Capture repeated blockers with `delivery-case-capture`.
 - Run `issue-pr-governor`, `version-release-governor`, and `dependency-license-governor` before open-source release or external contribution merge.
 - Run `example-scenario-runner` to verify bugfix, feature, configuration, and frontend example paths remain demonstrable.
+- Run `synthetic-e2e-runner` or `forward-test-runner` to verify blocked, happy-path, frontend, data-migration, and release-readiness scenarios.
 - Run `artifact-schema-governor` after adding gate scripts so machine-readable contracts stay discoverable.
 - Run `prompt-pack-governor` before publishing user-facing prompt examples.
 - Run `skill-installation-governor` to verify installability before release.

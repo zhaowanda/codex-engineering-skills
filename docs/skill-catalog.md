@@ -2,6 +2,16 @@
 
 Skills are grouped by delivery stage. Each entry shows maturity and category from `SKILL.md` frontmatter.
 
+## Recommended Minimum Paths
+
+- Bugfix: `requirement-document-ingestor -> spec-governor -> technical-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`.
+- Standard feature: bugfix path plus `architecture-design-governor`, `test-design-governor`, and `traceability-governor` when acceptance coverage or cross-module scope is non-trivial.
+- Frontend change: standard feature path plus `frontend-acceptance-runner` and `test-evidence-gate`.
+- Data/config/security/performance change: standard feature path plus the matching `configuration-governor`, `data-security-governor`, and `performance-governor`.
+- Release readiness: start from `implementation-completion-gate`, then `code-review-gate`, `test-evidence-gate`, environment/UAT/release-change evidence, and `release-evidence-binder`.
+
+Do not run every skill for every task. Use the workflow profile and change-risk evidence to choose the smallest gate set that can block unsafe implementation or release.
+
 ## Requirements
 
 - `skills/core/requirement-document-ingestor`: requirement-document-ingestor (deterministic-helper, extractor-analyzer)
