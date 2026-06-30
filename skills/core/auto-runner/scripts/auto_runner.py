@@ -49,7 +49,12 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def load_docs_config_module() -> Any:
-    path = ROOT / "scripts/docs_config.py"
+    candidates = [
+        Path(__file__).resolve().parents[1] / "scripts/docs_config.py",
+        ROOT / "scripts/docs_config.py",
+        ROOT.parent / "scripts/docs_config.py",
+    ]
+    path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     spec = importlib.util.spec_from_file_location("docs_config", path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
