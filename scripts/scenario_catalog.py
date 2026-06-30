@@ -8,7 +8,7 @@ from typing import Any
 
 
 SCHEMA = "codex-scenario-catalog-v1"
-PRE_EDIT_GATE = "Before editing, require technical_design.json, architecture_design.json, design_architecture_review.json with implementation_allowed=true, delivery_plan_review.json with implementation_allowed=true, Git fetch plus pull --ff-only evidence, and edit_permit.json."
+PRE_EDIT_GATE = "Before editing, require technical_design.json, architecture_design.json, design_architecture_review.json with implementation_allowed=true, delivery_plan_review.json with implementation_allowed=true, Git fetch plus pull --ff-only evidence, and edit_permit.json. For direct edits, create write_guard_snapshot.json after the permit and require write_guard_audit.json before commit or push."
 
 SCENARIOS: list[dict[str, Any]] = [
     {

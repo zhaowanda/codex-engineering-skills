@@ -81,6 +81,8 @@ Profile `artifact_steps` declare profile-specific artifact generation or inspect
 - Git worktree evidence proves the target repo fetched the remote and updated the base branch with `pull --ff-only`.
 - Git worktree is on a non-default working branch.
 - `edit_permit.json` exists, is ready, and binds a narrow file scope.
+- `write_guard_snapshot.json` exists after the permit when direct edits are used.
+- `write_guard_audit.json` passes before commit, push, or release evidence.
 
 ## Release Is Allowed Only When
 

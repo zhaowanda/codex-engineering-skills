@@ -145,7 +145,7 @@ Preview implementation scope before editing:
 python3 scripts/codex_eng.py implement --artifact-dir /tmp/codex-auto-demo
 ```
 
-Implementation dry-run blocks until the full pre-edit gate is ready: delivery docs manifest, `technical_design.json`, `architecture_design.json`, `design_architecture_review.json` with `implementation_allowed=true`, `delivery_plan_review.json` with `implementation_allowed=true`, Git evidence that fetched the remote and updated the base branch with `pull --ff-only`, and `edit_permit.json`.
+Implementation dry-run blocks until the full pre-edit gate is ready: delivery docs manifest, `technical_design.json`, `architecture_design.json`, `design_architecture_review.json` with `implementation_allowed=true`, `delivery_plan_review.json` with `implementation_allowed=true`, Git evidence that fetched the remote and updated the base branch with `pull --ff-only`, and `edit_permit.json`. For direct edits, create `write_guard_snapshot.json` after the permit and require `write_guard_audit.json` before commit or push.
 
 Default target: `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 
