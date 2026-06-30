@@ -65,6 +65,7 @@ human_doc_review = load_module("human_doc_review", ROOT / "skills/core/human-doc
 forward_test = load_module("forward_test", ROOT / "skills/core/forward-test-runner/scripts/forward_test.py")
 scenario_catalog = load_module("scenario_catalog", ROOT / "scripts/scenario_catalog.py")
 benchmark = load_module("benchmark", ROOT / "skills/core/benchmark-governor/scripts/benchmark.py")
+implement_dry_run = load_module("implement_dry_run", ROOT / "scripts/implement_dry_run.py")
 
 
 def test_skill_health_runs_on_repo() -> None:
@@ -342,6 +343,43 @@ def test_codex_eng_next_human_cli_runs() -> None:
         assert "next_stage" in proc.stdout
 
 
+def test_implement_dry_run_blocks_missing_gates() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        result = implement_dry_run.run(Path(tmp))
+        assert result["schema"] == "codex-implement-dry-run-v1"
+        assert result["decision"] == "blocked"
+        assert "delivery_plan.json" in result["missing_gates"]
+
+
+def test_implement_dry_run_allows_scoped_ready_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "delivery_plan.json").write_text(
+            '{ "repo_tasks": [{ "role": "modify", "repo": "app", "repo_path": ".", "allowed_files": ["src/app.py"], "test_commands": ["pytest"] }] }',
+            encoding="utf-8",
+        )
+        (root / "git_worktree_evidence.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+        (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+        result = implement_dry_run.run(root)
+        assert result["decision"] == "ready"
+        assert result["can_edit"] is True
+        assert result["allowed_files"] == ["src/app.py"]
+        assert result["recommended_validation_commands"] == ["pytest"]
+
+
+def test_codex_eng_implement_dry_run_cli_runs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = subprocess.run(
+            [sys.executable, "scripts/codex_eng.py", "implement", "--artifact-dir", tmp],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        assert proc.returncode == 0
+        assert "Codex implement dry-run" in proc.stdout
+        assert "missing_gates" in proc.stdout
+
+
 def test_benchmark_reports_scenario_coverage_metrics() -> None:
     result = benchmark.report(ROOT)
     metrics = result["metrics"]
@@ -349,7 +387,9 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["workflow_profile_count"] >= 6
     assert metrics["setup_command_available"] is True
     assert metrics["next_command_available"] is True
+    assert metrics["implement_dry_run_available"] is True
     assert metrics["human_output_available"] is True
+    assert metrics["profile_scoring_available"] is True
     assert metrics["scenario_catalog_count"] >= 8
     assert metrics["documented_scenario_count"] == metrics["scenario_catalog_count"]
     assert metrics["forward_tested_scenario_count"] >= 8
@@ -378,6 +418,9 @@ def run_all() -> None:
     test_codex_eng_doctor_human_cli_runs()
     test_codex_eng_setup_dry_run_cli_runs()
     test_codex_eng_next_human_cli_runs()
+    test_implement_dry_run_blocks_missing_gates()
+    test_implement_dry_run_allows_scoped_ready_artifacts()
+    test_codex_eng_implement_dry_run_cli_runs()
     test_benchmark_reports_scenario_coverage_metrics()
 
 

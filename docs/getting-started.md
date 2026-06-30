@@ -50,6 +50,12 @@ Check the next safe action later:
 python3 scripts/codex_eng.py next --artifact-dir /tmp/codex-auto-demo
 ```
 
+Preview implementation scope before editing:
+
+```bash
+python3 scripts/codex_eng.py implement --artifact-dir /tmp/codex-auto-demo
+```
+
 The manual steps below are for debugging individual gates, not the normal path.
 
 ## 1. Installation Details

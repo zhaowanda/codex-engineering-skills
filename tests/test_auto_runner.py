@@ -36,6 +36,9 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert result["workflow_profile"]["name"] in {"small_feature", "cross_repo_api", "bugfix", "frontend_change"}
         assert "delivery-plan-reviewer" in result["required_gates"]
         assert "profile_gate_gaps" in result
+        assert result["profile_selection_score"] > 0
+        assert result["profile_selection_confidence"] in {"high", "medium", "low"}
+        assert result["profile_selection_candidates"]
         assert result["next_stage"]
         assert result["can_implement"] is False
 

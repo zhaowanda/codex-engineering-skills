@@ -190,6 +190,8 @@ def test_delivery_runner_reports_next_stage() -> None:
         root = Path(tmp)
         status = delivery_runner.inspect(root)
         assert status["next_stage"] == "spec"
+        assert status["next_action_type"] == "fix_blocker"
+        assert status["primary_next_action"]["action_type"] == "fix_blocker"
         assert status["can_implement"] is False
 
         spec = spec_governor.normalize("REQ-4", "Checkout display", "Buyer sees discount. AC: discount is visible.")
@@ -217,6 +219,7 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is True
         assert status["next_stage"] == "implementation"
+        assert status["next_action_type"] == "ready_to_implement"
 
 
 def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None:
@@ -227,6 +230,8 @@ def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is False
         assert status["next_stage"] == "delivery_plan_review"
+        assert status["next_action_type"] == "fix_blocker"
+        assert status["primary_next_action"]["artifact"] == "delivery_plan_review.json"
         assert "delivery_plan_review.py" in status["next_command"]
 
 

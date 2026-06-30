@@ -153,13 +153,57 @@ def profile_next_actions(profile: dict[str, Any], artifact_dir: Path) -> list[di
     for item in gate_blockers:
         source = str(item.get("source") or "")
         artifact = source.replace("profile_gate.", "", 1) if source.startswith("profile_gate.") else ""
+        next_command = command_by_artifact.get(artifact, "")
         actions.append({
             "artifact": artifact,
             "blocker": item.get("message", ""),
             "accepted_decisions": item.get("accepted_decisions", []),
-            "next_command": command_by_artifact.get(artifact, profile.get("next_safe_command", "")),
+            "next_command": next_command,
+            "action_type": "generate_artifact" if next_command else "fix_blocker",
         })
     return actions
+
+
+def classify_next_action(can_implement: bool, can_release: bool, blockers: list[dict[str, Any]], next_stage: str) -> str:
+    if can_release:
+        return "ready_to_release"
+    if can_implement:
+        return "ready_to_implement"
+    if blockers:
+        return "fix_blocker"
+    if next_stage in {"test", "review", "release", "environment", "uat", "release_change"}:
+        return "collect_evidence"
+    return "generate_artifact"
+
+
+def primary_next_action(
+    next_action_type: str,
+    next_stage: str,
+    next_artifact: str,
+    next_command: str,
+    blockers: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if next_action_type in {"ready_to_implement", "ready_to_release"}:
+        return {"action_type": next_action_type, "stage": next_stage, "summary": next_action_type.replace("_", " "), "command": ""}
+    if actions:
+        first = next((item for item in actions if item.get("artifact") == next_artifact), actions[0])
+        return {
+            "action_type": first.get("action_type") or next_action_type,
+            "stage": next_stage,
+            "artifact": first.get("artifact", ""),
+            "summary": first.get("blocker", ""),
+            "command": first.get("next_command") or next_command,
+        }
+    if blockers:
+        first_blocker = blockers[0]
+        return {
+            "action_type": "fix_blocker",
+            "stage": next_stage,
+            "summary": f"{first_blocker.get('source', 'unknown')}: {first_blocker.get('message', '')}",
+            "command": next_command,
+        }
+    return {"action_type": next_action_type, "stage": next_stage, "summary": "run next workflow command", "command": next_command}
 
 
 def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
@@ -201,6 +245,11 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     can_implement = not implementation_missing and not blockers
     can_release = not release_missing and not blockers
     commands = {str(stage["name"]): str(stage.get("next_command") or "") for stage in stages}
+    next_command = commands.get(next_stage, "Run the gate for the next missing stage and attach evidence.")
+    artifact_by_stage = {name: filename for name, filename in order}
+    next_artifact = artifact_by_stage.get(next_stage, "")
+    next_action_type = classify_next_action(can_implement, can_release, blockers, next_stage)
+    primary_action = primary_next_action(next_action_type, next_stage, next_artifact, next_command, blockers, next_required_actions)
     return {
         "schema": "codex-delivery-runner-status-v1",
         "artifact_dir": str(artifact_dir),
@@ -215,7 +264,9 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "next_required_actions": next_required_actions,
         "next_release_actions": next_required_actions if profile.get("name") == "release_readiness" else [],
         "next_stage": next_stage,
-        "next_command": commands.get(next_stage, "Run the gate for the next missing stage and attach evidence."),
+        "next_action_type": next_action_type,
+        "primary_next_action": primary_action,
+        "next_command": next_command,
         "can_implement": can_implement,
         "can_release": can_release,
         "implementation_missing": implementation_missing,

@@ -176,35 +176,85 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_repo: bool, explicit_profile: str | None = None) -> dict[str, Any]:
+    name = str(profile.get("name") or "")
+    score = 0
+    signals: list[str] = []
+    if explicit_profile and explicit_profile == name:
+        score += 100
+        signals.append("explicit_profile")
+    trigger_lanes = {str(item) for item in as_list(profile.get("trigger_lanes"))}
+    if lane and lane in trigger_lanes:
+        score += 45
+        signals.append(f"lane:{lane}")
+    trigger_impacts = {str(item) for item in as_list(profile.get("trigger_impacts"))}
+    matched_impacts = sorted(impacts & trigger_impacts)
+    if matched_impacts:
+        score += 35 + (5 * len(matched_impacts))
+        signals.extend(f"impact:{item}" for item in matched_impacts)
+    if has_repo and name == "cross_repo_api":
+        score += 50
+        signals.append("repo_context")
+    if {"data", "security"} & impacts and name == "data_migration":
+        score += 45
+        signals.append("high_risk_data_or_security")
+    if lane in {"bugfix", "hotfix"} and name in {"bugfix", "hotfix"}:
+        score += 60
+        signals.append("defect_containment")
+    if not signals and name == "small_feature":
+        score += 5
+        signals.append("default_fallback")
+    return {"profile": name, "score": score, "signals": signals}
+
+
+def profile_selection_confidence(candidates: list[dict[str, Any]]) -> str:
+    if not candidates:
+        return "low"
+    ordered = sorted(candidates, key=lambda item: int(item.get("score") or 0), reverse=True)
+    top = int(ordered[0].get("score") or 0)
+    second = int(ordered[1].get("score") or 0) if len(ordered) > 1 else 0
+    if top >= 80 and top - second >= 25:
+        return "high"
+    if top >= 45 and top - second >= 10:
+        return "medium"
+    return "low"
+
+
 def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     profiles = load_profile_registry()
-    if explicit_profile and explicit_profile in profiles:
-        return profiles[explicit_profile], {
-            "mode": "explicit_profile",
-            "selected_profile": explicit_profile,
-            "reason": "Profile was explicitly requested.",
-        }
     lane = str(spec.get("lane") or "")
     impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
-    if has_repo and "cross_repo_api" in profiles:
-        return profiles["cross_repo_api"], {
-            "mode": "repo_context",
-            "selected_profile": "cross_repo_api",
-            "reason": "Project understanding was requested, so cross-repo/API contract gates are required.",
+    candidates = sorted(
+        (profile_score(profile, lane, impacts, has_repo, explicit_profile) for profile in profiles.values()),
+        key=lambda item: int(item.get("score") or 0),
+        reverse=True,
+    )
+    confidence = profile_selection_confidence(candidates)
+
+    def reason_payload(mode: str, selected_profile: str, reason: str, **extra: Any) -> dict[str, Any]:
+        payload = {
+            "mode": mode,
+            "selected_profile": selected_profile,
+            "reason": reason,
             "lane": lane,
             "impacts": sorted(impacts),
+            "profile_selection_score": next((item.get("score", 0) for item in candidates if item.get("profile") == selected_profile), 0),
+            "profile_selection_confidence": confidence,
+            "profile_selection_candidates": candidates,
+            "fallback_reason": "" if mode != "fallback" else reason,
         }
+        payload.update(extra)
+        return payload
+
+    if explicit_profile and explicit_profile in profiles:
+        return profiles[explicit_profile], reason_payload("explicit_profile", explicit_profile, "Profile was explicitly requested.")
+    if has_repo and "cross_repo_api" in profiles:
+        return profiles["cross_repo_api"], reason_payload("repo_context", "cross_repo_api", "Project understanding was requested, so cross-repo/API contract gates are required.")
     if lane in {"bugfix", "hotfix"}:
         for profile in profiles.values():
             if lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
                 profile_name = str(profile.get("name") or "")
-                return profile, {
-                    "mode": "lane",
-                    "selected_profile": profile_name,
-                    "reason": f"Spec lane {lane} takes precedence over impact routing for defect containment.",
-                    "lane": lane,
-                    "impacts": sorted(impacts),
-                }
+                return profile, reason_payload("lane", profile_name, f"Spec lane {lane} takes precedence over impact routing for defect containment.")
     priority = [
         ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
         ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
@@ -213,32 +263,14 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
     ]
     for impact, profile_name, reason in priority:
         if impact in impacts and profile_name in profiles:
-            return profiles[profile_name], {
-                "mode": "impact_surface",
-                "selected_profile": profile_name,
-                "reason": reason,
-                "matched_impact": impact,
-                "lane": lane,
-                "impacts": sorted(impacts),
-            }
+            return profiles[profile_name], reason_payload("impact_surface", profile_name, reason, matched_impact=impact)
     for profile in profiles.values():
         if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
             profile_name = str(profile.get("name") or "")
-            return profile, {
-                "mode": "lane",
-                "selected_profile": profile_name,
-                "reason": f"Spec lane {lane} is declared in profile trigger_lanes.",
-                "lane": lane,
-                "impacts": sorted(impacts),
-            }
+            return profile, reason_payload("lane", profile_name, f"Spec lane {lane} is declared in profile trigger_lanes.")
     fallback = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
-    return fallback, {
-        "mode": "fallback",
-        "selected_profile": str(fallback.get("name") or "small_feature"),
-        "reason": "No explicit, repository, impact, or lane trigger matched; using default small feature workflow.",
-        "lane": lane,
-        "impacts": sorted(impacts),
-    }
+    fallback_name = str(fallback.get("name") or "small_feature")
+    return fallback, reason_payload("fallback", fallback_name, "No explicit, repository, impact, or lane trigger matched; using default small feature workflow.")
 
 
 def select_workflow_profile(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> dict[str, Any]:
@@ -532,6 +564,10 @@ def run(
             "steps": steps,
             "workflow_profile": selected_profile,
             "profile_selection_reason": profile_selection_reason,
+            "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
+            "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
+            "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
+            "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
             "required_gates": selected_profile.get("required_skills", []),
             "missing_profile_artifacts": missing_profile,
             "profile_gate_gaps": gate_gaps,
@@ -781,6 +817,10 @@ def run(
         "steps": steps,
         "workflow_profile": selected_profile,
         "profile_selection_reason": profile_selection_reason,
+        "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
+        "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
+        "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
+        "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
         "required_gates": selected_profile.get("required_skills", []),
         "missing_profile_artifacts": missing_profile,
         "profile_gate_gaps": gate_gaps,

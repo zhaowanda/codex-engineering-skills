@@ -120,27 +120,24 @@ def render_auto_human(result: dict[str, Any]) -> str:
 
 def render_status_human(result: dict[str, Any]) -> str:
     profile = result.get("workflow_profile") if isinstance(result.get("workflow_profile"), dict) else {}
+    primary = result.get("primary_next_action") if isinstance(result.get("primary_next_action"), dict) else {}
     blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
-    actions = result.get("next_required_actions") if isinstance(result.get("next_required_actions"), list) else []
     lines = [
         "Codex delivery status",
         f"- artifact_dir: {result.get('artifact_dir', '')}",
         f"- profile: {profile.get('name', '')}",
         f"- next_stage: {result.get('next_stage', '')}",
+        f"- next_action_type: {result.get('next_action_type', '')}",
         f"- can_implement: {human_bool(bool(result.get('can_implement')))}",
         f"- can_release: {human_bool(bool(result.get('can_release')))}",
-        f"- next_command: {result.get('next_command') or result.get('next_profile_command') or ''}",
+        f"- next_summary: {primary.get('summary', '')}",
+        f"- next_command: {primary.get('command') or result.get('next_command') or result.get('next_profile_command') or ''}",
     ]
     if blockers:
         lines.append("- blockers:")
         for item in blockers[:5]:
             if isinstance(item, dict):
                 lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
-    if actions:
-        lines.append("- next_required_actions:")
-        for item in actions[:5]:
-            if isinstance(item, dict):
-                lines.append(f"  - {item.get('artifact', '')}: {item.get('next_command', '')}")
     return "\n".join(lines) + "\n"
 
 
@@ -155,6 +152,28 @@ def render_doctor_human(result: dict[str, Any]) -> str:
     for item in checks:
         if isinstance(item, dict):
             lines.append(f"  - {item.get('name', '')}: {'pass' if item.get('passed') else 'block'} ({item.get('decision', '')})")
+    return "\n".join(lines) + "\n"
+
+
+def render_implement_human(result: dict[str, Any]) -> str:
+    lines = [
+        "Codex implement dry-run",
+        f"- decision: {result.get('decision', '')}",
+        f"- can_edit: {human_bool(bool(result.get('can_edit')))}",
+        f"- next_action: {result.get('next_action', '')}",
+    ]
+    allowed = result.get("allowed_files") if isinstance(result.get("allowed_files"), list) else []
+    commands = result.get("recommended_validation_commands") if isinstance(result.get("recommended_validation_commands"), list) else []
+    missing = result.get("missing_gates") if isinstance(result.get("missing_gates"), list) else []
+    if allowed:
+        lines.append("- allowed_files:")
+        lines.extend(f"  - {item}" for item in allowed[:10])
+    if commands:
+        lines.append("- validation_commands:")
+        lines.extend(f"  - {item}" for item in commands[:10])
+    if missing:
+        lines.append("- missing_gates:")
+        lines.extend(f"  - {item}" for item in missing[:10])
     return "\n".join(lines) + "\n"
 
 
@@ -239,6 +258,10 @@ def main() -> int:
     p_next.add_argument("--artifact-dir", required=True)
     p_next.add_argument("--profile")
     p_next.add_argument("--format", choices=["json", "human"], default="human")
+    p_implement = sub.add_parser("implement")
+    p_implement.add_argument("--artifact-dir", required=True)
+    p_implement.add_argument("--dry-run", action="store_true", default=True)
+    p_implement.add_argument("--format", choices=["json", "human"], default="human")
     p_e2e = sub.add_parser("synthetic-e2e")
     p_e2e.add_argument("--out-dir", required=True)
     p_scenarios = sub.add_parser("scenarios")
@@ -318,6 +341,18 @@ def main() -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2) if result else stdout, end="" if result else "")
         elif result:
             print(render_status_human(result), end="")
+        else:
+            print(stdout, end="")
+            print(stderr, end="", file=sys.stderr)
+        return 0 if result else code
+    if args.cmd == "implement":
+        command = ["python3", "scripts/implement_dry_run.py", "--artifact-dir", args.artifact_dir]
+        code, stdout, stderr = run_capture(command)
+        result = parse_json_text(stdout)
+        if args.format == "json":
+            print(json.dumps(result, ensure_ascii=False, indent=2) if result else stdout, end="" if result else "")
+        elif result:
+            print(render_implement_human(result), end="")
         else:
             print(stdout, end="")
             print(stderr, end="", file=sys.stderr)

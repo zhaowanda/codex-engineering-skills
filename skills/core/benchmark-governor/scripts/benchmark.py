@@ -42,6 +42,7 @@ def report(root: Path) -> dict[str, Any]:
     scenarios = list((root / "examples/scenarios").glob("*/requirement.md"))
     tests = list((root / "tests").glob("test_*.py"))
     cli_text = (root / "scripts/codex_eng.py").read_text(encoding="utf-8") if (root / "scripts/codex_eng.py").exists() else ""
+    auto_runner_text = (root / "skills/core/auto-runner/scripts/auto_runner.py").read_text(encoding="utf-8") if (root / "skills/core/auto-runner/scripts/auto_runner.py").exists() else ""
     profiles = run_json(root, ["python3", "scripts/codex_eng.py", "scenarios"])["json"]
     scenario_catalog_count = int(profiles.get("scenario_count") or 0)
     documented_text = (root / "docs/scenario-guide.md").read_text(encoding="utf-8") if (root / "docs/scenario-guide.md").exists() else ""
@@ -82,7 +83,9 @@ def report(root: Path) -> dict[str, Any]:
             "workflow_profile_count": len(workflow_profiles),
             "setup_command_available": "sub.add_parser(\"setup\")" in cli_text,
             "next_command_available": "sub.add_parser(\"next\")" in cli_text,
+            "implement_dry_run_available": "sub.add_parser(\"implement\")" in cli_text and (root / "scripts/implement_dry_run.py").exists(),
             "human_output_available": "--format" in cli_text and "render_auto_human" in cli_text,
+            "profile_scoring_available": "profile_selection_confidence" in auto_runner_text and "profile_selection_candidates" in auto_runner_text,
             "scenario_catalog_count": scenario_catalog_count,
             "documented_scenario_count": len(documented_scenarios),
             "forward_tested_scenario_count": sum(1 for value in forward_scenario_results.values() if value),

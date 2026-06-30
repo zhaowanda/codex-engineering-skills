@@ -128,6 +128,12 @@ Check the next safe action later:
 python3 scripts/codex_eng.py next --artifact-dir /tmp/codex-auto-demo
 ```
 
+Preview implementation scope before editing:
+
+```bash
+python3 scripts/codex_eng.py implement --artifact-dir /tmp/codex-auto-demo
+```
+
 Default target: `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 
 Install this repository into the local Codex skills directory:
