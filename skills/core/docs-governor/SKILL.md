@@ -24,6 +24,8 @@ delivery docs repository setup
 
 - Separate human-readable documents from machine-readable gate artifacts.
 - Require stable doc ids for requirement-specific folders.
+- `init` must materialize non-empty requirement-scoped human docs and machine placeholders; empty `human/` or `machine/` directories are not sufficient.
+- `sync` must copy generated delivery artifacts into the docs repository by `doc_id` so docs follow the requirement, not just the workspace.
 - Keep private project docs outside the open-core repository.
 - Validate expected folders and manifests before teams rely on the docs repository.
 - Before implementation, validate docs root with `--require-git`; a plain local folder is not enough.
@@ -46,7 +48,19 @@ Initialize one delivery doc id in the configured docs repository:
 python3 scripts/docs_governor.py \
   init \
   --docs-root delivery-docs \
-  --doc-id REQ-001
+  --doc-id REQ-001 \
+  --title "Order export"
+```
+
+Sync generated delivery artifacts into the docs repository:
+
+```bash
+python3 scripts/docs_governor.py \
+  sync \
+  --docs-root delivery-docs \
+  --doc-id REQ-001 \
+  --title "Order export" \
+  --artifact-dir artifacts/REQ-001
 ```
 
 Validate:
@@ -63,4 +77,4 @@ python3 scripts/docs_governor.py \
 
 The output uses schema `codex-docs-governor-v1`.
 
-The artifact reports initialized or validated paths, missing structure, blockers, warnings, and next actions.
+The artifact reports initialized, synced, or validated paths, missing structure, blockers, warnings, and next actions. A valid initialized doc id includes non-empty `human/specs`, `human/designs`, `human/releases`, `machine/specs`, `machine/designs`, `machine/reviews`, and `machine/releases` files.

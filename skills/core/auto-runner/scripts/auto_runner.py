@@ -62,6 +62,19 @@ def load_docs_config_module() -> Any:
     return module
 
 
+def load_docs_governor_module() -> Any:
+    candidates = [
+        Path(__file__).resolve().parents[2] / "docs-governor/scripts/docs_governor.py",
+        ROOT / "skills/core/docs-governor/scripts/docs_governor.py",
+    ]
+    path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    spec = importlib.util.spec_from_file_location("docs_governor", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
 def default_docs_root() -> Path | None:
     try:
         return load_docs_config_module().configured_docs_root(ROOT)
@@ -98,6 +111,20 @@ def docs_readiness(docs_root: Path | None, doc_id: str) -> dict[str, Any]:
         "blockers": blockers,
         "next_command": f"python3 skills/core/docs-governor/scripts/docs_governor.py init --docs-root {docs_root} --doc-id {doc_id}",
     }
+
+
+def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifact_dir: Path) -> dict[str, Any]:
+    if not docs_root:
+        return {"decision": "skipped", "reason": "docs_root is not configured"}
+    if not docs_root.exists():
+        return {"decision": "skipped", "reason": "docs_root does not exist"}
+    proc = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=docs_root, text=True, capture_output=True)
+    if proc.returncode != 0 or proc.stdout.strip() != "true":
+        return {"decision": "skipped", "reason": "docs_root is not a git repository"}
+    try:
+        return load_docs_governor_module().sync(docs_root, doc_id, artifact_dir, title)
+    except Exception as exc:
+        return {"decision": "block", "reason": str(exc), "blockers": [{"source": "docs_sync", "message": str(exc)}]}
 
 
 def parse_scalar(value: str) -> Any:
@@ -614,7 +641,12 @@ def run(
         )
         steps.append(inspect_result)
         inspect_status = read_json(delivery_status)
+        docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out)
+        if docs_sync.get("decision") == "pass":
+            docs_status = docs_readiness(effective_docs_root, doc_id)
         blockers = collect_blockers(steps, inspect_status)
+        if docs_sync.get("decision") == "block":
+            blockers.extend(docs_sync.get("blockers", []))
         missing_profile = missing_profile_artifacts(selected_profile, out)
         gate_gaps = profile_gate_gaps(selected_profile, out)
         summary = {
@@ -635,6 +667,7 @@ def run(
             "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
             "required_gates": selected_profile.get("required_skills", []),
             "docs_readiness": docs_status,
+            "docs_sync": docs_sync,
             "missing_profile_artifacts": missing_profile,
             "profile_gate_gaps": gate_gaps,
             "next_profile_command": selected_profile.get("next_safe_command", ""),
@@ -868,8 +901,13 @@ def run(
         except Exception:
             inspect_status = {}
 
+    docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out)
+    if docs_sync.get("decision") == "pass":
+        docs_status = docs_readiness(effective_docs_root, doc_id)
     blockers = collect_blockers(steps, inspect_status, include_inspect=False)
     readiness_blockers = [item for item in inspect_status.get("blockers", []) or [] if isinstance(item, dict)]
+    if docs_sync.get("decision") == "block":
+        blockers.extend(docs_sync.get("blockers", []))
     if docs_status.get("decision") == "block":
         blockers.extend(docs_status.get("blockers", []))
     missing_profile = missing_profile_artifacts(selected_profile, out)
@@ -892,6 +930,7 @@ def run(
         "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
         "required_gates": selected_profile.get("required_skills", []),
         "docs_readiness": docs_status,
+        "docs_sync": docs_sync,
         "readiness_blockers": readiness_blockers,
         "missing_profile_artifacts": missing_profile,
         "profile_gate_gaps": gate_gaps,

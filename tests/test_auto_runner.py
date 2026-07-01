@@ -37,12 +37,18 @@ def restore_workspace_docs_config(original: str | None) -> None:
 def test_auto_runner_generates_core_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "artifacts"
-        result = auto_runner.run(
-            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
-            doc_id="REQ-AUTO-1",
-            title="Order export",
-            out=out,
-        )
+        config_file = ROOT / ".codex-engineering-docs.json"
+        original = config_file.read_text(encoding="utf-8") if config_file.exists() else None
+        restore_workspace_docs_config(None)
+        try:
+            result = auto_runner.run(
+                input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+                doc_id="REQ-AUTO-1",
+                title="Order export",
+                out=out,
+            )
+        finally:
+            restore_workspace_docs_config(original)
         assert result["schema"] == "codex-auto-runner-summary-v1"
         assert (out / "requirement.normalized.txt").exists()
         assert (out / "spec.json").exists()
@@ -67,9 +73,7 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
-        manifest = docs_root / "indexes/REQ-AUTO-DOCS.manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}", encoding="utf-8")
+        docs_root.mkdir(parents=True)
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
         out = root / "artifacts"
         result = auto_runner.run(
@@ -80,6 +84,15 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
             docs_root=docs_root,
         )
         assert result["docs_readiness"]["decision"] == "pass"
+        assert result["docs_sync"]["decision"] == "pass"
+        assert (docs_root / "indexes/REQ-AUTO-DOCS.manifest.json").exists()
+        assert "Order Export Requirement" in (docs_root / "human/specs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        assert "Technical Design" in (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        assert "Readiness" in (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        machine_spec = json.loads((docs_root / "machine/specs/REQ-AUTO-DOCS.spec.json").read_text(encoding="utf-8"))
+        assert machine_spec["schema"] == "codex-docs-machine-bundle-v1"
+        assert "spec.json" in machine_spec["artifacts"]
+        assert (docs_root / "machine/raw/REQ-AUTO-DOCS/auto_run_summary.json").exists()
 
 
 def test_auto_runner_blocks_docs_root_without_git_repo() -> None:
