@@ -55,7 +55,24 @@ def write_text_if_missing(path: Path, text: str) -> None:
         path.write_text(text, encoding="utf-8")
 
 
-def markdown_template(doc_id: str, title: str, kind: str) -> str:
+def normalize_doc_language(language: str = "en") -> str:
+    return "zh" if str(language).lower() in {"zh", "cn", "chinese", "中文"} else "en"
+
+
+def markdown_template(doc_id: str, title: str, kind: str, language: str = "en") -> str:
+    if normalize_doc_language(language) == "zh":
+        kind_label = {"spec": "需求说明", "design": "技术设计", "release": "发布准备"}.get(kind, kind)
+        heading = title or doc_id
+        return (
+            f"# {heading} {kind_label}\n\n"
+            f"- 文档编号：`{doc_id}`\n"
+            "- 状态：已初始化，等待同步交付产物\n"
+            "- 来源：docs-governor\n\n"
+            "## 摘要\n\n"
+            "当前只有文档骨架；请在生成需求、设计、计划、评审产物后执行 docs-governor sync。\n\n"
+            "## 追踪关系\n\n"
+            "- 需求、设计、评审、发布证据必须通过同一个文档编号关联。\n"
+        )
     heading = title or doc_id
     return (
         f"# {heading} {kind}\n\n"
@@ -80,7 +97,7 @@ def placeholder_artifact(doc_id: str, artifact_type: str) -> dict[str, Any]:
     }
 
 
-def materialize_doc_files(docs_root: Path, doc_id: str, title: str = "") -> dict[str, list[str]]:
+def materialize_doc_files(docs_root: Path, doc_id: str, title: str = "", language: str = "en") -> dict[str, list[str]]:
     human_paths = {
         "spec": docs_root / "human/specs" / f"{doc_id}.md",
         "design": docs_root / "human/designs" / f"{doc_id}.md",
@@ -91,7 +108,7 @@ def materialize_doc_files(docs_root: Path, doc_id: str, title: str = "") -> dict
         for name, (directory, suffix) in MACHINE_ARTIFACTS.items()
     }
     for name, path in human_paths.items():
-        write_text_if_missing(path, markdown_template(doc_id, title, name))
+        write_text_if_missing(path, markdown_template(doc_id, title, name, language))
     for name, path in machine_paths.items():
         if not path.exists() or not path.read_text(encoding="utf-8").strip():
             write_json(path, placeholder_artifact(doc_id, name))
@@ -192,6 +209,25 @@ def render_requirement_clarification(spec: dict[str, Any]) -> str:
     )
 
 
+def render_requirement_clarification_zh(spec: dict[str, Any]) -> str:
+    english = render_requirement_clarification(spec)
+    replacements = {
+        "### Clarification Status": "### 澄清状态",
+        "Status: blocked pending answer": "状态：等待答复，暂时阻塞",
+        "Status: no blocking clarification recorded": "状态：未记录阻塞性澄清问题",
+        "Design can proceed: no": "是否允许进入设计：否",
+        "Design can proceed: yes": "是否允许进入设计：是",
+        "### Confirmed Understanding": "### 已确认理解",
+        "No confirmed business rules beyond the requirement text.": "除需求原文外，未记录更多已确认业务规则。",
+        "### Pending Questions": "### 待澄清问题",
+        "None recorded.": "未记录。",
+        "### Working Assumptions": "### 工作假设",
+    }
+    for source, target in replacements.items():
+        english = english.replace(source, target)
+    return english
+
+
 def render_open_questions(*documents: dict[str, Any]) -> str:
     lines: list[str] = []
     for data in documents:
@@ -244,17 +280,56 @@ def render_named_items(items: list[Any], fields: list[str], empty: str) -> str:
 
 
 def render_delivery_tasks(delivery_plan: dict[str, Any]) -> str:
-    lines: list[str] = []
+    sections: list[str] = []
     for repo in as_list(delivery_plan.get("repo_tasks")):
         if not isinstance(repo, dict):
             continue
         allowed_files = ", ".join(str(item) for item in as_list(repo.get("allowed_files"))) or "not narrowed yet"
+        read_first = ", ".join(str(item) for item in as_list(repo.get("read_first"))) or "not bound yet"
         tests = ", ".join(str(item) for item in as_list(repo.get("test_commands"))) or "not bound yet"
-        lines.append(f"- Repo `{text(repo.get('repo'))}`: {text(repo.get('responsibility'))}; files: {allowed_files}; tests: {tests}")
+        git_prep = repo.get("git_preparation") if isinstance(repo.get("git_preparation"), dict) else {}
+        git_steps = ", ".join(str(item) for item in as_list(git_prep.get("required_before_edit"))) or "not bound yet"
+        lines = [
+            f"### Repo `{text(repo.get('repo'))}`",
+            "",
+            f"- Role: `{text(repo.get('role'))}`",
+            f"- Responsibility: {text(repo.get('responsibility'))}",
+            f"- Read first: {read_first}",
+            f"- Allowed files: {allowed_files}",
+            f"- Test commands: {tests}",
+            f"- Git preparation: {git_steps}",
+            "",
+        ]
         for task in as_list(repo.get("tasks"))[:6]:
             if isinstance(task, dict):
-                lines.append(f"  - {text(task.get('phase'))}: {text(task.get('summary'))}")
-    return "\n".join(lines) if lines else "- No repo tasks were synced."
+                evidence = ", ".join(str(item) for item in as_list(task.get("evidence_to_collect"))) or "TBD"
+                files_to_edit = ", ".join(str(item) for item in as_list(task.get("files_to_edit"))) or "none"
+                exit_criteria = ", ".join(str(item) for item in as_list(task.get("exit_criteria"))) or "TBD"
+                lines.append(
+                    f"- `{text(task.get('phase'))}` {text(task.get('summary'))}; "
+                    f"edit files: {files_to_edit}; evidence: {evidence}; exit: {exit_criteria}"
+                )
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections) if sections else "- No repo tasks were synced."
+
+
+def render_solution_options(technical: dict[str, Any], architecture: dict[str, Any], language: str = "en") -> str:
+    label_option = "方案" if language == "zh" else "Option"
+    label_selected = "选中方案" if language == "zh" else "Selected"
+    sections: list[str] = []
+    selected_technical = technical.get("selected_solution") if isinstance(technical.get("selected_solution"), dict) else {}
+    selected_arch = architecture.get("selected_architecture") if isinstance(architecture.get("selected_architecture"), dict) else {}
+    for title, options, selected in [
+        ("技术方案对比" if language == "zh" else "Technical Options", as_list(technical.get("solution_options")), selected_technical),
+        ("架构方案对比" if language == "zh" else "Architecture Options", as_list(architecture.get("architecture_options")), selected_arch),
+    ]:
+        lines = [f"### {title}", ""]
+        for item in options:
+            if isinstance(item, dict):
+                lines.append(f"- {label_option} `{text(item.get('option_id'))}` {text(item.get('name'))}: {text(item.get('description'))}; risk: {text(item.get('risk_level'))}; rollback: {text(item.get('rollback_strategy'))}")
+        lines.append(f"- {label_selected}: `{text(selected.get('selected_option_id'))}`; reason: {text(selected.get('selection_reason'))}; tradeoffs: {text(selected.get('tradeoffs'))}")
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
 
 
 def render_blockers(*documents: dict[str, Any]) -> str:
@@ -300,6 +375,100 @@ def render_evidence_refs(artifact_dir: Path) -> str:
     return "\n".join(lines) if lines else "- No machine artifacts were synced."
 
 
+def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> dict[str, str]:
+    requirement = artifact_dir / "requirement.normalized.txt"
+    spec = read_json(artifact_dir / "spec.json")
+    technical = read_json(artifact_dir / "technical_design.json")
+    architecture = read_json(artifact_dir / "architecture_design.json")
+    delivery_plan = read_json(artifact_dir / "delivery_plan.json")
+    design_review = read_json(artifact_dir / "design_architecture_review.json")
+    delivery_review = read_json(artifact_dir / "delivery_plan_review.json")
+    status = read_json(artifact_dir / "delivery_status.json")
+    requirement_text = requirement.read_text(encoding="utf-8") if requirement.exists() else ""
+    heading = title or str(spec.get("title") or doc_id)
+    return {
+        "spec": (
+            f"# {heading} 需求说明\n\n"
+            "## 一、摘要\n\n"
+            f"- 文档编号：`{doc_id}`\n"
+            f"- 当前结论：`{text(spec.get('decision'), 'unknown')}`\n"
+            f"- 是否涉及权限敏感场景：{text((spec.get('permission_scope') or {}).get('sensitive'), 'unknown')}\n\n"
+            "## 二、需求范围\n\n"
+            f"{render_scope(spec, text(spec.get('summary') or heading))}\n\n"
+            "## 三、需求澄清\n\n"
+            f"{render_requirement_clarification_zh(spec)}\n\n"
+            "## 四、需求原文\n\n"
+            f"{requirement_text.strip() or '未同步到需求原文。'}\n\n"
+            "## 五、验收标准\n\n"
+            f"{render_acceptance(spec)}\n\n"
+            "## 六、业务规则\n\n"
+            f"{render_business_rules(spec)}\n\n"
+            "## 七、未决问题\n\n"
+            f"{render_open_questions(spec)}\n\n"
+            "## 八、证据引用\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
+        ),
+        "design": (
+            f"# {heading} 技术设计\n\n"
+            "## 一、摘要\n\n"
+            f"- 文档编号：`{doc_id}`\n"
+            f"- 技术设计状态：`{text(technical.get('decision'), 'draft')}`\n"
+            f"- 架构设计状态：`{text(architecture.get('decision'), 'draft')}`\n"
+            f"- 交付计划状态：`{text(delivery_plan.get('decision'), 'draft')}`\n\n"
+            "## 二、现状分析\n\n"
+            f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], '未同步到现状分析。')}\n\n"
+            f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], '未同步到当前架构分析。')}\n\n"
+            "## 三、方案对比与选择\n\n"
+            f"{render_solution_options(technical, architecture, 'zh')}\n\n"
+            "## 四、业务流程\n\n"
+            f"{render_process_flows(technical)}\n\n"
+            "## 五、模块与接口设计\n\n"
+            f"{render_named_items(as_list(technical.get('module_decomposition')), ['module', 'responsibility', 'input', 'output', 'coupling_control'], '未同步到模块设计。')}\n\n"
+            f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], '未同步到接口影响。')}\n\n"
+            f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], '未同步到接口示例。')}\n\n"
+            "## 六、数据、页面与交互影响\n\n"
+            f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], '未同步到数据设计。')}\n\n"
+            f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], '未同步到页面影响。')}\n\n"
+            "## 七、架构与运维影响\n\n"
+            f"{render_named_items(as_list(architecture.get('cross_repo_dependency_graph')), ['from', 'to', 'contract', 'change'], '未同步到跨仓依赖图。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], '未同步到集成顺序。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], '未同步到发布影响矩阵。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚策略。')}\n\n"
+            "## 八、交付执行计划\n\n"
+            f"{render_delivery_tasks(delivery_plan)}\n\n"
+            "## 九、测试与验收证据\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。')}\n\n"
+            "## 十、风险与未过门禁\n\n"
+            f"{render_blockers(delivery_plan, architecture)}\n\n"
+            "## 十一、证据引用\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
+        ),
+        "release": (
+            f"# {heading} 发布准备\n\n"
+            "## 一、摘要\n\n"
+            f"- 文档编号：`{doc_id}`\n"
+            f"- 当前下一阶段：`{text(status.get('next_stage'), 'unknown')}`\n"
+            f"- 是否允许实现：`{text(status.get('can_implement'), 'false')}`\n"
+            f"- 是否允许发布：`{text(status.get('can_release'), 'false')}`\n\n"
+            "## 二、缺口清单\n\n"
+            "### 实现前必须补齐\n\n"
+            f"{bullet_lines([str(item) for item in as_list(status.get('implementation_missing'))], '未同步到实现前缺口。')}\n\n"
+            "### 发布前必须补齐\n\n"
+            f"{bullet_lines([str(item) for item in as_list(status.get('release_missing'))], '未同步到发布前缺口。')}\n\n"
+            "## 三、评审结论\n\n"
+            f"- 设计评审：`{text(design_review.get('decision'), 'unknown')}`\n"
+            f"- 交付计划评审：`{text(delivery_review.get('decision'), 'unknown')}`\n\n"
+            "## 四、阻塞项\n\n"
+            f"{render_blockers(design_review, delivery_review, status)}\n\n"
+            "## 五、下一步动作\n\n"
+            f"- {render_next_action(status, delivery_review)}\n\n"
+            "## 六、证据引用\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
+        ),
+    }
+
+
 def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dict[str, str]:
     requirement = artifact_dir / "requirement.normalized.txt"
     spec = read_json(artifact_dir / "spec.json")
@@ -340,19 +509,30 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"- Technical decision: `{text(technical.get('decision'), 'draft')}`\n"
             f"- Architecture decision: `{text(architecture.get('decision'), 'draft')}`\n"
             f"- Delivery plan decision: `{text(delivery_plan.get('decision'), 'draft')}`\n\n"
+            "## Current State\n\n"
+            f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], 'No current-state analysis was synced.')}\n\n"
+            f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], 'No current architecture analysis was synced.')}\n\n"
+            "## Options And Decision\n\n"
+            f"{render_solution_options(technical, architecture, 'en')}\n\n"
             "## Process Flow\n\n"
             f"{render_process_flows(technical)}\n\n"
             "## Module And Contract Design\n\n"
-            f"{render_named_items(as_list(technical.get('module_design')), ['module', 'responsibility', 'change_summary'], 'No module design was synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('module_decomposition')), ['module', 'responsibility', 'input', 'output', 'coupling_control'], 'No module design was synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], 'No API contract changes were confirmed.')}\n\n"
-            "## UI / UX Impact\n\n"
+            f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], 'No interface examples were synced.')}\n\n"
+            "## Data And UI Impact\n\n"
+            f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], 'No data design was synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], 'No UI impact was confirmed.')}\n\n"
             "## Architecture And Operations\n\n"
+            f"{render_named_items(as_list(architecture.get('cross_repo_dependency_graph')), ['from', 'to', 'contract', 'change'], 'No dependency graph was synced.')}\n\n"
             f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], 'No integration sequence was synced.')}\n\n"
-            f"{render_named_items(as_list(architecture.get('deployment_impact')), ['order', 'config'], 'No deployment impact was synced.')}\n\n"
+            f"{render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], 'No deployment impact matrix was synced.')}\n\n"
             f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], 'No rollback strategy was synced.')}\n\n"
             "## Delivery Plan\n\n"
             f"{render_delivery_tasks(delivery_plan)}\n\n"
+            "## Test And Acceptance Evidence\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], 'No acceptance evidence mapping was synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
             "## Risks And Open Gates\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## Evidence References\n\n"
@@ -383,11 +563,12 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
     }
 
 
-def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_url: str = "") -> dict[str, Any]:
+def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_url: str = "", doc_language: str = "en") -> dict[str, Any]:
     docs_root = docs_root.expanduser().resolve()
     artifact_dir = artifact_dir.expanduser().resolve()
-    manifest = init(docs_root, doc_id, git_url=git_url, title=title)
-    human_docs = render_synced_human_docs(doc_id, title, artifact_dir)
+    language = normalize_doc_language(doc_language)
+    manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language)
+    human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],
         "design": docs_root / manifest["human_docs"]["design"],
@@ -440,6 +621,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         "doc_id": doc_id,
         "docs_root": str(docs_root),
         "artifact_dir": str(artifact_dir),
+        "doc_language": language,
         "manifest": str(docs_root / "indexes" / f"{doc_id}.manifest.json"),
         "human_docs": manifest["synced_human_docs"],
         "machine_artifacts": manifest["synced_machine_artifacts"],
@@ -481,15 +663,17 @@ def configure(docs_root: Path, git_url: str = "") -> dict[str, Any]:
     }
 
 
-def init(docs_root: Path, doc_id: str, git_url: str = "", title: str = "") -> dict[str, Any]:
+def init(docs_root: Path, doc_id: str, git_url: str = "", title: str = "", doc_language: str = "en") -> dict[str, Any]:
     for directory in DIRS:
         (docs_root / directory).mkdir(parents=True, exist_ok=True)
     config = configure(docs_root, git_url)
-    materialized = materialize_doc_files(docs_root, doc_id, title)
+    language = normalize_doc_language(doc_language)
+    materialized = materialize_doc_files(docs_root, doc_id, title, language)
     manifest = {
         "schema": "codex-docs-governor-v1",
         "doc_id": doc_id,
         "title": title,
+        "doc_language": language,
         "docs_root": str(docs_root.expanduser().resolve()),
         "git_initialized": config.get("git_initialized", False),
         "workspace_config": config.get("schema", ""),
@@ -560,20 +744,22 @@ def main() -> int:
     p_sync.add_argument("--artifact-dir", required=True)
     p_sync.add_argument("--title", default="")
     p_sync.add_argument("--git-url", default="")
+    p_sync.add_argument("--doc-language", choices=["en", "zh"], default="en")
     for cmd in ["init", "validate"]:
         p = sub.add_parser(cmd)
         p.add_argument("--docs-root", required=True)
         p.add_argument("--doc-id", required=True)
         p.add_argument("--title", default="")
         p.add_argument("--git-url", default="")
+        p.add_argument("--doc-language", choices=["en", "zh"], default="en")
         p.add_argument("--require-git", action="store_true")
     args = parser.parse_args()
     if args.cmd == "configure":
         result = configure(Path(args.docs_root), args.git_url)
     elif args.cmd == "init":
-        result = init(Path(args.docs_root), args.doc_id, args.git_url, args.title)
+        result = init(Path(args.docs_root), args.doc_id, args.git_url, args.title, args.doc_language)
     elif args.cmd == "sync":
-        result = sync(Path(args.docs_root), args.doc_id, Path(args.artifact_dir), args.title, args.git_url)
+        result = sync(Path(args.docs_root), args.doc_id, Path(args.artifact_dir), args.title, args.git_url, args.doc_language)
     else:
         result = validate(Path(args.docs_root), args.doc_id, args.require_git)
     print(json.dumps(result, ensure_ascii=False, indent=2))

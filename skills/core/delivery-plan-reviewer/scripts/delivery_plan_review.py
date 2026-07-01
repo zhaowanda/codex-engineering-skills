@@ -9,6 +9,13 @@ from typing import Any
 
 SCHEMA = "codex-delivery-plan-review-v1"
 BROAD_SCOPE = {".", "*", "src", "app", "services", "packages", "frontend", "backend"}
+GENERIC_TASK_PHRASES = {
+    "modify only allowed_files",
+    "record command output",
+    "build concrete change list from reviewed design before editing",
+    "confirm no extra repositories or broad files are needed",
+    "preserve compatibility and permission behavior from design",
+}
 PHASE_SIGNALS = {
     "read": ("read", "inspect", "understand", "确认", "阅读"),
     "confirm": ("confirm", "verify contract", "route", "scope", "确认"),
@@ -45,6 +52,16 @@ def finding(area: str, severity: str, message: str, evidence: Any, suggestion: s
 
 def text_of(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False).lower()
+
+
+def looks_like_path(value: str) -> bool:
+    text = value.strip()
+    return "/" in text or "." in Path(text).name
+
+
+def generic_task_detail(value: Any) -> bool:
+    blob = text_of(value)
+    return any(phrase in blob for phrase in GENERIC_TASK_PHRASES)
 
 
 def phase_coverage(tasks: list[Any]) -> dict[str, bool]:
@@ -95,6 +112,29 @@ def review(plan: dict[str, Any]) -> dict[str, Any]:
             findings.append(finding("task_depth", "blocker", "modify repo lacks executable tasks", repo, "Add read/confirm/edit/test/evidence/rollback tasks."))
         elif len(tasks) < 2:
             findings.append(finding("task_depth", "high", "modify repo task list is too coarse", {"repo": repo, "task_count": len(tasks)}, "Split work into implementation phases with exit criteria."))
+        if not any(looks_like_path(item) for item in allowed_files):
+            findings.append(finding("file_scope", "high", "allowed_files lacks concrete file paths", {"repo": repo, "allowed_files": allowed_files}, "Use real file paths from code index or explicit human confirmation."))
+        for task_index, item in enumerate(tasks):
+            if not isinstance(item, dict):
+                findings.append(finding("task_depth", "high", "task must be structured", {"repo": repo, "task_index": task_index}, "Use structured task objects with phase, files, evidence, and exit criteria."))
+                continue
+            required_task_fields = ["phase", "summary", "implementation_notes", "evidence_to_collect", "rollback_check", "exit_criteria"]
+            missing_task_fields = [field for field in required_task_fields if item.get(field) in (None, "", [], {})]
+            phase = str(item.get("phase") or "")
+            if phase in {"read", "confirm"} and not item.get("files_to_read"):
+                missing_task_fields.append("files_to_read")
+            if phase == "edit" and not item.get("files_to_edit"):
+                missing_task_fields.append("files_to_edit")
+            if phase not in {"read"} and not item.get("depends_on"):
+                missing_task_fields.append("depends_on")
+            if not item.get("blocking_conditions"):
+                missing_task_fields.append("blocking_conditions")
+            if item.get("files_to_edit") and not any(looks_like_path(str(path)) for path in as_list(item.get("files_to_edit"))):
+                missing_task_fields.append("concrete files_to_edit")
+            if missing_task_fields:
+                findings.append(finding("task_depth", "high", "task lacks executable detail", {"repo": repo, "task_id": item.get("task_id"), "missing": sorted(set(missing_task_fields))}, "Each task needs concrete files, implementation notes, evidence, rollback check, dependencies, blockers, and exit criteria."))
+            if generic_task_detail(item.get("implementation_notes")) and len(as_list(item.get("implementation_notes"))) <= 2:
+                findings.append(finding("task_depth", "medium", "task implementation notes are generic", {"repo": repo, "task_id": item.get("task_id"), "implementation_notes": item.get("implementation_notes")}, "Add file/function/route/config specific implementation notes."))
         phases = phase_coverage(tasks)
         missing_phases = [phase for phase, covered in phases.items() if not covered]
         if missing_phases:
@@ -113,11 +153,19 @@ def review(plan: dict[str, Any]) -> dict[str, Any]:
             findings.append(finding("rollback", "high", "modify repo lacks rollback steps", repo, "Add repo-specific rollback steps and data risk."))
         if not risks:
             findings.append(finding("risk", "medium", "modify repo lacks risk controls", repo, "Record delivery risks and mitigations."))
+        git_prep = task.get("git_preparation") if isinstance(task.get("git_preparation"), dict) else {}
+        required_git = text_of(git_prep.get("required_before_edit", []))
+        for signal in ["fetch", "pull --ff-only", "branch", "clean worktree"]:
+            if signal not in required_git:
+                findings.append(finding("readiness", "high", "git preparation is incomplete", {"repo": repo, "missing_signal": signal}, "Require fetch, pull --ff-only, branch preparation, and clean worktree verification before edits."))
 
     validation = plan.get("validation_plan") if isinstance(plan.get("validation_plan"), dict) else {}
     required_evidence = as_list(validation.get("required_evidence"))
     if modify_repos and not required_evidence:
         findings.append(finding("validation", "high", "validation_plan.required_evidence is empty", validation, "Aggregate required evidence from acceptance mapping."))
+    acceptance_task_mapping = as_list(validation.get("acceptance_task_mapping"))
+    if modify_repos and required_evidence and not acceptance_task_mapping:
+        findings.append(finding("validation", "high", "validation plan lacks acceptance task mapping", validation, "Map each acceptance criterion to concrete test/evidence tasks."))
 
     release = plan.get("release_plan") if isinstance(plan.get("release_plan"), dict) else {}
     rollback_plan = plan.get("rollback_plan") if isinstance(plan.get("rollback_plan"), dict) else {}

@@ -241,12 +241,16 @@ def test_docs_governor_init_and_validate() -> None:
             root = Path(tmp) / "docs"
             manifest = docs_governor.init(root, "REQ-1")
             assert manifest["schema"] == "codex-docs-governor-v1"
+            assert manifest["doc_language"] == "en"
             assert (root / "human/specs/REQ-1.md").read_text(encoding="utf-8").strip()
             assert (root / "human/designs/REQ-1.md").read_text(encoding="utf-8").strip()
             assert (root / "human/releases/REQ-1.md").read_text(encoding="utf-8").strip()
             assert json.loads((root / "machine/specs/REQ-1.spec.json").read_text(encoding="utf-8"))["doc_id"] == "REQ-1"
             validation = docs_governor.validate(root, "REQ-1")
             assert validation["decision"] == "pass"
+            zh_manifest = docs_governor.init(root, "REQ-ZH", title="订单导出", doc_language="zh")
+            assert zh_manifest["doc_language"] == "zh"
+            assert "## 摘要" in (root / "human/specs/REQ-ZH.md").read_text(encoding="utf-8")
     finally:
         if original is None:
             config_file.unlink(missing_ok=True)

@@ -33,6 +33,8 @@ Then run `design-architecture-reviewer` after architecture design exists.
 ## Rules
 
 - Generate concrete structure from spec facts.
+- When project-understanding artifacts are available, populate current-state analysis, code entrypoints, modules, routes, tests, and compatibility notes from real repository facts.
+- Do not present fallback phrases such as `target module to be confirmed` as expert-ready facts; keep them as review-blocking uncertainty.
 - Preserve open questions; do not hide uncertainty.
 - Include at least two solution options and a selected option.
 - Include traceability from requirements to acceptance and tests.

@@ -253,6 +253,7 @@ def main() -> int:
     p_auto.add_argument("--out")
     p_auto.add_argument("--profile")
     p_auto.add_argument("--docs-root")
+    p_auto.add_argument("--doc-language", choices=["en", "zh", "auto"], default="auto")
     p_auto.add_argument("--force", action="store_true")
     p_auto.add_argument("--format", choices=["json", "human"], default="json")
     p_setup = sub.add_parser("setup")
@@ -280,6 +281,7 @@ def main() -> int:
     p_docs.add_argument("mode", choices=["configure", "init", "validate"])
     p_docs.add_argument("--docs-root", required=True)
     p_docs.add_argument("--doc-id", default="")
+    p_docs.add_argument("--doc-language", choices=["en", "zh"], default="en")
     p_docs.add_argument("--git-url", default="")
     p_docs.add_argument("--require-git", action="store_true")
     p_implement = sub.add_parser("implement")
@@ -301,7 +303,7 @@ def main() -> int:
 
     if args.cmd == "auto":
         command = ["python3", "skills/core/auto-runner/scripts/auto_runner.py", "--input", args.input]
-        for flag in ["doc_id", "title", "repo", "project", "out", "profile", "docs_root"]:
+        for flag in ["doc_id", "title", "repo", "project", "out", "profile", "docs_root", "doc_language"]:
             value = getattr(args, flag)
             if value:
                 command.extend([f"--{flag.replace('_', '-')}", value])
@@ -378,6 +380,7 @@ def main() -> int:
                 print("--doc-id is required for docs init/validate", file=sys.stderr)
                 return 2
             command.extend(["--doc-id", args.doc_id])
+            command.extend(["--doc-language", args.doc_language])
         if args.git_url:
             command.extend(["--git-url", args.git_url])
         if args.require_git:

@@ -32,6 +32,8 @@ python3 scripts/architecture_design.py \
 ## Rules
 
 - Include at least two architecture options.
+- Prefer real repo entrypoints, module paths, routes, and dependency direction from project-understanding artifacts.
+- Fallback architecture phrases such as `existing producer` or `target owner` must remain visible as uncertainty and should not pass expert review.
 - Mark repo responsibilities as `modify`, `confirm_only`, `read_only`, or `out_of_scope`.
 - Separate data ownership from data flow.
 - Include deployment, rollback, observability, and risk sections.

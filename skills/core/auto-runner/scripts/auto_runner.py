@@ -113,7 +113,15 @@ def docs_readiness(docs_root: Path | None, doc_id: str) -> dict[str, Any]:
     }
 
 
-def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifact_dir: Path) -> dict[str, Any]:
+def infer_doc_language(input_text: str, requested: str = "en") -> str:
+    requested = str(requested or "en").lower()
+    if requested in {"zh", "en"}:
+        return requested
+    zh_hints = ["文档使用中文", "文档用中文", "中文文档", "用中文描述", "使用中文描述", "中文描述"]
+    return "zh" if any(hint in input_text for hint in zh_hints) else "en"
+
+
+def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifact_dir: Path, doc_language: str = "en") -> dict[str, Any]:
     if not docs_root:
         return {"decision": "skipped", "reason": "docs_root is not configured"}
     if not docs_root.exists():
@@ -122,7 +130,7 @@ def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifac
     if proc.returncode != 0 or proc.stdout.strip() != "true":
         return {"decision": "skipped", "reason": "docs_root is not a git repository"}
     try:
-        return load_docs_governor_module().sync(docs_root, doc_id, artifact_dir, title)
+        return load_docs_governor_module().sync(docs_root, doc_id, artifact_dir, title, doc_language=doc_language)
     except Exception as exc:
         return {"decision": "block", "reason": str(exc), "blockers": [{"source": "docs_sync", "message": str(exc)}]}
 
@@ -594,8 +602,11 @@ def run(
     force: bool = False,
     profile: str | None = None,
     docs_root: Path | None = None,
+    doc_language: str = "auto",
 ) -> dict[str, Any]:
     input_path = input_path.resolve()
+    input_text = input_path.read_text(encoding="utf-8", errors="ignore") if input_path.exists() else ""
+    effective_doc_language = infer_doc_language(input_text, doc_language)
     doc_id = doc_id or default_doc_id(input_path)
     title = title or default_title(input_path)
     out = (out or default_out(doc_id)).resolve()
@@ -641,7 +652,7 @@ def run(
         )
         steps.append(inspect_result)
         inspect_status = read_json(delivery_status)
-        docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out)
+        docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
         if docs_sync.get("decision") == "pass":
             docs_status = docs_readiness(effective_docs_root, doc_id)
         blockers = collect_blockers(steps, inspect_status)
@@ -668,6 +679,7 @@ def run(
             "required_gates": selected_profile.get("required_skills", []),
             "docs_readiness": docs_status,
             "docs_sync": docs_sync,
+            "doc_language": effective_doc_language,
             "missing_profile_artifacts": missing_profile,
             "profile_gate_gaps": gate_gaps,
             "next_profile_command": selected_profile.get("next_safe_command", ""),
@@ -901,7 +913,7 @@ def run(
         except Exception:
             inspect_status = {}
 
-    docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out)
+    docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
     if docs_sync.get("decision") == "pass":
         docs_status = docs_readiness(effective_docs_root, doc_id)
     blockers = collect_blockers(steps, inspect_status, include_inspect=False)
@@ -931,6 +943,7 @@ def run(
         "required_gates": selected_profile.get("required_skills", []),
         "docs_readiness": docs_status,
         "docs_sync": docs_sync,
+        "doc_language": effective_doc_language,
         "readiness_blockers": readiness_blockers,
         "missing_profile_artifacts": missing_profile,
         "profile_gate_gaps": gate_gaps,
@@ -957,6 +970,7 @@ def main() -> int:
     parser.add_argument("--out")
     parser.add_argument("--profile")
     parser.add_argument("--docs-root")
+    parser.add_argument("--doc-language", choices=["en", "zh", "auto"], default="auto")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     result = run(
@@ -969,6 +983,7 @@ def main() -> int:
         force=args.force,
         profile=args.profile,
         docs_root=Path(args.docs_root) if args.docs_root else None,
+        doc_language=args.doc_language,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

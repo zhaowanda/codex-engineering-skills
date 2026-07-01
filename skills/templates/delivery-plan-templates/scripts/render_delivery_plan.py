@@ -121,16 +121,20 @@ def acceptance_from_design(technical: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def task_steps(repo_name: str, responsibility: str, modules: list[dict[str, Any]], tests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def task_steps(repo_name: str, responsibility: str, modules: list[dict[str, Any]], tests: list[dict[str, Any]], allowed_files: list[str], acceptance: list[dict[str, Any]]) -> list[dict[str, Any]]:
     module_refs = [str(item.get("module")) for item in modules if item.get("module")]
     test_refs = [str(item.get("id")) for item in tests if item.get("id")]
+    evidence = sorted({item for ac in acceptance for item in safe_list(ac.get("evidence_required"))})
+    edit_targets = allowed_files or module_refs
+    primary_target = edit_targets[0] if edit_targets else repo_name
+    acceptance_ids = [str(item.get("acceptance_id")) for item in acceptance if item.get("acceptance_id")]
     return [
-        {"task_id": f"{repo_name}-read", "phase": "read", "summary": "Read scoped modules and existing tests before editing.", "modules": module_refs, "exit_criteria": ["owner files and dependencies understood"]},
-        {"task_id": f"{repo_name}-confirm", "phase": "confirm", "summary": "Confirm API/UI/data/permission impact matches reviewed design.", "modules": module_refs, "exit_criteria": ["scope still matches architecture responsibilities"]},
-        {"task_id": f"{repo_name}-edit", "phase": "edit", "summary": responsibility or "Implement scoped change.", "modules": module_refs, "change_type": sorted({str(item.get("change_type")) for item in modules if item.get("change_type")}), "exit_criteria": ["changes stay within allowed_files"]},
-        {"task_id": f"{repo_name}-test", "phase": "test", "summary": "Run mapped validation commands and acceptance checks.", "test_refs": test_refs, "exit_criteria": ["required tests pass"]},
-        {"task_id": f"{repo_name}-evidence", "phase": "evidence", "summary": "Capture command logs and acceptance evidence.", "test_refs": test_refs, "exit_criteria": ["evidence artifacts are attached to delivery"]},
-        {"task_id": f"{repo_name}-rollback", "phase": "rollback", "summary": "Verify rollback path is executable for this repo.", "modules": module_refs, "exit_criteria": ["rollback owner and steps are known"]},
+        {"task_id": f"{repo_name}-read", "order": 1, "phase": "read", "summary": f"Read {primary_target} and adjacent tests before editing.", "files_to_read": edit_targets, "files_to_edit": [], "implementation_notes": [f"Inspect {primary_target} to locate the existing behavior for {responsibility or repo_name}.", f"Record current dependencies for modules: {', '.join(module_refs) or primary_target}."], "evidence_to_collect": [f"inspected-files: {', '.join(edit_targets)}"], "rollback_check": "no writes in read phase", "depends_on": [], "blocking_conditions": [f"{primary_target} cannot be located"], "modules": module_refs, "exit_criteria": [f"{primary_target} behavior and dependencies understood"]},
+        {"task_id": f"{repo_name}-confirm", "order": 2, "phase": "confirm", "summary": f"Confirm {primary_target} scope against reviewed design.", "files_to_read": edit_targets, "files_to_edit": [], "implementation_notes": [f"Confirm {primary_target} can satisfy acceptance ids {', '.join(acceptance_ids) or 'unmapped AC'} without adding unplanned repositories.", f"Confirm permission, compatibility, and data-flow assumptions before modifying {primary_target}."], "evidence_to_collect": [f"scope-confirmation for {primary_target}"], "rollback_check": "scope change requires plan update, not ad hoc editing", "depends_on": [f"{repo_name}-read"], "blocking_conditions": [f"{primary_target} does not match the reviewed module topology"], "modules": module_refs, "exit_criteria": ["scope still matches architecture responsibilities"]},
+        {"task_id": f"{repo_name}-edit", "order": 3, "phase": "edit", "summary": responsibility or f"Implement scoped change in {primary_target}.", "files_to_read": edit_targets, "files_to_edit": edit_targets, "implementation_notes": [f"Apply the requirement behavior in {primary_target}.", f"Keep edits inside {', '.join(edit_targets)} unless the plan is updated.", f"Preserve reviewed contracts and permission checks for acceptance ids {', '.join(acceptance_ids) or 'unmapped AC'}."], "evidence_to_collect": [f"git diff for {', '.join(edit_targets)}"], "rollback_check": f"revert changes to {', '.join(edit_targets)} and redeploy previous {repo_name} artifact", "depends_on": [f"{repo_name}-confirm"], "blocking_conditions": ["required edit falls outside allowed_files"], "modules": module_refs, "change_type": sorted({str(item.get("change_type")) for item in modules if item.get("change_type")}), "exit_criteria": [f"diff only touches {', '.join(edit_targets)}"]},
+        {"task_id": f"{repo_name}-test", "order": 4, "phase": "test", "summary": f"Run validation for {primary_target} and mapped acceptance checks.", "files_to_read": edit_targets, "files_to_edit": [], "implementation_notes": [f"Run repo test commands against changes in {primary_target}.", f"Verify evidence for acceptance ids {', '.join(acceptance_ids) or 'unmapped AC'}."], "evidence_to_collect": evidence or ["test command output"], "rollback_check": "failed validation blocks release", "depends_on": [f"{repo_name}-edit"], "blocking_conditions": ["required local test command unavailable"], "test_refs": test_refs, "exit_criteria": ["required tests pass"]},
+        {"task_id": f"{repo_name}-evidence", "order": 5, "phase": "evidence", "summary": f"Capture command logs and acceptance evidence for {primary_target}.", "files_to_read": [], "files_to_edit": [], "implementation_notes": [f"Attach test logs and acceptance evidence for {primary_target}.", f"Reference acceptance ids {', '.join(acceptance_ids) or 'unmapped AC'} in the delivery artifact."], "evidence_to_collect": evidence or ["review log", "test log"], "rollback_check": "missing evidence blocks release", "depends_on": [f"{repo_name}-test"], "blocking_conditions": ["acceptance evidence cannot be produced"], "test_refs": test_refs, "exit_criteria": ["evidence artifacts are attached to delivery"]},
+        {"task_id": f"{repo_name}-rollback", "order": 6, "phase": "rollback", "summary": f"Verify rollback path for {primary_target}.", "files_to_read": edit_targets, "files_to_edit": [], "implementation_notes": [f"Confirm reverting {primary_target} is sufficient for rollback.", f"Confirm no data/config rollback is required beyond {repo_name} artifact rollback."], "evidence_to_collect": [f"rollback verification for {primary_target}"], "rollback_check": f"previous {repo_name} artifact or commit can be restored", "depends_on": [f"{repo_name}-evidence"], "blocking_conditions": ["rollback owner or artifact is unknown"], "modules": module_refs, "exit_criteria": ["rollback owner and steps are known"]},
     ]
 
 
@@ -141,6 +145,13 @@ def allowed_files_hint(repo: str, architecture: dict[str, Any]) -> list[str]:
         if module:
             hints.append(module)
     return sorted(set(hints))
+
+
+def read_first_hint(repo: str, architecture: dict[str, Any], ctx: dict[str, Any]) -> list[str]:
+    hints = allowed_files_hint(repo, architecture)
+    if ctx["files"] and repo in {ctx["project"], "target-repo"}:
+        hints = [*hints, *ctx["entrypoints"], *ctx["files"][:5]]
+    return narrow_allowed_files(hints)
 
 
 def narrow_allowed_files(paths: list[str]) -> list[str]:
@@ -170,16 +181,19 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
         repo_path = repo["repo_path"] or (ctx["repo_path"] if repo_name in {ctx["project"], "target-repo"} else "")
         modules = topology.get(repo_name, [])
         allowed = allowed_files_hint(repo_name, architecture)
-        if ctx["files"] and repo_name in {ctx["project"], "target-repo"}:
-            allowed = sorted(set([*allowed, *ctx["entrypoints"], *ctx["files"][:5]]))
         allowed = narrow_allowed_files(allowed)
+        read_first = read_first_hint(repo_name, architecture, ctx)
         test_commands = ctx["tests"] if repo_name in {ctx["project"], "target-repo"} else []
         task = {
             "repo": repo_name,
             "repo_path": repo_path,
             "role": role,
             "responsibility": repo["responsibility"],
-            "tasks": task_steps(repo_name, repo["responsibility"], modules, tests) if role == "modify" else [
+            "git_preparation": {
+                "required_before_edit": ["git fetch --all --prune", "git pull --ff-only", "create or switch to requirement branch", "verify clean worktree"],
+                "branch_naming_hint": f"feature/{doc_id.lower()}",
+            } if role == "modify" else {},
+            "tasks": task_steps(repo_name, repo["responsibility"], modules, tests, allowed, acceptance) if role == "modify" else [
                 {
                     "task_id": f"{repo_name}-confirm",
                     "phase": "confirm",
@@ -188,7 +202,7 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
                     "change_type": sorted({str(item.get("change_type")) for item in modules if item.get("change_type")}),
                 }
             ],
-            "read_first": allowed,
+            "read_first": read_first,
             "allowed_files": allowed if role == "modify" else [],
             "test_commands": test_commands,
             "acceptance_evidence": acceptance,
@@ -207,6 +221,12 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
         open_gates.append("architecture.repo_responsibilities is empty")
     release_order = [item["repo"] for item in repo_tasks if item["role"] == "modify"]
     rollback_order = list(reversed(release_order))
+    modify_task_refs = [
+        task_ref
+        for repo in repo_tasks
+        if repo.get("role") == "modify"
+        for task_ref in [f"{repo['repo']}-test", f"{repo['repo']}-evidence"]
+    ]
     return {
         "schema": "codex-delivery-plan-v1",
         "doc_id": doc_id,
@@ -220,6 +240,14 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
             "test_strategy": tests,
             "acceptance": acceptance,
             "required_evidence": sorted({evidence for item in acceptance for evidence in item.get("evidence_required", [])}),
+            "acceptance_task_mapping": [
+                {
+                    "acceptance_id": item.get("acceptance_id", ""),
+                    "task_refs": modify_task_refs,
+                    "evidence_required": item.get("evidence_required", []),
+                }
+                for item in acceptance
+            ],
         },
         "release_plan": {
             "release_order": release_order,

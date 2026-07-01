@@ -30,6 +30,7 @@ spec
 - A design is not expert-ready unless requirements trace to process flow, modules, data flow, API/UI impact, tests, acceptance evidence, and selected options.
 - Require at least two technical solution options and two architecture options unless a documented waiver exists.
 - Require explicit selected option, decision criteria, tradeoffs, and rejected alternative reasoning.
+- Require current-state analysis with concrete code entrypoints, interface examples for API changes, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
 - Require security, performance, rollback, observability, and test strategy to be executable, not generic.
 - Treat placeholders such as `TBD`, `unknown`, `todo`, and `confirm later` as findings unless they are inside an explicitly controlled gate.
 

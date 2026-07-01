@@ -28,6 +28,7 @@ delivery docs repository setup
 - `sync` must copy generated delivery artifacts into the docs repository by `doc_id` so docs follow the requirement, not just the workspace.
 - Keep private project docs outside the open-core repository.
 - Validate expected folders and manifests before teams rely on the docs repository.
+- Human-readable docs default to English. Pass `--doc-language zh` when the requirement or user explicitly asks for Chinese docs.
 - Before implementation, validate docs root with `--require-git`; a plain local folder is not enough.
 - Do not copy secrets, local absolute paths, or private customer data into shareable docs.
 
@@ -49,7 +50,8 @@ python3 scripts/docs_governor.py \
   init \
   --docs-root delivery-docs \
   --doc-id REQ-001 \
-  --title "Order export"
+  --title "Order export" \
+  --doc-language en
 ```
 
 Sync generated delivery artifacts into the docs repository:
@@ -60,6 +62,7 @@ python3 scripts/docs_governor.py \
   --docs-root delivery-docs \
   --doc-id REQ-001 \
   --title "Order export" \
+  --doc-language en \
   --artifact-dir artifacts/REQ-001
 ```
 

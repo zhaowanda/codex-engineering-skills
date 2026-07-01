@@ -9,6 +9,16 @@ from typing import Any
 
 PLACEHOLDERS = ("confirm later", "unknown", "tbd", "todo", "待确认", "后续确认")
 PLACEHOLDER_SAFE_KEYS = {"role", "source_evidence", "read_first", "evidence_refs"}
+GENERIC_PHRASES = (
+    "target module to be confirmed",
+    "existing producer",
+    "existing contract unless",
+    "no api impact confirmed yet",
+    "preserve existing contract unless",
+    "affected object",
+    "target owner",
+    "existing entrypoint to be confirmed",
+)
 REVIEW_AREAS = [
     "requirement_coverage",
     "technical_design_quality",
@@ -58,8 +68,30 @@ def has_placeholder(value: Any, key: str = "") -> bool:
     return False
 
 
+def has_generic_phrase(value: Any) -> bool:
+    blob = text_of(value)
+    return any(phrase in blob for phrase in GENERIC_PHRASES)
+
+
+def looks_like_path(value: str) -> bool:
+    path = value.strip()
+    return "/" in path or "." in Path(path).name
+
+
 def missing_required(item: dict[str, Any], keys: list[str]) -> list[str]:
     return [key for key in keys if key not in item or item.get(key) in (None, "", [])]
+
+
+def meaningful_text(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return json.dumps(value, ensure_ascii=False)
+
+
+def lacks_detail(value: Any, min_chars: int = 12) -> bool:
+    return len(meaningful_text(value)) < min_chars
 
 
 def finding(area: str, severity: str, message: str, evidence: Any, suggestion: str) -> dict[str, Any]:
@@ -177,6 +209,7 @@ def review_traceability(req_trace: list[Any], rows: list[Any], area: str, kind: 
 
 def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
+    current_state = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
     req_trace = as_list(technical.get("requirement_trace"))
     target_behavior = as_list(technical.get("target_behavior"))
     business_rules = as_list(technical.get("business_rule_mapping"))
@@ -195,7 +228,10 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     acceptance_mapping = as_list(technical.get("acceptance_mapping"))
     ui_ue_design = as_list(technical.get("ui_ue_design"))
     test_strategy = as_list(technical.get("test_strategy"))
+    interface_examples = as_list(technical.get("interface_examples"))
+    compatibility_matrix = as_list(technical.get("compatibility_matrix"))
 
+    current_architecture = architecture.get("current_architecture") if isinstance(architecture.get("current_architecture"), dict) else {}
     architecture_options = as_list(architecture.get("architecture_options"))
     selected_architecture = architecture.get("selected_architecture") if isinstance(architecture.get("selected_architecture"), dict) else {}
     architecture_traceability = as_list(architecture.get("architecture_traceability_matrix"))
@@ -203,13 +239,16 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     module_topology = as_list(architecture.get("module_topology"))
     repo_responsibilities = as_list(architecture.get("repo_responsibilities"))
     cross_contracts = as_list(architecture.get("cross_repo_contracts"))
+    dependency_graph = as_list(architecture.get("cross_repo_dependency_graph"))
     data_flow = as_list(architecture.get("data_flow"))
     data_ownership = as_list(architecture.get("data_ownership"))
     integration_sequence = as_list(architecture.get("integration_sequence"))
+    failure_isolation = as_list(architecture.get("failure_isolation"))
     security_permission = as_list(architecture.get("security_and_permission"))
     observability = as_list(architecture.get("observability"))
     monitoring_alerts = as_list(architecture.get("monitoring_alerts"))
     deployment_topology = as_list(architecture.get("deployment_topology"))
+    deployment_matrix = as_list(architecture.get("deployment_impact_matrix"))
     migration_strategy = as_list(architecture.get("migration_strategy"))
     gray_release = as_list(architecture.get("gray_release_strategy"))
     rollback = as_list(architecture.get("rollback_strategy"))
@@ -217,12 +256,18 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     if not isinstance(technical.get("design_scope"), dict) or not technical.get("design_scope", {}).get("in_scope"):
         findings.append(finding("technical_design_quality", "high", "technical design lacks explicit design_scope", technical.get("design_scope"), "Define in_scope, out_of_scope, assumptions, and non_goals."))
+    if not current_state or missing_required(current_state, ["existing_behavior", "code_entrypoints", "known_constraints"]):
+        findings.append(finding("technical_design_quality", "high", "current state analysis is incomplete", current_state, "Describe existing behavior, code entrypoints, constraints, and reuse points before proposing changes."))
+    elif lacks_detail(current_state.get("existing_behavior"), 24):
+        findings.append(finding("technical_design_quality", "medium", "current state analysis is too shallow", current_state.get("existing_behavior"), "Use concrete repository and behavior facts, not a short generic phrase."))
     if not req_trace:
         findings.append(finding("requirement_coverage", "blocker", "technical design has no requirement trace", "requirement_trace empty", "Map every requirement to design evidence."))
     if req_trace and len(target_behavior) < len(req_trace):
         findings.append(finding("requirement_coverage", "high", "some requirements lack target behavior", {"requirements": len(req_trace), "target_behavior": len(target_behavior)}, "Add target behavior for each requirement."))
     if has_placeholder(technical) or has_placeholder(architecture):
         findings.append(finding("technical_design_quality", "medium", "design still contains placeholders", "placeholder detected", "Replace placeholders with concrete decisions."))
+    if has_generic_phrase(technical) or has_generic_phrase(architecture):
+        findings.append(finding("technical_design_quality", "high", "design contains generic template phrasing", "generic phrase detected", "Replace template phrases with real project files, contracts, owners, and behavior."))
     if not business_rules:
         findings.append(finding("technical_design_quality", "high", "business rules are not mapped to technical enforcement", "business_rule_mapping empty", "Map each business rule to API/service/query/frontend/export enforcement."))
     elif any(isinstance(item, dict) and not (item.get("technical_enforcement") and item.get("source_of_truth")) for item in business_rules):
@@ -230,6 +275,9 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     review_process_flow(process_flow, findings)
     review_module_decomposition(modules, findings)
+    for idx, item in enumerate(modules):
+        if isinstance(item, dict) and item.get("module") and not looks_like_path(str(item.get("module"))):
+            findings.append(finding("cohesion_coupling_review", "medium", "module reference is not file-level", {"index": idx, "module": item.get("module")}, "Prefer concrete file/module paths from code index for implementation-facing design."))
 
     if not logical_data_flow:
         findings.append(finding("data_model_review", "high", "logical data flow is missing", "logical_data_flow empty", "Show source, transform, destination, owner, and data-security handling."))
@@ -246,6 +294,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
             missing = missing_required(item, ["compatibility", "old_consumer_impact"])
             if missing:
                 findings.append(finding("api_contract_review", "high", "API contract lacks compatibility fields", {"index": idx, "missing": missing}, "Add compatibility and old_consumer_impact."))
+    if api_contracts and not interface_examples:
+        findings.append(finding("api_contract_review", "medium", "API/interface examples are missing", "interface_examples empty", "Add request/response/error examples or an explicit no-example reason."))
     if "api" in text_of(technical) and not api_contracts:
         findings.append(finding("api_contract_review", "high", "API-related design lacks API contracts", "api term detected", "Add API contract table or explicit no API impact reason."))
 
@@ -265,6 +315,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     if not compatibility:
         findings.append(finding("compatibility_review", "high", "compatibility strategy is missing", "compatibility_strategy empty", "Define old consumers, old data, rollback, and additive/breaking behavior."))
+    if compatibility and not compatibility_matrix:
+        findings.append(finding("compatibility_review", "medium", "compatibility matrix is missing", "compatibility_matrix empty", "Map consumers to old behavior, new behavior, compatibility, and rollback behavior."))
     if not edge_cases:
         findings.append(finding("technical_design_quality", "high", "exception and edge cases are missing", "exception_and_edge_cases empty", "Cover invalid state, permission denial, old consumers, dependency failures, and empty data."))
     if not nfrs:
@@ -297,6 +349,10 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     if not isinstance(architecture.get("architecture_scope"), dict) or not architecture.get("architecture_scope", {}).get("in_scope"):
         findings.append(finding("architecture_boundary_review", "high", "architecture scope is missing", architecture.get("architecture_scope"), "Define architecture in_scope, out_of_scope, assumptions, and decision drivers."))
+    if not current_architecture or missing_required(current_architecture, ["system_context", "repo_entrypoints", "upstream_downstream", "constraints"]):
+        findings.append(finding("architecture_boundary_review", "high", "current architecture analysis is incomplete", current_architecture, "Describe system context, repo entrypoints, upstream/downstream dependencies, and constraints."))
+    elif not any(looks_like_path(str(item)) for item in as_list(current_architecture.get("repo_entrypoints"))):
+        findings.append(finding("architecture_boundary_review", "medium", "current architecture lacks concrete repo entrypoint paths", current_architecture.get("repo_entrypoints"), "Use real file, route, or config paths from project understanding."))
     review_options(architecture_options, selected_architecture, "architecture_depth_review", "architecture", findings)
     review_traceability(req_trace, architecture_traceability, "architecture_depth_review", "architecture", findings)
 
@@ -318,6 +374,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     if not cross_contracts:
         findings.append(finding("cross_repo_contract_review", "high", "cross-repo contracts are missing or not explicitly waived", "cross_repo_contracts empty", "Declare contracts or explicitly state no cross-repo contract."))
+    if cross_contracts and not dependency_graph:
+        findings.append(finding("cross_repo_contract_review", "medium", "cross-repo dependency graph is missing", "cross_repo_dependency_graph empty", "Record producer/consumer direction, contract, and whether each repo is modify or confirm-only."))
     for idx, item in enumerate(cross_contracts):
         if isinstance(item, dict):
             missing = missing_required(item, ["producer", "consumer", "contract", "compatibility", "failure_mode"])
@@ -336,6 +394,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     if not integration_sequence:
         findings.append(finding("cross_repo_contract_review", "high", "integration sequence is missing", "integration_sequence empty", "Describe actor/action/contract/failure handling in execution order."))
+    if not failure_isolation:
+        findings.append(finding("architecture_depth_review", "medium", "failure isolation design is missing", "failure_isolation empty", "Describe dependency failures, isolation behavior, and user impact."))
     if not rollback:
         findings.append(finding("deployment_rollback_review", "blocker", "rollback strategy is missing", "rollback_strategy empty", "Add repo-specific rollback and data risk."))
     if not observability:
@@ -344,6 +404,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
         findings.append(finding("observability_review", "medium", "monitoring/alert plan is missing", "monitoring_alerts empty", "Define signal, owner, trigger, and action."))
     if not deployment_topology:
         findings.append(finding("deployment_rollback_review", "high", "deployment topology is missing", "deployment_topology empty", "Define repo artifact, environment, and dependencies."))
+    if deployment_topology and not deployment_matrix:
+        findings.append(finding("deployment_rollback_review", "medium", "deployment impact matrix is missing", "deployment_impact_matrix empty", "List repo, artifact, order, config changes, and restart requirements."))
     if not migration_strategy:
         findings.append(finding("deployment_rollback_review", "high", "migration strategy is missing", "migration_strategy empty", "Define schema/data/config/none and rollback/backward compatibility."))
     if not gray_release:

@@ -82,6 +82,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     ac_id = str(acceptance[0].get("id") if acceptance else "AC-1")
     owner_module = ctx["modules"][0] if ctx["modules"] else "target module to be confirmed"
     read_first = ctx["entrypoints"] + ctx["files"][:5]
+    owner_file = next((item for item in read_first if item.endswith((".py", ".ts", ".tsx", ".js", ".jsx", ".java", ".go", ".rs"))), owner_module)
     route_refs = [f"{item.get('method', '')} {item.get('route', '')} ({item.get('file', '')})".strip() for item in ctx["routes"][:5]]
     config_refs = [str(item.get("path")) for item in ctx["config_items"][:5]]
     test_evidence = [f"{cmd} evidence" for cmd in ctx["test_hints"][:3]] or ["test evidence"]
@@ -97,6 +98,12 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             "test_command_hints": ctx["test_hints"],
         },
         "design_scope": spec.get("scope") or {"in_scope": [summary], "out_of_scope": [], "assumptions": [], "non_goals": []},
+        "current_state_analysis": {
+            "existing_behavior": f"{ctx['project']} currently handles the affected behavior through {', '.join(read_first[:3]) or owner_module}; implementation must verify this path before editing.",
+            "code_entrypoints": read_first or [owner_module],
+            "known_constraints": ["preserve existing contracts", "preserve existing permission and validation behavior"],
+            "reuse_points": [owner_module, *(route_refs[:2] or [])],
+        },
         "requirement_trace": [{"requirement_id": str(item.get("id")), "summary": str(item.get("summary"))} for item in requirements],
         "business_rule_mapping": [
             {"requirement_id": req_id, "technical_enforcement": str(rule.get("rule")), "source_of_truth": "spec.business_rules"}
@@ -110,18 +117,20 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             "failure_end_states": ["Validation failure", "Dependency unavailable"],
         }],
         "module_decomposition": [{
-            "module": owner_module,
+            "module": owner_file,
             "responsibility": summary,
             "input": "request data",
             "output": "updated behavior",
             "dependencies": route_refs + config_refs,
-            "cohesion_reason": f"Keep requirement behavior in {ctx['project']} owner module.",
+            "cohesion_reason": f"Keep requirement behavior in {ctx['project']} owner file/module.",
             "coupling_control": "Use existing contracts and avoid duplicating upstream business rules.",
         }],
-        "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": summary, "destination": owner_module, "owner": ctx["project"], "data_security": "classify during security review"}],
+        "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": summary, "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review"}],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
         "api_contracts": [{"contract": route_refs[0] if route_refs else "No API impact confirmed yet", "compatibility": "preserve existing consumers unless design updates contract", "old_consumer_impact": "review route consumers before implementation"}],
+        "interface_examples": [{"name": route_refs[0] if route_refs else "no API request expected", "request": route_refs[0] if route_refs else "no API request expected", "response": f"response contract for {route_refs[0]}" if route_refs else "no API response change expected", "error_response": f"error contract for {route_refs[0]}" if route_refs else "no API error contract change expected"}],
         "compatibility_strategy": [{"old_consumer": "existing consumers", "old_data": "existing data", "rollback": "revert changed behavior", "behavior": "preserve backward compatibility"}],
+        "compatibility_matrix": [{"consumer": "existing consumers", "old_behavior": "current behavior before this requirement", "new_behavior": summary, "compatibility": "backward compatible by default", "rollback_behavior": "revert changed behavior"}],
         "data_design": [{"read_rule": f"read through {owner_module}", "write_rule": f"write through {owner_module} only if requirement changes state", "migration": "none unless design update requires it"}],
         "permission_model": [{"role": actor, "rule": "preserve existing permission boundary", "negative_case": "unauthorized user cannot access changed behavior"} for actor in actors],
         "exception_and_edge_cases": [{"case": "missing/invalid input", "handling": "return validation error or preserve existing fallback"}],
@@ -135,8 +144,8 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             {
                 "requirement_id": str(item.get("id") or req_id),
                 "process_flow_refs": [title or summary],
-                "module_refs": [owner_module],
-                "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_module}"],
+                "module_refs": [owner_file],
+                "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"],
                 "api_contract_refs": route_refs or ["No API impact confirmed yet"],
                 "ui_ue_refs": ["affected UI if any"],
                 "test_refs": [f"TEST-{item.get('id') or req_id}"],
@@ -145,7 +154,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
                 "decision_reason": "lowest initial risk",
             }
             for item in requirements
-        ] or [{"requirement_id": req_id, "process_flow_refs": [title or summary], "module_refs": [owner_module], "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_module}"], "api_contract_refs": route_refs or ["No API impact confirmed yet"], "ui_ue_refs": ["affected UI if any"], "test_refs": [f"TEST-{req_id}"], "acceptance_refs": [ac_id], "selected_option_id": "T1", "decision_reason": "lowest initial risk"}],
+        ] or [{"requirement_id": req_id, "process_flow_refs": [title or summary], "module_refs": [owner_file], "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"], "api_contract_refs": route_refs or ["No API impact confirmed yet"], "ui_ue_refs": ["affected UI if any"], "test_refs": [f"TEST-{req_id}"], "acceptance_refs": [ac_id], "selected_option_id": "T1", "decision_reason": "lowest initial risk"}],
         "acceptance_mapping": [{"acceptance_id": str(item.get("id") or ac_id), "design_refs": [summary], "evidence_required": as_list(item.get("evidence_required")) or test_evidence} for item in acceptance] or [{"acceptance_id": ac_id, "design_refs": [summary], "evidence_required": test_evidence}],
         "ui_ue_design": [{"page_or_route": route_refs[0] if route_refs else "confirm if UI is affected", "user_goal": summary, "entry_point": "existing entry", "layout": "preserve existing layout unless requirement changes it", "interaction_flow": ["open affected behavior", "perform action", "verify result"], "states": ["loading", "success", "error"], "field_rules": ["preserve existing field validation and visibility"], "permission_visibility": "preserve role visibility", "acceptance_evidence": "browser evidence if UI changed"}],
         "test_strategy": [{"case": summary, "evidence": test_evidence, "type": "functional"}],

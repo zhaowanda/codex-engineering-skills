@@ -29,6 +29,9 @@ technical_design + architecture_design
 - Only `modify` repositories may be passed to `git-worktree-governor prepare-plan`.
 - Every `modify` repository must include `repo_path` before execution in a real workspace.
 - Every `modify` repository should include `tasks`, `allowed_files`, `read_first`, `test_commands`, and `acceptance_evidence`.
+- Every modify task should include files to read/edit, implementation notes, evidence to collect, rollback check, dependencies, blocking conditions, and exit criteria.
+- `allowed_files` and `files_to_edit` should be real file paths from code index, module topology, or explicit human confirmation; do not broaden edit scope with unrelated read-first files.
+- Include Git preparation steps before edits: fetch, `pull --ff-only`, branch preparation, and clean worktree verification.
 - File scope should be narrow enough for `edit-readiness-governor` and `workspace-write-guard`.
 - Include cross-repo order, validation order, release order, rollback order, and open gates.
 - Do not start implementation while `open_gates` has unresolved items.

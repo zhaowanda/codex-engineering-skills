@@ -29,6 +29,7 @@ spec
 - Include at least two technical solution options and two architecture options.
 - Include selected option, decision criteria, tradeoffs, and rejected alternative reasoning.
 - Include process flow, data flow, module split, API/UI impact decisions, security, performance, rollback, observability, and tests.
+- Include current-state analysis, code entrypoints, interface examples, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
 - Run `design-architecture-reviewer` after filling the templates.
 
 ## Commands

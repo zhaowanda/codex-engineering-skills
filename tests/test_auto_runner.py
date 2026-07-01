@@ -113,6 +113,69 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
         assert (docs_root / "machine/raw/REQ-AUTO-DOCS/auto_run_summary.json").exists()
 
 
+def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = root / "artifacts"
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-ZH",
+            title="订单导出",
+            out=out,
+            docs_root=docs_root,
+            doc_language="zh",
+        )
+        assert result["doc_language"] == "zh"
+        spec_doc = (docs_root / "human/specs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
+        design_doc = (docs_root / "human/designs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
+        release_doc = (docs_root / "human/releases/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
+        assert "## 一、摘要" in spec_doc
+        assert "## 三、需求澄清" in spec_doc
+        assert "## 二、现状分析" in design_doc
+        assert "## 三、方案对比与选择" in design_doc
+        assert "## 四、业务流程" in design_doc
+        assert "## 五、模块与接口设计" in design_doc
+        assert "## 八、交付执行计划" in design_doc
+        assert "## 九、测试与验收证据" in design_doc
+        assert "## 二、缺口清单" in release_doc
+        assert "## Executive Summary" not in spec_doc + design_doc + release_doc
+
+
+def test_auto_runner_auto_detects_chinese_doc_request() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text(
+            "文档使用中文描述。\nAC: exported file contains order id and status.",
+            encoding="utf-8",
+        )
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir()
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-HINT", out=root / "artifacts", docs_root=docs_root, doc_language="auto")
+        assert result["doc_language"] == "zh"
+        assert "## 三、需求澄清" in (docs_root / "human/specs/REQ-AUTO-ZH-HINT.md").read_text(encoding="utf-8")
+
+
+def test_auto_runner_defaults_to_auto_doc_language_detection() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text(
+            "需求：导出订单。\n文档使用中文。\nAC: exported file contains order id and status.",
+            encoding="utf-8",
+        )
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir()
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-DEFAULT", out=root / "artifacts", docs_root=docs_root)
+        assert result["doc_language"] == "zh"
+        assert "## 一、摘要" in (docs_root / "human/specs/REQ-AUTO-ZH-DEFAULT.md").read_text(encoding="utf-8")
+
+
 def test_auto_runner_blocks_docs_root_without_git_repo() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
