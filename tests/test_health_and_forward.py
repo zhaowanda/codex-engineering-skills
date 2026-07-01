@@ -280,6 +280,40 @@ def test_human_doc_review_warns_thin_doc() -> None:
         assert result["warnings"]
 
 
+def test_human_doc_review_warns_missing_formal_sections_and_diagram() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "doc.md"
+        doc.write_text(
+            "Scope\nDecision\nOptions\nRisk\nEvidence\nRollback\n"
+            "`spec.json`\n"
+            "This is readable but still lacks several formal review sections and any chart.\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert result["decision"] == "warn"
+        sources = {item["source"] for item in result["warnings"]}
+        assert "diagram" in sources
+        assert "background" in sources
+
+
+def test_human_doc_review_warns_chinese_doc_with_english_template_terms() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "doc.md"
+        doc.write_text(
+            "# 中文文档\n\n"
+            "## Executive Summary\n\n"
+            "背景 目标 范围 澄清 决策 方案 风险 证据 验收 测试 回滚。\n"
+            "这里包含足够多的中文内容，用来模拟用户明确要求中文但文档仍残留英文模板标题的情况。\n"
+            "这里继续补充中文说明，确保超过语言质量检查阈值。\n"
+            "`spec.json`\n\n"
+            "```mermaid\nflowchart LR\nA-->B\n```\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert result["decision"] == "warn"
+        assert any(item["source"] == "zh_language_quality" for item in result["warnings"])
+
+
 def test_forward_test_runner_passes_synthetic_case() -> None:
     result = forward_test.run(ROOT)
     assert result["schema"] == "codex-forward-test-run-v1"
@@ -627,6 +661,8 @@ def run_all() -> None:
     test_overlay_health_blocks_missing_registry()
     test_human_doc_review_detects_local_path()
     test_human_doc_review_warns_thin_doc()
+    test_human_doc_review_warns_missing_formal_sections_and_diagram()
+    test_human_doc_review_warns_chinese_doc_with_english_template_terms()
     test_forward_test_runner_passes_synthetic_case()
     test_scenario_catalog_documents_supported_development_scenarios()
     test_codex_eng_scenarios_cli_runs()

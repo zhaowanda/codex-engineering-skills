@@ -136,11 +136,37 @@ def text(value: Any, default: str = "TBD") -> str:
     return str(value)
 
 
+def zh_text(value: Any, default: str = "待补充") -> str:
+    if value in (None, "", [], {}):
+        return default
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    rendered = text(value, default)
+    replacements = {
+        "unknown": "未知",
+        "draft": "草稿",
+        "ready": "就绪",
+        "ready_for_design": "可进入设计",
+        "needs_completion": "需要补齐",
+        "needs_revision": "需要修订",
+        "pass": "通过",
+        "block": "阻塞",
+        "false": "否",
+        "true": "是",
+        "TBD": default,
+    }
+    return replacements.get(rendered, rendered)
+
+
 def bullet_lines(items: list[str], empty: str = "TBD") -> str:
     compact = [item for item in items if item]
     if not compact:
         return f"- {empty}"
     return "\n".join(item if item.lstrip().startswith("- ") else f"- {item}" for item in compact)
+
+
+def section_paragraph(title: str, lines: list[str], empty: str) -> str:
+    return f"### {title}\n\n{bullet_lines(lines, empty)}"
 
 
 def render_scope(spec: dict[str, Any], fallback: str) -> str:
@@ -237,6 +263,107 @@ def render_open_questions(*documents: dict[str, Any]) -> str:
             else:
                 lines.append(text(item))
     return bullet_lines(lines, "None recorded.")
+
+
+def render_clarification_log(spec: dict[str, Any], language: str = "en") -> str:
+    rows: list[str] = []
+    for index, item in enumerate(as_list(spec.get("clarification_log")), start=1):
+        if isinstance(item, dict):
+            rows.append(
+                f"| C-{index} | {text(item.get('question') or item.get('summary'))} | "
+                f"{text(item.get('answer'), 'unanswered')} | {text(item.get('status'), 'open')} | {text(item.get('impact'), 'scope/design')} |"
+            )
+    if not rows:
+        if language == "zh":
+            return "未记录澄清问题；当前文档基于需求原文、验收标准和已识别业务规则生成。"
+        return "No clarification log was recorded; this document is based on the source requirement, acceptance criteria, and detected business rules."
+    header = "| 编号 | 问题 | 答案 | 状态 | 影响范围 |\n|---|---|---|---|---|" if language == "zh" else "| ID | Question | Answer | Status | Impact |\n|---|---|---|---|---|"
+    return header + "\n" + "\n".join(rows)
+
+
+def render_decision_records(*documents: dict[str, Any], language: str = "en") -> str:
+    rows: list[str] = []
+    for data in documents:
+        for item in as_list(data.get("decision_records")):
+            if isinstance(item, dict):
+                if language == "zh":
+                    rows.append(f"- 决策：{text(item.get('decision'))}；备选：{text(item.get('alternatives'))}；理由：{text(item.get('reason'))}；回滚考虑：{text(item.get('rollback'), '见回滚策略')}")
+                else:
+                    rows.append(f"- Decision: {text(item.get('decision'))}; alternatives: {text(item.get('alternatives'))}; reason: {text(item.get('reason'))}; rollback: {text(item.get('rollback'), 'see rollback strategy')}")
+    if not rows:
+        return "- 未记录决策记录；需在设计评审前补齐关键决策。" if language == "zh" else "- No decision records were synced; key decisions should be completed before design review."
+    return "\n".join(rows)
+
+
+def render_requirement_trace_mermaid(spec: dict[str, Any], language: str = "en") -> str:
+    reqs = [item for item in as_list(spec.get("requirements")) if isinstance(item, dict)]
+    acs = [item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
+    if not reqs or not acs:
+        return "缺少需求或验收标准，无法生成追踪图。" if language == "zh" else "Requirement or acceptance data is missing, so the traceability diagram cannot be generated."
+    lines = ["```mermaid", "flowchart LR"]
+    for req in reqs[:6]:
+        req_id = text(req.get("id"), "REQ")
+        lines.append(f'  {req_id}["{req_id}: {text(req.get("summary"), "requirement")[:60]}"]')
+    for ac in acs[:8]:
+        ac_id = text(ac.get("id"), "AC")
+        lines.append(f'  {ac_id}["{ac_id}: {text(ac.get("criteria"), "acceptance")[:60]}"]')
+    first_req = text(reqs[0].get("id"), "REQ")
+    for ac in acs[:8]:
+        lines.append(f'  {first_req} --> {text(ac.get("id"), "AC")}')
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def render_process_mermaid(technical: dict[str, Any], language: str = "en") -> str:
+    flows = [item for item in as_list(technical.get("process_flow")) if isinstance(item, dict)]
+    if not flows:
+        return "缺少业务流程，无法生成流程图。" if language == "zh" else "Process flow data is missing, so the flow diagram cannot be generated."
+    lines = ["```mermaid", "flowchart TD"]
+    counter = 0
+    for flow in flows[:3]:
+        previous = ""
+        for step in as_list(flow.get("steps"))[:8]:
+            if not isinstance(step, dict):
+                continue
+            counter += 1
+            node = f"S{counter}"
+            label = f"{text(step.get('actor'), 'actor')}: {text(step.get('action'), 'action')}"[:70]
+            lines.append(f'  {node}["{label}"]')
+            if previous:
+                lines.append(f"  {previous} --> {node}")
+            previous = node
+    lines.append("```")
+    return "\n".join(lines) if counter else ("缺少流程步骤，无法生成流程图。" if language == "zh" else "Process steps are missing, so the flow diagram cannot be generated.")
+
+
+def render_architecture_mermaid(architecture: dict[str, Any], language: str = "en") -> str:
+    deps = [item for item in as_list(architecture.get("cross_repo_dependency_graph")) if isinstance(item, dict)]
+    if not deps:
+        return "缺少跨仓或模块依赖信息，无法生成关系图。" if language == "zh" else "Dependency graph data is missing, so the architecture diagram cannot be generated."
+    lines = ["```mermaid", "flowchart LR"]
+    for item in deps[:8]:
+        source = text(item.get("from"), "source").replace("/", "_").replace("-", "_")
+        target = text(item.get("to"), "target").replace("/", "_").replace("-", "_")
+        label = text(item.get("contract"), "contract")[:50]
+        lines.append(f'  {source} -->|"{label}"| {target}')
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def render_release_mermaid(delivery_plan: dict[str, Any], language: str = "en") -> str:
+    release = delivery_plan.get("release_plan") if isinstance(delivery_plan.get("release_plan"), dict) else {}
+    rollback = delivery_plan.get("rollback_plan") if isinstance(delivery_plan.get("rollback_plan"), dict) else {}
+    release_order = [str(item) for item in as_list(release.get("release_order"))]
+    rollback_order = [str(item) for item in as_list(rollback.get("rollback_order"))]
+    if not release_order and not rollback_order:
+        return "缺少发布或回滚顺序，无法生成顺序图。" if language == "zh" else "Release or rollback order is missing, so the sequence diagram cannot be generated."
+    lines = ["```mermaid", "sequenceDiagram", "  participant Operator", "  participant Delivery"]
+    for repo in release_order:
+        lines.append(f"  Operator->>Delivery: release {repo}")
+    for repo in rollback_order:
+        lines.append(f"  Delivery-->>Operator: rollback {repo}")
+    lines.append("```")
+    return "\n".join(lines)
 
 
 def render_process_flows(technical: dict[str, Any]) -> str:
@@ -391,79 +518,120 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"# {heading} 需求说明\n\n"
             "## 一、摘要\n\n"
             f"- 文档编号：`{doc_id}`\n"
-            f"- 当前结论：`{text(spec.get('decision'), 'unknown')}`\n"
-            f"- 是否涉及权限敏感场景：{text((spec.get('permission_scope') or {}).get('sensitive'), 'unknown')}\n\n"
-            "## 二、需求范围\n\n"
+            f"- 当前结论：`{zh_text(spec.get('decision'), '未知')}`\n"
+            f"- 是否涉及权限敏感场景：{zh_text((spec.get('permission_scope') or {}).get('sensitive'), '未知')}\n"
+            "- 本文面向需求评审、技术设计和交付计划使用，机器可读依据见证据引用章节。\n\n"
+            "## 二、背景与目标\n\n"
+            f"{section_paragraph('业务背景', [text(spec.get('requirement_summary') or spec.get('summary') or heading)], '未同步到业务背景。')}\n\n"
+            f"{section_paragraph('用户场景', [text(item.get('scenario') or item.get('summary') or item) for item in as_list(spec.get('user_scenarios')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('user_scenarios')) if not isinstance(item, dict)], '未记录用户场景。')}\n\n"
+            f"{section_paragraph('业务目标', [text(item.get('objective') or item.get('summary') or item) for item in as_list(spec.get('business_objectives')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('business_objectives')) if not isinstance(item, dict)], '未记录业务目标。')}\n\n"
+            "## 三、范围与非目标\n\n"
             f"{render_scope(spec, text(spec.get('summary') or heading))}\n\n"
-            "## 三、需求澄清\n\n"
+            "## 四、需求澄清\n\n"
             f"{render_requirement_clarification_zh(spec)}\n\n"
-            "## 四、需求原文\n\n"
+            "### 澄清记录\n\n"
+            f"{render_clarification_log(spec, 'zh')}\n\n"
+            "## 五、需求原文\n\n"
             f"{requirement_text.strip() or '未同步到需求原文。'}\n\n"
-            "## 五、验收标准\n\n"
+            "## 六、验收标准\n\n"
             f"{render_acceptance(spec)}\n\n"
-            "## 六、业务规则\n\n"
+            "## 七、业务规则解释\n\n"
             f"{render_business_rules(spec)}\n\n"
-            "## 七、未决问题\n\n"
+            "## 八、需求到验收追踪图\n\n"
+            f"{render_requirement_trace_mermaid(spec, 'zh')}\n\n"
+            "## 九、未决问题\n\n"
             f"{render_open_questions(spec)}\n\n"
-            "## 八、证据引用\n\n"
+            "## 十、证据引用\n\n"
+            "- `spec.json`：结构化需求、范围、验收标准和开放问题。\n"
+            "- `requirement.normalized.txt`：归一化后的需求原文。\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "design": (
             f"# {heading} 技术设计\n\n"
             "## 一、摘要\n\n"
             f"- 文档编号：`{doc_id}`\n"
-            f"- 技术设计状态：`{text(technical.get('decision'), 'draft')}`\n"
-            f"- 架构设计状态：`{text(architecture.get('decision'), 'draft')}`\n"
-            f"- 交付计划状态：`{text(delivery_plan.get('decision'), 'draft')}`\n\n"
-            "## 二、现状分析\n\n"
+            f"- 技术设计状态：`{zh_text(technical.get('decision'), '草稿')}`\n"
+            f"- 架构设计状态：`{zh_text(architecture.get('decision'), '草稿')}`\n"
+            f"- 交付计划状态：`{zh_text(delivery_plan.get('decision'), '草稿')}`\n"
+            "- 本文用于设计评审和实施前检查，关键结论均应能追溯到 machine artifacts。\n\n"
+            "## 二、现状问题与设计目标\n\n"
             f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], '未同步到现状分析。')}\n\n"
             f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], '未同步到当前架构分析。')}\n\n"
+            f"{section_paragraph('设计目标', [text(item.get('behavior') or item.get('summary') or item) for item in as_list(technical.get('target_behavior')) if isinstance(item, dict)], '未同步到目标行为。')}\n\n"
+            f"{section_paragraph('非目标', [str(item) for item in as_list((technical.get('design_scope') or {}).get('non_goals'))], '未记录非目标。')}\n\n"
             "## 三、方案对比与选择\n\n"
             f"{render_solution_options(technical, architecture, 'zh')}\n\n"
-            "## 四、业务流程\n\n"
+            "## 四、决策记录\n\n"
+            f"{render_decision_records(architecture, technical, language='zh')}\n\n"
+            "## 五、业务流程\n\n"
             f"{render_process_flows(technical)}\n\n"
-            "## 五、模块与接口设计\n\n"
+            "### 流程图\n\n"
+            f"{render_process_mermaid(technical, 'zh')}\n\n"
+            "## 六、模块与接口设计\n\n"
             f"{render_named_items(as_list(technical.get('module_decomposition')), ['module', 'responsibility', 'input', 'output', 'coupling_control'], '未同步到模块设计。')}\n\n"
             f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], '未同步到接口影响。')}\n\n"
             f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], '未同步到接口示例。')}\n\n"
-            "## 六、数据、页面与交互影响\n\n"
+            "## 七、数据、权限、页面与异常场景\n\n"
             f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], '未同步到数据设计。')}\n\n"
+            f"{render_named_items(as_list(technical.get('permission_model')), ['role', 'rule', 'negative_case'], '未同步到权限规则。')}\n\n"
+            f"{render_named_items(as_list(technical.get('exception_and_edge_cases')), ['case', 'handling'], '未同步到异常场景。')}\n\n"
             f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], '未同步到页面影响。')}\n\n"
-            "## 七、架构与运维影响\n\n"
+            "## 八、架构与运维影响\n\n"
             f"{render_named_items(as_list(architecture.get('cross_repo_dependency_graph')), ['from', 'to', 'contract', 'change'], '未同步到跨仓依赖图。')}\n\n"
+            "### 模块/仓库关系图\n\n"
+            f"{render_architecture_mermaid(architecture, 'zh')}\n\n"
             f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], '未同步到集成顺序。')}\n\n"
             f"{render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], '未同步到发布影响矩阵。')}\n\n"
             f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚策略。')}\n\n"
-            "## 八、交付执行计划\n\n"
+            "## 九、交付执行计划\n\n"
             f"{render_delivery_tasks(delivery_plan)}\n\n"
-            "## 九、测试与验收证据\n\n"
+            "## 十、测试与验收证据\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。')}\n\n"
             f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。')}\n\n"
-            "## 十、风险与未过门禁\n\n"
+            "## 十一、风险与未过门禁\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
-            "## 十一、证据引用\n\n"
+            "## 十二、证据引用\n\n"
+            "- `technical_design.json`：技术设计、接口、数据、权限和测试映射。\n"
+            "- `architecture_design.json`：架构边界、跨仓依赖、部署和回滚策略。\n"
+            "- `delivery_plan.json`：实施顺序、文件范围、证据和回滚检查。\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "release": (
             f"# {heading} 发布准备\n\n"
             "## 一、摘要\n\n"
             f"- 文档编号：`{doc_id}`\n"
-            f"- 当前下一阶段：`{text(status.get('next_stage'), 'unknown')}`\n"
-            f"- 是否允许实现：`{text(status.get('can_implement'), 'false')}`\n"
-            f"- 是否允许发布：`{text(status.get('can_release'), 'false')}`\n\n"
-            "## 二、缺口清单\n\n"
+            f"- 当前下一阶段：`{zh_text(status.get('next_stage'), '未知')}`\n"
+            f"- 是否允许实现：`{zh_text(status.get('can_implement'), '否')}`\n"
+            f"- 是否允许发布：`{zh_text(status.get('can_release'), '否')}`\n"
+            "- 本文用于实现前、发布前和上线后观察检查。\n\n"
+            "## 二、发布前检查\n\n"
             "### 实现前必须补齐\n\n"
             f"{bullet_lines([str(item) for item in as_list(status.get('implementation_missing'))], '未同步到实现前缺口。')}\n\n"
             "### 发布前必须补齐\n\n"
             f"{bullet_lines([str(item) for item in as_list(status.get('release_missing'))], '未同步到发布前缺口。')}\n\n"
-            "## 三、评审结论\n\n"
-            f"- 设计评审：`{text(design_review.get('decision'), 'unknown')}`\n"
-            f"- 交付计划评审：`{text(delivery_review.get('decision'), 'unknown')}`\n\n"
-            "## 四、阻塞项\n\n"
+            "## 三、执行步骤\n\n"
+            f"{render_delivery_tasks(delivery_plan)}\n\n"
+            "## 四、发布与回滚顺序图\n\n"
+            f"{render_release_mermaid(delivery_plan, 'zh')}\n\n"
+            "## 五、验证步骤\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], '未同步到验收验证步骤。')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试验证步骤。')}\n\n"
+            "## 六、回滚步骤\n\n"
+            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚步骤。')}\n\n"
+            "## 七、评审结论\n\n"
+            f"- 设计评审：`{zh_text(design_review.get('decision'), '未知')}`\n"
+            f"- 交付计划评审：`{zh_text(delivery_review.get('decision'), '未知')}`\n\n"
+            "## 八、风险处置与阻塞项\n\n"
             f"{render_blockers(design_review, delivery_review, status)}\n\n"
-            "## 五、下一步动作\n\n"
+            "## 九、上线后观察\n\n"
+            f"{render_named_items(as_list(architecture.get('observability')), ['signal', 'owner'], '未同步到观察指标。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('monitoring_alerts')), ['signal', 'owner', 'trigger', 'action'], '未同步到告警策略。')}\n\n"
+            "## 十、下一步动作\n\n"
             f"- {render_next_action(status, delivery_review)}\n\n"
-            "## 六、证据引用\n\n"
+            "## 十一、证据引用\n\n"
+            "- `delivery_status.json`：当前阶段、允许实现/发布状态和缺口。\n"
+            "- `delivery_plan_review.json`：交付计划评审结论。\n"
+            "- `design_architecture_review.json`：设计评审结论。\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
     }
@@ -487,10 +655,16 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"- Doc ID: `{doc_id}`\n"
             f"- Current decision: `{text(spec.get('decision'), 'unknown')}`\n"
             f"- Permission sensitivity: {text((spec.get('permission_scope') or {}).get('sensitive'), 'unknown')}\n\n"
+            "## Background And Goals\n\n"
+            f"{section_paragraph('Business Background', [text(spec.get('requirement_summary') or spec.get('summary') or heading)], 'Business background was not synced.')}\n\n"
+            f"{section_paragraph('User Scenarios', [text(item.get('scenario') or item.get('summary') or item) for item in as_list(spec.get('user_scenarios')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('user_scenarios')) if not isinstance(item, dict)], 'No user scenarios were recorded.')}\n\n"
+            f"{section_paragraph('Business Objectives', [text(item.get('objective') or item.get('summary') or item) for item in as_list(spec.get('business_objectives')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('business_objectives')) if not isinstance(item, dict)], 'No business objectives were recorded.')}\n\n"
             "## Scope\n\n"
             f"{render_scope(spec, text(spec.get('summary') or heading))}\n\n"
             "## Requirement Clarification\n\n"
             f"{render_requirement_clarification(spec)}\n\n"
+            "### Clarification Log\n\n"
+            f"{render_clarification_log(spec, 'en')}\n\n"
             "## Requirement Source\n\n"
             f"{requirement_text.strip() or 'Requirement text not synced.'}\n\n"
             "## Acceptance Criteria\n\n"
@@ -499,7 +673,11 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"{render_business_rules(spec)}\n\n"
             "## Open Questions\n\n"
             f"{render_open_questions(spec)}\n\n"
+            "## Requirement Traceability Diagram\n\n"
+            f"{render_requirement_trace_mermaid(spec, 'en')}\n\n"
             "## Evidence References\n\n"
+            "- `spec.json`: structured requirement, scope, acceptance criteria, and open questions.\n"
+            "- `requirement.normalized.txt`: normalized requirement source.\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "design": (
@@ -509,22 +687,32 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"- Technical decision: `{text(technical.get('decision'), 'draft')}`\n"
             f"- Architecture decision: `{text(architecture.get('decision'), 'draft')}`\n"
             f"- Delivery plan decision: `{text(delivery_plan.get('decision'), 'draft')}`\n\n"
-            "## Current State\n\n"
+            "## Current State, Problem, And Goals\n\n"
             f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], 'No current-state analysis was synced.')}\n\n"
             f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], 'No current architecture analysis was synced.')}\n\n"
+            f"{section_paragraph('Design Goals', [text(item.get('behavior') or item.get('summary') or item) for item in as_list(technical.get('target_behavior')) if isinstance(item, dict)], 'No target behavior was synced.')}\n\n"
+            f"{section_paragraph('Non Goals', [str(item) for item in as_list((technical.get('design_scope') or {}).get('non_goals'))], 'No non-goals were recorded.')}\n\n"
             "## Options And Decision\n\n"
             f"{render_solution_options(technical, architecture, 'en')}\n\n"
+            "## Decision Records\n\n"
+            f"{render_decision_records(architecture, technical, language='en')}\n\n"
             "## Process Flow\n\n"
             f"{render_process_flows(technical)}\n\n"
+            "### Flow Diagram\n\n"
+            f"{render_process_mermaid(technical, 'en')}\n\n"
             "## Module And Contract Design\n\n"
             f"{render_named_items(as_list(technical.get('module_decomposition')), ['module', 'responsibility', 'input', 'output', 'coupling_control'], 'No module design was synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], 'No API contract changes were confirmed.')}\n\n"
             f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], 'No interface examples were synced.')}\n\n"
             "## Data And UI Impact\n\n"
             f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], 'No data design was synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('permission_model')), ['role', 'rule', 'negative_case'], 'No permission rules were synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('exception_and_edge_cases')), ['case', 'handling'], 'No exception scenarios were synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], 'No UI impact was confirmed.')}\n\n"
             "## Architecture And Operations\n\n"
             f"{render_named_items(as_list(architecture.get('cross_repo_dependency_graph')), ['from', 'to', 'contract', 'change'], 'No dependency graph was synced.')}\n\n"
+            "### Module / Repository Diagram\n\n"
+            f"{render_architecture_mermaid(architecture, 'en')}\n\n"
             f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], 'No integration sequence was synced.')}\n\n"
             f"{render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], 'No deployment impact matrix was synced.')}\n\n"
             f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], 'No rollback strategy was synced.')}\n\n"
@@ -536,6 +724,9 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "## Risks And Open Gates\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## Evidence References\n\n"
+            "- `technical_design.json`: technical design, API/data/permission/test mapping.\n"
+            "- `architecture_design.json`: architecture boundaries, dependency graph, deployment, rollback.\n"
+            "- `delivery_plan.json`: implementation sequence, file scope, evidence, rollback checks.\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "release": (
@@ -550,6 +741,15 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"{bullet_lines([str(item) for item in as_list(status.get('implementation_missing'))], 'No implementation gaps were synced.')}\n\n"
             "### Before Release\n\n"
             f"{bullet_lines([str(item) for item in as_list(status.get('release_missing'))], 'No release gaps were synced.')}\n\n"
+            "## Execution Steps\n\n"
+            f"{render_delivery_tasks(delivery_plan)}\n\n"
+            "## Release And Rollback Sequence\n\n"
+            f"{render_release_mermaid(delivery_plan, 'en')}\n\n"
+            "## Validation Steps\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], 'No acceptance validation steps were synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test validation steps were synced.')}\n\n"
+            "## Rollback Steps\n\n"
+            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], 'No rollback steps were synced.')}\n\n"
             "## Review Decisions\n\n"
             f"- Design review: `{text(design_review.get('decision'), 'unknown')}`\n"
             f"- Delivery plan review: `{text(delivery_review.get('decision'), 'unknown')}`\n\n"
@@ -557,7 +757,13 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"{render_blockers(design_review, delivery_review, status)}\n\n"
             "## Next Action\n\n"
             f"- {render_next_action(status, delivery_review)}\n\n"
+            "## Post Release Observation\n\n"
+            f"{render_named_items(as_list(architecture.get('observability')), ['signal', 'owner'], 'No observation signals were synced.')}\n\n"
+            f"{render_named_items(as_list(architecture.get('monitoring_alerts')), ['signal', 'owner', 'trigger', 'action'], 'No monitoring alerts were synced.')}\n\n"
             "## Evidence References\n\n"
+            "- `delivery_status.json`: current stage, implementation/release readiness, missing gates.\n"
+            "- `delivery_plan_review.json`: delivery plan review result.\n"
+            "- `design_architecture_review.json`: design review result.\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
     }

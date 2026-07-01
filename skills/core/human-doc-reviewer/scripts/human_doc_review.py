@@ -15,6 +15,30 @@ REQUIRED_TERMS = {
     "evidence": ["evidence", "证据", "验证"],
     "rollback": ["rollback", "回滚"],
 }
+FORMAL_TERMS = {
+    "background": ["background", "背景"],
+    "goal": ["goal", "objective", "目标"],
+    "clarification": ["clarification", "澄清"],
+    "acceptance": ["acceptance", "验收"],
+    "test": ["test", "测试"],
+}
+GENERIC_PHRASES = [
+    "pending delivery artifact sync",
+    "tbd",
+    "unknown",
+    "confirm later",
+    "target module to be confirmed",
+    "existing producer",
+    "待确认",
+]
+ENGLISH_TEMPLATE_TERMS = [
+    "executive summary",
+    "current decision",
+    "missing readiness",
+    "before implementation",
+    "evidence references",
+    "requirement clarification",
+]
 
 
 def review(path: Path) -> dict:
@@ -27,6 +51,20 @@ def review(path: Path) -> dict:
     for area, terms in REQUIRED_TERMS.items():
         if not any(term in lower or term in text for term in terms):
             warnings.append({"source": area, "message": f"{area} section or terms not found"})
+    for area, terms in FORMAL_TERMS.items():
+        if not any(term in lower or term in text for term in terms):
+            warnings.append({"source": area, "message": f"{area} formal-document content not found"})
+    if "```mermaid" not in lower and not any(phrase in text for phrase in ["无法生成", "cannot be generated"]):
+        warnings.append({"source": "diagram", "message": "diagram or explicit no-diagram explanation not found"})
+    if not re.search(r"`[^`]+\.json`", text):
+        warnings.append({"source": "evidence_refs", "message": "machine artifact JSON evidence references not found"})
+    if any(phrase in lower for phrase in GENERIC_PHRASES):
+        warnings.append({"source": "generic_phrase", "message": "generic or placeholder phrasing detected"})
+    zh_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    if zh_chars >= 80:
+        english_hits = [term for term in ENGLISH_TEMPLATE_TERMS if term in lower]
+        if english_hits:
+            warnings.append({"source": "zh_language_quality", "message": f"Chinese document still contains English template terms: {', '.join(english_hits[:5])}"})
     mac_user_root = "/" + "Users/"
     if mac_user_root in text or re.search(r"/home/[^/\s]+|[A-Za-z]:\\\\", text):
         blockers.append({"source": "local_path", "message": "local absolute path detected"})

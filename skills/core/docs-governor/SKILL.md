@@ -29,6 +29,7 @@ delivery docs repository setup
 - Keep private project docs outside the open-core repository.
 - Validate expected folders and manifests before teams rely on the docs repository.
 - Human-readable docs default to English. Pass `--doc-language zh` when the requirement or user explicitly asks for Chinese docs.
+- Synced human docs should read as formal review documents, not JSON dumps: include background, goals, clarification log, decisions, diagrams, evidence references, test/rollback/release sections, and explicit missing-input explanations.
 - Before implementation, validate docs root with `--require-git`; a plain local folder is not enough.
 - Do not copy secrets, local absolute paths, or private customer data into shareable docs.
 

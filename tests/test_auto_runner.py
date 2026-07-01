@@ -90,18 +90,26 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
         design_doc = (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         release_doc = (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         assert "## Executive Summary" in spec_doc
+        assert "## Background And Goals" in spec_doc
         assert "## Scope" in spec_doc
         assert "## Requirement Clarification" in spec_doc
+        assert "### Clarification Log" in spec_doc
         assert "### Clarification Status" in spec_doc
         assert "### Confirmed Understanding" in spec_doc
         assert "### Pending Questions" in spec_doc
         assert "### Working Assumptions" in spec_doc
         assert "Design can proceed:" in spec_doc
         assert "## Acceptance Criteria" in spec_doc
+        assert "## Requirement Traceability Diagram" in spec_doc
         assert "`AC-1` exported file contains order id and status." in spec_doc
+        assert "```mermaid" in spec_doc + design_doc + release_doc
+        assert "## Current State, Problem, And Goals" in design_doc
+        assert "## Decision Records" in design_doc
         assert "## Process Flow" in design_doc
         assert "## Risks And Open Gates" in design_doc
         assert "## Missing Readiness" in release_doc
+        assert "## Execution Steps" in release_doc
+        assert "## Release And Rollback Sequence" in release_doc
         assert "### Before Implementation" in release_doc
         assert "- -" not in spec_doc + design_doc + release_doc
         assert "[{\"" not in spec_doc + design_doc + release_doc
@@ -133,15 +141,22 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         design_doc = (docs_root / "human/designs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         release_doc = (docs_root / "human/releases/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         assert "## 一、摘要" in spec_doc
-        assert "## 三、需求澄清" in spec_doc
-        assert "## 二、现状分析" in design_doc
+        assert "## 二、背景与目标" in spec_doc
+        assert "## 四、需求澄清" in spec_doc
+        assert "### 澄清记录" in spec_doc
+        assert "## 八、需求到验收追踪图" in spec_doc
+        assert "## 二、现状问题与设计目标" in design_doc
         assert "## 三、方案对比与选择" in design_doc
-        assert "## 四、业务流程" in design_doc
-        assert "## 五、模块与接口设计" in design_doc
-        assert "## 八、交付执行计划" in design_doc
-        assert "## 九、测试与验收证据" in design_doc
-        assert "## 二、缺口清单" in release_doc
+        assert "## 四、决策记录" in design_doc
+        assert "## 五、业务流程" in design_doc
+        assert "## 六、模块与接口设计" in design_doc
+        assert "## 九、交付执行计划" in design_doc
+        assert "## 十、测试与验收证据" in design_doc
+        assert "## 二、发布前检查" in release_doc
+        assert "## 四、发布与回滚顺序图" in release_doc
+        assert "```mermaid" in spec_doc + design_doc + release_doc
         assert "## Executive Summary" not in spec_doc + design_doc + release_doc
+        assert "Evidence References" not in spec_doc + design_doc + release_doc
 
 
 def test_auto_runner_auto_detects_chinese_doc_request() -> None:
@@ -157,7 +172,7 @@ def test_auto_runner_auto_detects_chinese_doc_request() -> None:
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
         result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-HINT", out=root / "artifacts", docs_root=docs_root, doc_language="auto")
         assert result["doc_language"] == "zh"
-        assert "## 三、需求澄清" in (docs_root / "human/specs/REQ-AUTO-ZH-HINT.md").read_text(encoding="utf-8")
+        assert "## 四、需求澄清" in (docs_root / "human/specs/REQ-AUTO-ZH-HINT.md").read_text(encoding="utf-8")
 
 
 def test_auto_runner_defaults_to_auto_doc_language_detection() -> None:
