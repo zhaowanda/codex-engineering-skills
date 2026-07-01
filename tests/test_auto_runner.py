@@ -86,9 +86,27 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
         assert result["docs_readiness"]["decision"] == "pass"
         assert result["docs_sync"]["decision"] == "pass"
         assert (docs_root / "indexes/REQ-AUTO-DOCS.manifest.json").exists()
-        assert "Order Export Requirement" in (docs_root / "human/specs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        assert "Technical Design" in (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        assert "Readiness" in (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        spec_doc = (docs_root / "human/specs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        design_doc = (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        release_doc = (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        assert "## Executive Summary" in spec_doc
+        assert "## Scope" in spec_doc
+        assert "## Requirement Clarification" in spec_doc
+        assert "### Clarification Status" in spec_doc
+        assert "### Confirmed Understanding" in spec_doc
+        assert "### Pending Questions" in spec_doc
+        assert "### Working Assumptions" in spec_doc
+        assert "Design can proceed:" in spec_doc
+        assert "## Acceptance Criteria" in spec_doc
+        assert "`AC-1` exported file contains order id and status." in spec_doc
+        assert "## Process Flow" in design_doc
+        assert "## Risks And Open Gates" in design_doc
+        assert "## Missing Readiness" in release_doc
+        assert "### Before Implementation" in release_doc
+        assert "- -" not in spec_doc + design_doc + release_doc
+        assert "[{\"" not in spec_doc + design_doc + release_doc
+        assert "{\"in_scope\"" not in spec_doc
+        assert "acceptance_criteria:" not in spec_doc
         machine_spec = json.loads((docs_root / "machine/specs/REQ-AUTO-DOCS.spec.json").read_text(encoding="utf-8"))
         assert machine_spec["schema"] == "codex-docs-machine-bundle-v1"
         assert "spec.json" in machine_spec["artifacts"]

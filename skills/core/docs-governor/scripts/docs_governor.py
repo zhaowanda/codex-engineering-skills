@@ -101,15 +101,203 @@ def materialize_doc_files(docs_root: Path, doc_id: str, title: str = "") -> dict
     }
 
 
-def short_json_summary(data: dict[str, Any], keys: list[str]) -> str:
+def as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def text(value: Any, default: str = "TBD") -> str:
+    if value in (None, "", [], {}):
+        return default
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, list):
+        return ", ".join(text(item, default) for item in value) or default
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def bullet_lines(items: list[str], empty: str = "TBD") -> str:
+    compact = [item for item in items if item]
+    if not compact:
+        return f"- {empty}"
+    return "\n".join(item if item.lstrip().startswith("- ") else f"- {item}" for item in compact)
+
+
+def render_scope(spec: dict[str, Any], fallback: str) -> str:
+    scope = spec.get("scope")
+    if not isinstance(scope, dict):
+        return fallback
     lines: list[str] = []
-    for key in keys:
-        value = data.get(key)
-        if value in (None, "", [], {}):
+    for label, key in [("In scope", "in_scope"), ("Out of scope", "out_of_scope"), ("Assumptions", "assumptions"), ("Non-goals", "non_goals")]:
+        values = [str(item) for item in as_list(scope.get(key))]
+        if values:
+            lines.append(f"- {label}: {', '.join(values)}")
+    return "\n".join(lines) if lines else f"- {fallback}"
+
+
+def render_acceptance(spec: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for item in as_list(spec.get("acceptance_criteria")):
+        if not isinstance(item, dict):
             continue
-        rendered = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
-        lines.append(f"- {key}: {rendered}")
-    return "\n".join(lines) if lines else "- No synced data available."
+        evidence = ", ".join(str(value) for value in as_list(item.get("evidence_required"))) or "TBD"
+        lines.append(f"`{text(item.get('id'))}` {text(item.get('criteria'))} ({text(item.get('type'), 'case')}; evidence: {evidence})")
+    return bullet_lines(lines, "No acceptance criteria were synced.")
+
+
+def render_business_rules(spec: dict[str, Any]) -> str:
+    lines = [f"`{text(item.get('id'))}` {text(item.get('rule'))}" for item in as_list(spec.get("business_rules")) if isinstance(item, dict)]
+    return bullet_lines(lines, "No explicit business rules were synced.")
+
+
+def render_requirement_clarification(spec: dict[str, Any]) -> str:
+    confirmed: list[str] = []
+    for item in as_list(spec.get("business_rules")):
+        if isinstance(item, dict):
+            confirmed.append(f"{text(item.get('id'))}: {text(item.get('rule'))}")
+    permission = spec.get("permission_scope") if isinstance(spec.get("permission_scope"), dict) else {}
+    actors = ", ".join(str(item) for item in as_list(permission.get("actors")))
+    if actors:
+        confirmed.append(f"Actors/roles identified: {actors}")
+    if permission.get("negative_cases_required") is True:
+        confirmed.append("Negative permission cases are required.")
+
+    assumptions: list[str] = []
+    scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
+    assumptions.extend(str(item) for item in as_list(scope.get("assumptions")))
+    assumptions.extend(str(item) for item in as_list(spec.get("assumptions")))
+
+    questions: list[str] = []
+    for item in as_list(spec.get("open_questions")):
+        if isinstance(item, dict):
+            questions.append(text(item.get("question") or item.get("summary") or item))
+        else:
+            questions.append(text(item))
+
+    decision = str(spec.get("decision") or "")
+    blocked = bool(questions) or decision in {"needs_clarification", "blocked"}
+    return (
+        "### Clarification Status\n\n"
+        f"- Status: {'blocked pending answer' if blocked else 'no blocking clarification recorded'}\n"
+        f"- Design can proceed: {'no' if blocked else 'yes'}\n\n"
+        "### Confirmed Understanding\n\n"
+        f"{bullet_lines(confirmed, 'No confirmed business rules beyond the requirement text.')}\n\n"
+        "### Pending Questions\n\n"
+        f"{bullet_lines(questions, 'None recorded.')}\n\n"
+        "### Working Assumptions\n\n"
+        f"{bullet_lines(assumptions, 'None recorded.')}"
+    )
+
+
+def render_open_questions(*documents: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for data in documents:
+        for item in as_list(data.get("open_questions")):
+            if isinstance(item, dict):
+                lines.append(text(item.get("question") or item.get("summary") or item))
+            else:
+                lines.append(text(item))
+    return bullet_lines(lines, "None recorded.")
+
+
+def render_process_flows(technical: dict[str, Any]) -> str:
+    sections: list[str] = []
+    for flow in as_list(technical.get("process_flow")):
+        if not isinstance(flow, dict):
+            continue
+        steps = []
+        for step in as_list(flow.get("steps")):
+            if isinstance(step, dict):
+                steps.append(f"  - {text(step.get('step'))}. {text(step.get('actor'))}: {text(step.get('action'))} -> {text(step.get('output'))}")
+        sections.append(
+            f"### {text(flow.get('flow_name'), 'Process')}\n\n"
+            f"- Actors: {', '.join(str(item) for item in as_list(flow.get('actors'))) or 'TBD'}\n"
+            f"- Success state: {text(flow.get('success_end_state'))}\n"
+            f"- Failure states: {', '.join(str(item) for item in as_list(flow.get('failure_end_states'))) or 'TBD'}\n\n"
+            + ("\n".join(steps) if steps else "- Steps: TBD")
+        )
+    return "\n\n".join(sections) if sections else "### Process\n\n- TBD"
+
+
+def render_named_items(items: list[Any], fields: list[str], empty: str) -> str:
+    labels = {
+        "page_or_route": "page/route",
+        "user_goal": "user goal",
+        "entry_point": "entry point",
+        "permission_visibility": "permission visibility",
+        "acceptance_evidence": "acceptance evidence",
+        "old_consumer_impact": "consumer impact",
+        "failure_handling": "failure handling",
+        "data_risk": "data risk",
+    }
+    lines: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        values = [f"{labels.get(field, field)}: {text(item.get(field))}" for field in fields if item.get(field) not in (None, "", [], {})]
+        if values:
+            lines.append("; ".join(values))
+    return bullet_lines(lines, empty)
+
+
+def render_delivery_tasks(delivery_plan: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for repo in as_list(delivery_plan.get("repo_tasks")):
+        if not isinstance(repo, dict):
+            continue
+        allowed_files = ", ".join(str(item) for item in as_list(repo.get("allowed_files"))) or "not narrowed yet"
+        tests = ", ".join(str(item) for item in as_list(repo.get("test_commands"))) or "not bound yet"
+        lines.append(f"- Repo `{text(repo.get('repo'))}`: {text(repo.get('responsibility'))}; files: {allowed_files}; tests: {tests}")
+        for task in as_list(repo.get("tasks"))[:6]:
+            if isinstance(task, dict):
+                lines.append(f"  - {text(task.get('phase'))}: {text(task.get('summary'))}")
+    return "\n".join(lines) if lines else "- No repo tasks were synced."
+
+
+def render_blockers(*documents: dict[str, Any]) -> str:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for data in documents:
+        for item in as_list(data.get("blockers")) + as_list(data.get("open_gates")):
+            if isinstance(item, dict):
+                source = text(item.get("source") or item.get("area"), "gate")
+                message = text(item.get("message") or item.get("suggestion") or item)
+            else:
+                source = "gate"
+                message = text(item)
+            key = f"{source}: {message}"
+            if key not in seen:
+                seen.add(key)
+                lines.append(key)
+    return bullet_lines(lines[:10], "None.")
+
+
+def render_next_action(status: dict[str, Any], delivery_review: dict[str, Any]) -> str:
+    primary = status.get("primary_next_action") if isinstance(status.get("primary_next_action"), dict) else {}
+    for value in [primary.get("summary"), status.get("next_command")]:
+        if value:
+            return text(value)
+    blockers = as_list(delivery_review.get("blockers"))
+    if blockers and isinstance(blockers[0], dict):
+        return text(blockers[0].get("suggestion") or blockers[0].get("message"))
+    return "Resolve listed blockers before implementation or release."
+
+
+def render_evidence_refs(artifact_dir: Path) -> str:
+    refs = [
+        "spec.json",
+        "technical_design.json",
+        "architecture_design.json",
+        "delivery_plan.json",
+        "design_architecture_review.json",
+        "delivery_plan_review.json",
+        "delivery_status.json",
+    ]
+    lines = [f"- `{name}`" for name in refs if (artifact_dir / name).exists()]
+    return "\n".join(lines) if lines else "- No machine artifacts were synced."
 
 
 def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dict[str, str]:
@@ -126,31 +314,71 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
     return {
         "spec": (
             f"# {heading} Spec\n\n"
-            f"- doc_id: `{doc_id}`\n"
-            f"- decision: `{spec.get('decision', '')}`\n\n"
-            "## Requirement\n\n"
+            "## Executive Summary\n\n"
+            f"- Doc ID: `{doc_id}`\n"
+            f"- Current decision: `{text(spec.get('decision'), 'unknown')}`\n"
+            f"- Permission sensitivity: {text((spec.get('permission_scope') or {}).get('sensitive'), 'unknown')}\n\n"
+            "## Scope\n\n"
+            f"{render_scope(spec, text(spec.get('summary') or heading))}\n\n"
+            "## Requirement Clarification\n\n"
+            f"{render_requirement_clarification(spec)}\n\n"
+            "## Requirement Source\n\n"
             f"{requirement_text.strip() or 'Requirement text not synced.'}\n\n"
             "## Acceptance Criteria\n\n"
-            f"{short_json_summary(spec, ['acceptance_criteria', 'negative_acceptance_criteria', 'business_rules', 'open_questions'])}\n"
+            f"{render_acceptance(spec)}\n\n"
+            "## Business Rules\n\n"
+            f"{render_business_rules(spec)}\n\n"
+            "## Open Questions\n\n"
+            f"{render_open_questions(spec)}\n\n"
+            "## Evidence References\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "design": (
             f"# {heading} Design\n\n"
-            f"- doc_id: `{doc_id}`\n\n"
-            "## Technical Design\n\n"
-            f"{short_json_summary(technical, ['process_flow', 'module_design', 'api_contracts', 'ui_ue_design', 'test_strategy', 'open_questions'])}\n\n"
-            "## Architecture Design\n\n"
-            f"{short_json_summary(architecture, ['system_context', 'component_design', 'integration_sequence', 'deployment_impact', 'rollback_strategy', 'architecture_risks'])}\n\n"
+            "## Executive Summary\n\n"
+            f"- Doc ID: `{doc_id}`\n"
+            f"- Technical decision: `{text(technical.get('decision'), 'draft')}`\n"
+            f"- Architecture decision: `{text(architecture.get('decision'), 'draft')}`\n"
+            f"- Delivery plan decision: `{text(delivery_plan.get('decision'), 'draft')}`\n\n"
+            "## Process Flow\n\n"
+            f"{render_process_flows(technical)}\n\n"
+            "## Module And Contract Design\n\n"
+            f"{render_named_items(as_list(technical.get('module_design')), ['module', 'responsibility', 'change_summary'], 'No module design was synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], 'No API contract changes were confirmed.')}\n\n"
+            "## UI / UX Impact\n\n"
+            f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], 'No UI impact was confirmed.')}\n\n"
+            "## Architecture And Operations\n\n"
+            f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], 'No integration sequence was synced.')}\n\n"
+            f"{render_named_items(as_list(architecture.get('deployment_impact')), ['order', 'config'], 'No deployment impact was synced.')}\n\n"
+            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], 'No rollback strategy was synced.')}\n\n"
             "## Delivery Plan\n\n"
-            f"{short_json_summary(delivery_plan, ['repo_tasks', 'cross_repo_order', 'validation_plan', 'open_gates', 'decision'])}\n"
+            f"{render_delivery_tasks(delivery_plan)}\n\n"
+            "## Risks And Open Gates\n\n"
+            f"{render_blockers(delivery_plan, architecture)}\n\n"
+            "## Evidence References\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "release": (
             f"# {heading} Release\n\n"
-            f"- doc_id: `{doc_id}`\n\n"
-            "## Readiness\n\n"
-            f"{short_json_summary(status, ['next_stage', 'can_implement', 'can_release', 'implementation_missing', 'release_missing'])}\n\n"
-            "## Reviews\n\n"
-            f"{short_json_summary(design_review, ['decision', 'blockers', 'warnings'])}\n"
-            f"{short_json_summary(delivery_review, ['decision', 'blockers', 'warnings'])}\n"
+            "## Executive Summary\n\n"
+            f"- Doc ID: `{doc_id}`\n"
+            f"- Next stage: `{text(status.get('next_stage'), 'unknown')}`\n"
+            f"- Implementation allowed: `{text(status.get('can_implement'), 'false')}`\n"
+            f"- Release allowed: `{text(status.get('can_release'), 'false')}`\n\n"
+            "## Missing Readiness\n\n"
+            "### Before Implementation\n\n"
+            f"{bullet_lines([str(item) for item in as_list(status.get('implementation_missing'))], 'No implementation gaps were synced.')}\n\n"
+            "### Before Release\n\n"
+            f"{bullet_lines([str(item) for item in as_list(status.get('release_missing'))], 'No release gaps were synced.')}\n\n"
+            "## Review Decisions\n\n"
+            f"- Design review: `{text(design_review.get('decision'), 'unknown')}`\n"
+            f"- Delivery plan review: `{text(delivery_review.get('decision'), 'unknown')}`\n\n"
+            "## Blockers\n\n"
+            f"{render_blockers(design_review, delivery_review, status)}\n\n"
+            "## Next Action\n\n"
+            f"- {render_next_action(status, delivery_review)}\n\n"
+            "## Evidence References\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
         ),
     }
 
