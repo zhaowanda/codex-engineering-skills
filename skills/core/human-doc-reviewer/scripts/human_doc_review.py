@@ -39,6 +39,11 @@ ENGLISH_TEMPLATE_TERMS = [
     "evidence references",
     "requirement clarification",
 ]
+DEPTH_TERMS = {
+    "review_focus": ["review focus", "评审重点", "阅读与评审重点"],
+    "traceability": ["traceability", "追踪", "追溯"],
+    "implementation_boundary": ["implementation boundary", "edit constraint", "实施边界", "实现约束", "允许修改文件"],
+}
 
 
 def review(path: Path) -> dict:
@@ -60,6 +65,18 @@ def review(path: Path) -> dict:
         warnings.append({"source": "evidence_refs", "message": "machine artifact JSON evidence references not found"})
     if any(phrase in lower for phrase in GENERIC_PHRASES):
         warnings.append({"source": "generic_phrase", "message": "generic or placeholder phrasing detected"})
+    generic_hits = sum(lower.count(phrase) for phrase in GENERIC_PHRASES)
+    if generic_hits >= 4:
+        warnings.append({"source": "placeholder_density", "message": "document contains many placeholder phrases; likely lacks delivery-specific depth"})
+    bullet_count = len(re.findall(r"(?m)^- ", text))
+    heading_count = len(re.findall(r"(?m)^#{1,3} ", text))
+    if bullet_count >= 8 and len(text.strip()) < 1800:
+        warnings.append({"source": "bullet_depth", "message": "many bullets but little explanatory content; add review rationale and impact analysis"})
+    for area, terms in DEPTH_TERMS.items():
+        if not any(term in lower or term in text for term in terms):
+            warnings.append({"source": area, "message": f"{area} depth signal not found"})
+    if heading_count >= 8 and len(text.strip()) / max(heading_count, 1) < 180:
+        warnings.append({"source": "section_depth", "message": "sections are very short on average; document may be outline-only"})
     zh_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
     if zh_chars >= 80:
         english_hits = [term for term in ENGLISH_TEMPLATE_TERMS if term in lower]

@@ -136,6 +136,96 @@ def text(value: Any, default: str = "TBD") -> str:
     return str(value)
 
 
+ZH_DEFAULT_PHRASES = {
+    "target module to be confirmed": "待确认目标模块",
+    "existing entrypoint to be confirmed": "待确认现有入口",
+    "existing producer": "现有生产方",
+    "preserve existing contracts": "保持现有契约",
+    "preserve existing permission and validation behavior": "保持现有权限与校验行为",
+    "keep owner boundary narrow": "保持责任边界收敛",
+    "preserve backward compatibility": "保持向后兼容",
+    "support rollback by reverting owner repo": "支持通过回滚责任仓库恢复",
+    "target-repo owns the initial change boundary for this requirement and must preserve existing upstream/downstream contracts.": "target-repo 承担该需求的初始变更边界，并必须保持现有上下游契约。",
+    "Minimal scoped change": "最小范围变更",
+    "New abstraction or contract": "新增抽象或契约",
+    "Single owner repository change": "单一责任仓库变更",
+    "Cross-repository contract change": "跨仓契约变更",
+    "Implement inside the current owner module using existing contracts.": "在当前责任模块内复用现有契约实现。",
+    "Introduce a new abstraction/API to isolate the behavior.": "引入新的抽象或 API 隔离该行为。",
+    "Implement in the current owner repo and preserve external contracts.": "在当前责任仓库内实现，并保持对外契约不变。",
+    "Change producer and consumer contracts across repositories.": "同时调整跨仓生产方和消费方契约。",
+    "Default to smallest safe change until code inspection proves abstraction is needed.": "默认采用最小安全变更，除非代码检查证明必须抽象。",
+    "Default to smallest owner-boundary change until code inspection requires cross-repo work.": "默认控制在最小责任边界内，除非代码检查证明需要跨仓改造。",
+    "May need revision after architecture review": "架构评审后可能需要修订",
+    "May be revised after repo routing": "仓库路由后可能需要修订",
+    "revert scoped change": "回滚范围内变更",
+    "revert contract and consumers": "回滚契约和消费方",
+    "revert target-repo": "回滚目标仓库",
+    "ordered rollback consumer then producer": "按顺序先回滚消费方再回滚生产方",
+    "start with owner-repo scoped architecture": "先采用责任仓库内架构",
+    "cross-repo contract change": "跨仓契约变更",
+    "minimize coupling and release risk": "降低耦合和发布风险",
+    "Read 待确认目标模块 and adjacent tests before editing.": "修改前阅读待确认目标模块及相邻测试。",
+    "Confirm 待确认目标模块 scope against reviewed design.": "按已评审设计确认待确认目标模块范围。",
+    "Run validation for 待确认目标模块 and mapped acceptance checks.": "运行待确认目标模块校验和已映射的验收检查。",
+    "Capture command logs and acceptance evidence for 待确认目标模块.": "采集待确认目标模块的命令日志和验收证据。",
+    "Verify rollback path for 待确认目标模块.": "验证待确认目标模块的回滚路径。",
+    "inspected-files: 待确认目标模块": "已检查文件：待确认目标模块",
+    "scope-confirmation for 待确认目标模块": "待确认目标模块范围确认",
+    "git diff for 待确认目标模块": "待确认目标模块 git diff",
+    "rollback verification for 待确认目标模块": "待确认目标模块回滚验证",
+    "待确认目标模块 behavior and dependencies understood": "已理解待确认目标模块行为和依赖",
+    "scope still matches architecture responsibilities": "范围仍匹配架构职责",
+    "diff only touches 待确认目标模块": "diff 仅触达待确认目标模块",
+    "required tests pass": "必需测试通过",
+    "evidence artifacts are attached to delivery": "证据产物已附加到交付记录",
+    "rollback owner and steps are known": "已明确回滚责任方和步骤",
+    "Acceptance criteria pass.": "验收标准通过。",
+    "Validation failure": "校验失败",
+    "Dependency unavailable": "依赖不可用",
+    "expected behavior": "预期行为",
+    "request data": "请求数据",
+    "updated behavior": "更新后的行为",
+    "Use existing contracts and avoid duplicating upstream business rules.": "复用现有契约，避免重复实现上游业务规则。",
+    "No API impact confirmed yet": "尚未确认 API 影响",
+    "preserve existing consumers unless design updates contract": "除非设计更新契约，否则保持现有消费方不受影响",
+    "review route consumers before implementation": "实现前检查路由消费方",
+    "no API request expected": "预计无 API 请求变更",
+    "no API response change expected": "预计无 API 响应变更",
+    "no API error contract change expected": "预计无 API 错误契约变更",
+    "read through target module to be confirmed": "通过待确认目标模块读取",
+    "write through target module to be confirmed only if requirement changes state": "仅在需求涉及状态变更时，通过待确认目标模块写入",
+    "none unless design update requires it": "除非设计更新要求，否则无需迁移",
+    "preserve existing permission boundary": "保持现有权限边界",
+    "unauthorized user cannot access changed behavior": "未授权用户不能访问变更后的行为",
+    "missing/invalid input": "缺失或非法输入",
+    "return validation error or preserve existing fallback": "返回校验错误或保持现有兜底行为",
+    "confirm if UI is affected": "确认是否影响 UI",
+    "existing entry": "现有入口",
+    "preserve role visibility": "保持角色可见性",
+    "browser evidence if UI changed": "如 UI 变更需提供浏览器证据",
+    "target-repo internal contract": "目标仓库内部契约",
+    "confirm only unless implementation proves contract change is required": "仅确认影响，除非实现证明必须修改契约",
+    "preserve existing failure behavior": "保持现有失败处理行为",
+    "existing deploy artifact": "现有部署制品",
+    "none unless configuration design adds it": "除非配置设计新增，否则无配置变更",
+    "standard deployment restart only": "仅标准部署重启",
+    "revert commit, redeploy previous artifact": "回滚提交并重新部署上一版本制品",
+    "none unless data design changes": "除非数据设计变化，否则无数据风险",
+    "functional_test": "功能测试",
+    "permission_negative_test": "权限反向测试",
+    "export_evidence": "导出证据",
+    "test evidence": "测试证据",
+}
+
+
+def translate_default_zh_phrase(value: str) -> str:
+    rendered = value
+    for source, target in sorted(ZH_DEFAULT_PHRASES.items(), key=lambda item: len(item[0]), reverse=True):
+        rendered = rendered.replace(source, target)
+    return rendered
+
+
 def zh_text(value: Any, default: str = "待补充") -> str:
     if value in (None, "", [], {}):
         return default
@@ -151,11 +241,24 @@ def zh_text(value: Any, default: str = "待补充") -> str:
         "needs_revision": "需要修订",
         "pass": "通过",
         "block": "阻塞",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "read": "阅读",
+        "confirm": "确认",
+        "edit": "修改",
+        "test": "测试",
+        "evidence": "证据",
+        "rollback": "回滚",
+        "functional": "功能测试",
+        "positive": "正向用例",
+        "negative": "反向用例",
+        "modify": "修改",
         "false": "否",
         "true": "是",
         "TBD": default,
     }
-    return replacements.get(rendered, rendered)
+    return replacements.get(rendered, translate_default_zh_phrase(rendered))
 
 
 def bullet_lines(items: list[str], empty: str = "TBD") -> str:
@@ -169,26 +272,43 @@ def section_paragraph(title: str, lines: list[str], empty: str) -> str:
     return f"### {title}\n\n{bullet_lines(lines, empty)}"
 
 
-def render_scope(spec: dict[str, Any], fallback: str) -> str:
+def summarize_dict_item(item: dict[str, Any], fields: list[str], language: str = "en") -> str:
+    values = [str(item.get(field)) for field in fields if item.get(field) not in (None, "", [], {})]
+    if values:
+        return "；".join(values) if language == "zh" else "; ".join(values)
+    return zh_text(item, "待补充") if language == "zh" else text(item)
+
+
+def render_scope(spec: dict[str, Any], fallback: str, language: str = "en") -> str:
     scope = spec.get("scope")
     if not isinstance(scope, dict):
         return fallback
     lines: list[str] = []
-    for label, key in [("In scope", "in_scope"), ("Out of scope", "out_of_scope"), ("Assumptions", "assumptions"), ("Non-goals", "non_goals")]:
+    labels = {
+        "in_scope": "范围内" if language == "zh" else "In scope",
+        "out_of_scope": "范围外" if language == "zh" else "Out of scope",
+        "assumptions": "假设" if language == "zh" else "Assumptions",
+        "non_goals": "非目标" if language == "zh" else "Non-goals",
+    }
+    for key in ["in_scope", "out_of_scope", "assumptions", "non_goals"]:
         values = [str(item) for item in as_list(scope.get(key))]
         if values:
-            lines.append(f"- {label}: {', '.join(values)}")
+            lines.append(f"- {labels[key]}：{', '.join(values)}" if language == "zh" else f"- {labels[key]}: {', '.join(values)}")
     return "\n".join(lines) if lines else f"- {fallback}"
 
 
-def render_acceptance(spec: dict[str, Any]) -> str:
+def render_acceptance(spec: dict[str, Any], language: str = "en") -> str:
     lines: list[str] = []
     for item in as_list(spec.get("acceptance_criteria")):
         if not isinstance(item, dict):
             continue
-        evidence = ", ".join(str(value) for value in as_list(item.get("evidence_required"))) or "TBD"
-        lines.append(f"`{text(item.get('id'))}` {text(item.get('criteria'))} ({text(item.get('type'), 'case')}; evidence: {evidence})")
-    return bullet_lines(lines, "No acceptance criteria were synced.")
+        evidence = ", ".join(str(value) for value in as_list(item.get("evidence_required"))) or ("待补充" if language == "zh" else "TBD")
+        if language == "zh":
+            evidence = ", ".join(zh_text(value) for value in as_list(item.get("evidence_required"))) or "待补充"
+            lines.append(f"`{text(item.get('id'))}` {text(item.get('criteria'))}（类型：{zh_text(item.get('type'), '用例')}；证据：{evidence}）")
+        else:
+            lines.append(f"`{text(item.get('id'))}` {text(item.get('criteria'))} ({text(item.get('type'), 'case')}; evidence: {evidence})")
+    return bullet_lines(lines, "未同步到验收标准。" if language == "zh" else "No acceptance criteria were synced.")
 
 
 def render_business_rules(spec: dict[str, Any]) -> str:
@@ -251,10 +371,13 @@ def render_requirement_clarification_zh(spec: dict[str, Any]) -> str:
     }
     for source, target in replacements.items():
         english = english.replace(source, target)
+    english = english.replace("Actors/roles identified:", "已识别角色：")
+    english = english.replace("Negative permission cases are required.", "需要覆盖权限反向用例。")
+    english = english.replace("BR-", "业务规则-")
     return english
 
 
-def render_open_questions(*documents: dict[str, Any]) -> str:
+def render_open_questions(*documents: dict[str, Any], language: str = "en") -> str:
     lines: list[str] = []
     for data in documents:
         for item in as_list(data.get("open_questions")):
@@ -262,7 +385,7 @@ def render_open_questions(*documents: dict[str, Any]) -> str:
                 lines.append(text(item.get("question") or item.get("summary") or item))
             else:
                 lines.append(text(item))
-    return bullet_lines(lines, "None recorded.")
+    return bullet_lines(lines, "未记录。" if language == "zh" else "None recorded.")
 
 
 def render_clarification_log(spec: dict[str, Any], language: str = "en") -> str:
@@ -366,7 +489,7 @@ def render_release_mermaid(delivery_plan: dict[str, Any], language: str = "en") 
     return "\n".join(lines)
 
 
-def render_process_flows(technical: dict[str, Any]) -> str:
+def render_process_flows(technical: dict[str, Any], language: str = "en") -> str:
     sections: list[str] = []
     for flow in as_list(technical.get("process_flow")):
         if not isinstance(flow, dict):
@@ -374,19 +497,31 @@ def render_process_flows(technical: dict[str, Any]) -> str:
         steps = []
         for step in as_list(flow.get("steps")):
             if isinstance(step, dict):
-                steps.append(f"  - {text(step.get('step'))}. {text(step.get('actor'))}: {text(step.get('action'))} -> {text(step.get('output'))}")
-        sections.append(
-            f"### {text(flow.get('flow_name'), 'Process')}\n\n"
-            f"- Actors: {', '.join(str(item) for item in as_list(flow.get('actors'))) or 'TBD'}\n"
-            f"- Success state: {text(flow.get('success_end_state'))}\n"
-            f"- Failure states: {', '.join(str(item) for item in as_list(flow.get('failure_end_states'))) or 'TBD'}\n\n"
-            + ("\n".join(steps) if steps else "- Steps: TBD")
-        )
-    return "\n\n".join(sections) if sections else "### Process\n\n- TBD"
+                if language == "zh":
+                    steps.append(f"  - {zh_text(step.get('step'))}. {zh_text(step.get('actor'))}：{zh_text(step.get('action'))} -> {zh_text(step.get('output'))}")
+                else:
+                    steps.append(f"  - {text(step.get('step'))}. {text(step.get('actor'))}: {text(step.get('action'))} -> {text(step.get('output'))}")
+        if language == "zh":
+            sections.append(
+                f"### {zh_text(flow.get('flow_name'), '流程')}\n\n"
+                f"- 参与方：{', '.join(str(item) for item in as_list(flow.get('actors'))) or '待补充'}\n"
+                f"- 成功状态：{zh_text(flow.get('success_end_state'))}\n"
+                f"- 失败状态：{', '.join(str(item) for item in as_list(flow.get('failure_end_states'))) or '待补充'}\n\n"
+                + ("\n".join(steps) if steps else "- 步骤：待补充")
+            )
+        else:
+            sections.append(
+                f"### {text(flow.get('flow_name'), 'Process')}\n\n"
+                f"- Actors: {', '.join(str(item) for item in as_list(flow.get('actors'))) or 'TBD'}\n"
+                f"- Success state: {text(flow.get('success_end_state'))}\n"
+                f"- Failure states: {', '.join(str(item) for item in as_list(flow.get('failure_end_states'))) or 'TBD'}\n\n"
+                + ("\n".join(steps) if steps else "- Steps: TBD")
+            )
+    return "\n\n".join(sections) if sections else ("### 流程\n\n- 待补充" if language == "zh" else "### Process\n\n- TBD")
 
 
-def render_named_items(items: list[Any], fields: list[str], empty: str) -> str:
-    labels = {
+def render_named_items(items: list[Any], fields: list[str], empty: str, language: str = "en") -> str:
+    en_labels = {
         "page_or_route": "page/route",
         "user_goal": "user goal",
         "entry_point": "entry point",
@@ -396,48 +531,133 @@ def render_named_items(items: list[Any], fields: list[str], empty: str) -> str:
         "failure_handling": "failure handling",
         "data_risk": "data risk",
     }
+    zh_labels = {
+        "existing_behavior": "现有行为",
+        "code_entrypoints": "代码入口",
+        "known_constraints": "已知约束",
+        "reuse_points": "可复用点",
+        "system_context": "系统上下文",
+        "repo_entrypoints": "仓库入口",
+        "upstream_downstream": "上下游",
+        "constraints": "约束",
+        "module": "模块",
+        "responsibility": "职责",
+        "input": "输入",
+        "output": "输出",
+        "coupling_control": "耦合控制",
+        "contract": "契约",
+        "compatibility": "兼容性",
+        "old_consumer_impact": "存量消费方影响",
+        "name": "名称",
+        "request": "请求",
+        "response": "响应",
+        "error_response": "错误响应",
+        "read_rule": "读取规则",
+        "write_rule": "写入规则",
+        "migration": "迁移",
+        "role": "角色",
+        "rule": "规则",
+        "negative_case": "反向用例",
+        "case": "场景",
+        "handling": "处理方式",
+        "page_or_route": "页面/路由",
+        "user_goal": "用户目标",
+        "entry_point": "入口",
+        "permission_visibility": "权限可见性",
+        "acceptance_evidence": "验收证据",
+        "from": "来源",
+        "to": "目标",
+        "change": "变更",
+        "step": "步骤",
+        "actor": "参与方",
+        "action": "动作",
+        "failure_handling": "失败处理",
+        "repo": "仓库",
+        "artifact": "制品",
+        "order": "顺序",
+        "config_change": "配置变更",
+        "restart_required": "是否重启",
+        "steps": "步骤",
+        "data_risk": "数据风险",
+        "acceptance_id": "验收项",
+        "design_refs": "设计引用",
+        "evidence_required": "所需证据",
+        "type": "类型",
+        "evidence": "证据",
+        "signal": "信号",
+        "owner": "负责人",
+        "trigger": "触发条件",
+    }
+    labels = zh_labels if language == "zh" else en_labels
     lines: list[str] = []
     for item in items:
         if not isinstance(item, dict):
             continue
-        values = [f"{labels.get(field, field)}: {text(item.get(field))}" for field in fields if item.get(field) not in (None, "", [], {})]
+        values = [
+            f"{labels.get(field, field)}：{zh_text(item.get(field))}" if language == "zh" else f"{labels.get(field, field)}: {text(item.get(field))}"
+            for field in fields
+            if item.get(field) not in (None, "", [], {})
+        ]
         if values:
-            lines.append("; ".join(values))
+            lines.append("；".join(values) if language == "zh" else "; ".join(values))
     return bullet_lines(lines, empty)
 
 
-def render_delivery_tasks(delivery_plan: dict[str, Any]) -> str:
+def render_delivery_tasks(delivery_plan: dict[str, Any], language: str = "en") -> str:
     sections: list[str] = []
     for repo in as_list(delivery_plan.get("repo_tasks")):
         if not isinstance(repo, dict):
             continue
-        allowed_files = ", ".join(str(item) for item in as_list(repo.get("allowed_files"))) or "not narrowed yet"
-        read_first = ", ".join(str(item) for item in as_list(repo.get("read_first"))) or "not bound yet"
-        tests = ", ".join(str(item) for item in as_list(repo.get("test_commands"))) or "not bound yet"
+        allowed_files = ", ".join(str(item) for item in as_list(repo.get("allowed_files"))) or ("尚未收敛" if language == "zh" else "not narrowed yet")
+        read_first = ", ".join(str(item) for item in as_list(repo.get("read_first"))) or ("尚未绑定" if language == "zh" else "not bound yet")
+        tests = ", ".join(str(item) for item in as_list(repo.get("test_commands"))) or ("尚未绑定" if language == "zh" else "not bound yet")
         git_prep = repo.get("git_preparation") if isinstance(repo.get("git_preparation"), dict) else {}
-        git_steps = ", ".join(str(item) for item in as_list(git_prep.get("required_before_edit"))) or "not bound yet"
-        lines = [
-            f"### Repo `{text(repo.get('repo'))}`",
-            "",
-            f"- Role: `{text(repo.get('role'))}`",
-            f"- Responsibility: {text(repo.get('responsibility'))}",
-            f"- Read first: {read_first}",
-            f"- Allowed files: {allowed_files}",
-            f"- Test commands: {tests}",
-            f"- Git preparation: {git_steps}",
-            "",
-        ]
+        git_steps = ", ".join(str(item) for item in as_list(git_prep.get("required_before_edit"))) or ("尚未绑定" if language == "zh" else "not bound yet")
+        if language == "zh":
+            lines = [
+                f"### 仓库 `{text(repo.get('repo'))}`",
+                "",
+                f"- 角色：`{zh_text(repo.get('role'))}`",
+                f"- 职责：{zh_text(repo.get('responsibility'))}",
+                f"- 修改前必须阅读：{read_first}",
+                f"- 允许修改文件：{allowed_files}",
+                f"- 测试命令：{tests}",
+                f"- Git 准备动作：{git_steps}",
+                "",
+            ]
+        else:
+            lines = [
+                f"### Repo `{text(repo.get('repo'))}`",
+                "",
+                f"- Role: `{text(repo.get('role'))}`",
+                f"- Responsibility: {text(repo.get('responsibility'))}",
+                f"- Read first: {read_first}",
+                f"- Allowed files: {allowed_files}",
+                f"- Test commands: {tests}",
+                f"- Git preparation: {git_steps}",
+                "",
+            ]
         for task in as_list(repo.get("tasks"))[:6]:
             if isinstance(task, dict):
-                evidence = ", ".join(str(item) for item in as_list(task.get("evidence_to_collect"))) or "TBD"
-                files_to_edit = ", ".join(str(item) for item in as_list(task.get("files_to_edit"))) or "none"
-                exit_criteria = ", ".join(str(item) for item in as_list(task.get("exit_criteria"))) or "TBD"
-                lines.append(
-                    f"- `{text(task.get('phase'))}` {text(task.get('summary'))}; "
-                    f"edit files: {files_to_edit}; evidence: {evidence}; exit: {exit_criteria}"
-                )
+                if language == "zh":
+                    evidence = ", ".join(zh_text(item) for item in as_list(task.get("evidence_to_collect"))) or "待补充"
+                else:
+                    evidence = ", ".join(str(item) for item in as_list(task.get("evidence_to_collect"))) or "TBD"
+                files_to_edit = ", ".join(str(item) for item in as_list(task.get("files_to_edit"))) or ("无" if language == "zh" else "none")
+                exit_criteria = ", ".join(zh_text(item) for item in as_list(task.get("exit_criteria"))) if language == "zh" else ", ".join(str(item) for item in as_list(task.get("exit_criteria")))
+                exit_criteria = exit_criteria or ("待补充" if language == "zh" else "TBD")
+                if language == "zh":
+                    lines.append(
+                        f"- `{zh_text(task.get('phase'))}` {zh_text(task.get('summary'))}；"
+                        f"修改文件：{files_to_edit}；证据：{evidence}；退出标准：{exit_criteria}"
+                    )
+                else:
+                    lines.append(
+                        f"- `{text(task.get('phase'))}` {text(task.get('summary'))}; "
+                        f"edit files: {files_to_edit}; evidence: {evidence}; exit: {exit_criteria}"
+                    )
         sections.append("\n".join(lines))
-    return "\n\n".join(sections) if sections else "- No repo tasks were synced."
+    return "\n\n".join(sections) if sections else ("- 未同步到仓库任务。" if language == "zh" else "- No repo tasks were synced.")
 
 
 def render_solution_options(technical: dict[str, Any], architecture: dict[str, Any], language: str = "en") -> str:
@@ -453,8 +673,17 @@ def render_solution_options(technical: dict[str, Any], architecture: dict[str, A
         lines = [f"### {title}", ""]
         for item in options:
             if isinstance(item, dict):
-                lines.append(f"- {label_option} `{text(item.get('option_id'))}` {text(item.get('name'))}: {text(item.get('description'))}; risk: {text(item.get('risk_level'))}; rollback: {text(item.get('rollback_strategy'))}")
-        lines.append(f"- {label_selected}: `{text(selected.get('selected_option_id'))}`; reason: {text(selected.get('selection_reason'))}; tradeoffs: {text(selected.get('tradeoffs'))}")
+                if language == "zh":
+                    lines.append(
+                        f"- {label_option} `{text(item.get('option_id'))}` {zh_text(item.get('name'))}："
+                        f"{zh_text(item.get('description'))}；风险：{zh_text(item.get('risk_level'))}；回滚：{zh_text(item.get('rollback_strategy'))}"
+                    )
+                else:
+                    lines.append(f"- {label_option} `{text(item.get('option_id'))}` {text(item.get('name'))}: {text(item.get('description'))}; risk: {text(item.get('risk_level'))}; rollback: {text(item.get('rollback_strategy'))}")
+        if language == "zh":
+            lines.append(f"- {label_selected}：`{text(selected.get('selected_option_id'))}`；理由：{zh_text(selected.get('selection_reason'))}；取舍：{zh_text(selected.get('tradeoffs'))}")
+        else:
+            lines.append(f"- {label_selected}: `{text(selected.get('selected_option_id'))}`; reason: {text(selected.get('selection_reason'))}; tradeoffs: {text(selected.get('tradeoffs'))}")
         sections.append("\n".join(lines))
     return "\n\n".join(sections)
 
@@ -475,6 +704,64 @@ def render_blockers(*documents: dict[str, Any]) -> str:
                 seen.add(key)
                 lines.append(key)
     return bullet_lines(lines[:10], "None.")
+
+
+def render_review_context(spec: dict[str, Any], language: str = "en") -> str:
+    summary = spec.get("requirement_summary") or spec.get("summary") or spec.get("title")
+    acceptance_count = len([item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)])
+    question_count = len(as_list(spec.get("open_questions")))
+    if language == "zh":
+        return (
+            f"- 需求核心：{zh_text(summary, '未同步到需求摘要')}\n"
+            f"- 验收规模：当前同步到 {acceptance_count} 条验收标准，需要逐条绑定设计、测试和证据。\n"
+            f"- 澄清状态：当前记录 {question_count} 个未决问题；若存在未决问题，设计只能作为草案，不能直接进入实现。\n"
+            "- 阅读方式：先确认范围和澄清结论，再看验收标准与追踪图，最后检查证据引用是否完整。"
+        )
+    return (
+        f"- Requirement core: {text(summary, 'requirement summary was not synced')}\n"
+        f"- Acceptance size: {acceptance_count} acceptance criteria were synced and must map to design, tests, and evidence.\n"
+        f"- Clarification state: {question_count} open questions are recorded; unresolved questions keep the design in draft.\n"
+        "- Review path: verify scope and clarification first, then acceptance traceability, then evidence references."
+    )
+
+
+def render_design_review_context(technical: dict[str, Any], architecture: dict[str, Any], delivery_plan: dict[str, Any], language: str = "en") -> str:
+    module_count = len(as_list(technical.get("module_decomposition")))
+    contract_count = len(as_list(technical.get("api_contracts")))
+    repo_count = len(as_list(delivery_plan.get("repo_tasks")))
+    dependency_count = len(as_list(architecture.get("cross_repo_dependency_graph")))
+    if language == "zh":
+        return (
+            f"- 设计覆盖：当前同步到 {module_count} 个模块、{contract_count} 个接口/契约、{dependency_count} 条跨仓或模块依赖。\n"
+            f"- 实施边界：交付计划覆盖 {repo_count} 个仓库；每个仓库都必须先完成 Git 准备、阅读入口文件、再按允许文件范围修改。\n"
+            "- 评审重点：优先检查方案选择理由、兼容性影响、权限/数据/异常场景，以及测试证据是否能覆盖每条验收标准。\n"
+            "- 实现约束：若允许修改文件、测试命令或回滚策略缺失，本设计只能用于评审，不能作为开工许可。"
+        )
+    return (
+        f"- Design coverage: {module_count} modules, {contract_count} contracts, and {dependency_count} dependencies were synced.\n"
+        f"- Implementation boundary: {repo_count} repositories are covered; each requires Git preparation, read-first files, and narrowed edit scope.\n"
+        "- Review focus: validate option rationale, compatibility impact, permission/data/edge cases, and evidence coverage.\n"
+        "- Edit constraint: missing allowed files, tests, or rollback strategy means this is review material, not edit approval."
+    )
+
+
+def render_release_review_context(status: dict[str, Any], delivery_plan: dict[str, Any], language: str = "en") -> str:
+    repo_count = len(as_list(delivery_plan.get("repo_tasks")))
+    implementation_missing = len(as_list(status.get("implementation_missing")))
+    release_missing = len(as_list(status.get("release_missing")))
+    if language == "zh":
+        return (
+            f"- 发布范围：当前交付计划涉及 {repo_count} 个仓库或执行单元。\n"
+            f"- 实现前缺口：{implementation_missing} 项；发布前缺口：{release_missing} 项。\n"
+            "- 放行原则：只有设计评审、交付计划评审、实现完成、测试证据、代码评审和回滚策略均可追溯时，才允许进入发布。\n"
+            "- 失败处理：任何验证失败都必须回到对应仓库任务或回滚步骤，不能只记录为人工观察项。"
+        )
+    return (
+        f"- Release scope: {repo_count} repositories or execution units are in the delivery plan.\n"
+        f"- Missing gates: {implementation_missing} before implementation and {release_missing} before release.\n"
+        "- Approval rule: release needs traceable design review, plan review, implementation, tests, code review, and rollback evidence.\n"
+        "- Failure handling: failed validation must map back to a repo task or rollback step, not only manual observation."
+    )
 
 
 def render_next_action(status: dict[str, Any], delivery_review: dict[str, Any]) -> str:
@@ -521,12 +808,14 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"- 当前结论：`{zh_text(spec.get('decision'), '未知')}`\n"
             f"- 是否涉及权限敏感场景：{zh_text((spec.get('permission_scope') or {}).get('sensitive'), '未知')}\n"
             "- 本文面向需求评审、技术设计和交付计划使用，机器可读依据见证据引用章节。\n\n"
+            "### 阅读与评审重点\n\n"
+            f"{render_review_context(spec, 'zh')}\n\n"
             "## 二、背景与目标\n\n"
             f"{section_paragraph('业务背景', [text(spec.get('requirement_summary') or spec.get('summary') or heading)], '未同步到业务背景。')}\n\n"
-            f"{section_paragraph('用户场景', [text(item.get('scenario') or item.get('summary') or item) for item in as_list(spec.get('user_scenarios')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('user_scenarios')) if not isinstance(item, dict)], '未记录用户场景。')}\n\n"
+            f"{section_paragraph('用户场景', [summarize_dict_item(item, ['actor', 'trigger', 'expected_outcome'], 'zh') for item in as_list(spec.get('user_scenarios')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('user_scenarios')) if not isinstance(item, dict)], '未记录用户场景。')}\n\n"
             f"{section_paragraph('业务目标', [text(item.get('objective') or item.get('summary') or item) for item in as_list(spec.get('business_objectives')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('business_objectives')) if not isinstance(item, dict)], '未记录业务目标。')}\n\n"
             "## 三、范围与非目标\n\n"
-            f"{render_scope(spec, text(spec.get('summary') or heading))}\n\n"
+            f"{render_scope(spec, text(spec.get('summary') or heading), 'zh')}\n\n"
             "## 四、需求澄清\n\n"
             f"{render_requirement_clarification_zh(spec)}\n\n"
             "### 澄清记录\n\n"
@@ -534,13 +823,13 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "## 五、需求原文\n\n"
             f"{requirement_text.strip() or '未同步到需求原文。'}\n\n"
             "## 六、验收标准\n\n"
-            f"{render_acceptance(spec)}\n\n"
+            f"{render_acceptance(spec, 'zh')}\n\n"
             "## 七、业务规则解释\n\n"
             f"{render_business_rules(spec)}\n\n"
             "## 八、需求到验收追踪图\n\n"
             f"{render_requirement_trace_mermaid(spec, 'zh')}\n\n"
             "## 九、未决问题\n\n"
-            f"{render_open_questions(spec)}\n\n"
+            f"{render_open_questions(spec, language='zh')}\n\n"
             "## 十、证据引用\n\n"
             "- `spec.json`：结构化需求、范围、验收标准和开放问题。\n"
             "- `requirement.normalized.txt`：归一化后的需求原文。\n\n"
@@ -554,9 +843,11 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"- 架构设计状态：`{zh_text(architecture.get('decision'), '草稿')}`\n"
             f"- 交付计划状态：`{zh_text(delivery_plan.get('decision'), '草稿')}`\n"
             "- 本文用于设计评审和实施前检查，关键结论均应能追溯到 machine artifacts。\n\n"
+            "### 阅读与评审重点\n\n"
+            f"{render_design_review_context(technical, architecture, delivery_plan, 'zh')}\n\n"
             "## 二、现状问题与设计目标\n\n"
-            f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], '未同步到现状分析。')}\n\n"
-            f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], '未同步到当前架构分析。')}\n\n"
+            f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], '未同步到现状分析。', 'zh')}\n\n"
+            f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], '未同步到当前架构分析。', 'zh')}\n\n"
             f"{section_paragraph('设计目标', [text(item.get('behavior') or item.get('summary') or item) for item in as_list(technical.get('target_behavior')) if isinstance(item, dict)], '未同步到目标行为。')}\n\n"
             f"{section_paragraph('非目标', [str(item) for item in as_list((technical.get('design_scope') or {}).get('non_goals'))], '未记录非目标。')}\n\n"
             "## 三、方案对比与选择\n\n"
@@ -564,30 +855,30 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "## 四、决策记录\n\n"
             f"{render_decision_records(architecture, technical, language='zh')}\n\n"
             "## 五、业务流程\n\n"
-            f"{render_process_flows(technical)}\n\n"
+            f"{render_process_flows(technical, 'zh')}\n\n"
             "### 流程图\n\n"
             f"{render_process_mermaid(technical, 'zh')}\n\n"
             "## 六、模块与接口设计\n\n"
-            f"{render_named_items(as_list(technical.get('module_decomposition')), ['module', 'responsibility', 'input', 'output', 'coupling_control'], '未同步到模块设计。')}\n\n"
-            f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], '未同步到接口影响。')}\n\n"
-            f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], '未同步到接口示例。')}\n\n"
+            f"{render_named_items(as_list(technical.get('module_decomposition')), ['module', 'responsibility', 'input', 'output', 'coupling_control'], '未同步到模块设计。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], '未同步到接口影响。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], '未同步到接口示例。', 'zh')}\n\n"
             "## 七、数据、权限、页面与异常场景\n\n"
-            f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], '未同步到数据设计。')}\n\n"
-            f"{render_named_items(as_list(technical.get('permission_model')), ['role', 'rule', 'negative_case'], '未同步到权限规则。')}\n\n"
-            f"{render_named_items(as_list(technical.get('exception_and_edge_cases')), ['case', 'handling'], '未同步到异常场景。')}\n\n"
-            f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], '未同步到页面影响。')}\n\n"
+            f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], '未同步到数据设计。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('permission_model')), ['role', 'rule', 'negative_case'], '未同步到权限规则。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('exception_and_edge_cases')), ['case', 'handling'], '未同步到异常场景。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], '未同步到页面影响。', 'zh')}\n\n"
             "## 八、架构与运维影响\n\n"
-            f"{render_named_items(as_list(architecture.get('cross_repo_dependency_graph')), ['from', 'to', 'contract', 'change'], '未同步到跨仓依赖图。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('cross_repo_dependency_graph')), ['from', 'to', 'contract', 'change'], '未同步到跨仓依赖图。', 'zh')}\n\n"
             "### 模块/仓库关系图\n\n"
             f"{render_architecture_mermaid(architecture, 'zh')}\n\n"
-            f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], '未同步到集成顺序。')}\n\n"
-            f"{render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], '未同步到发布影响矩阵。')}\n\n"
-            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚策略。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], '未同步到集成顺序。', 'zh')}\n\n"
+            f"{render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], '未同步到发布影响矩阵。', 'zh')}\n\n"
+            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚策略。', 'zh')}\n\n"
             "## 九、交付执行计划\n\n"
-            f"{render_delivery_tasks(delivery_plan)}\n\n"
+            f"{render_delivery_tasks(delivery_plan, 'zh')}\n\n"
             "## 十、测试与验收证据\n\n"
-            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。')}\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。')}\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
             "## 十一、风险与未过门禁\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## 十二、证据引用\n\n"
@@ -604,28 +895,30 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"- 是否允许实现：`{zh_text(status.get('can_implement'), '否')}`\n"
             f"- 是否允许发布：`{zh_text(status.get('can_release'), '否')}`\n"
             "- 本文用于实现前、发布前和上线后观察检查。\n\n"
+            "### 阅读与评审重点\n\n"
+            f"{render_release_review_context(status, delivery_plan, 'zh')}\n\n"
             "## 二、发布前检查\n\n"
             "### 实现前必须补齐\n\n"
             f"{bullet_lines([str(item) for item in as_list(status.get('implementation_missing'))], '未同步到实现前缺口。')}\n\n"
             "### 发布前必须补齐\n\n"
             f"{bullet_lines([str(item) for item in as_list(status.get('release_missing'))], '未同步到发布前缺口。')}\n\n"
             "## 三、执行步骤\n\n"
-            f"{render_delivery_tasks(delivery_plan)}\n\n"
+            f"{render_delivery_tasks(delivery_plan, 'zh')}\n\n"
             "## 四、发布与回滚顺序图\n\n"
             f"{render_release_mermaid(delivery_plan, 'zh')}\n\n"
             "## 五、验证步骤\n\n"
-            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], '未同步到验收验证步骤。')}\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试验证步骤。')}\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], '未同步到验收验证步骤。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试验证步骤。', 'zh')}\n\n"
             "## 六、回滚步骤\n\n"
-            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚步骤。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚步骤。', 'zh')}\n\n"
             "## 七、评审结论\n\n"
             f"- 设计评审：`{zh_text(design_review.get('decision'), '未知')}`\n"
             f"- 交付计划评审：`{zh_text(delivery_review.get('decision'), '未知')}`\n\n"
             "## 八、风险处置与阻塞项\n\n"
             f"{render_blockers(design_review, delivery_review, status)}\n\n"
             "## 九、上线后观察\n\n"
-            f"{render_named_items(as_list(architecture.get('observability')), ['signal', 'owner'], '未同步到观察指标。')}\n\n"
-            f"{render_named_items(as_list(architecture.get('monitoring_alerts')), ['signal', 'owner', 'trigger', 'action'], '未同步到告警策略。')}\n\n"
+            f"{render_named_items(as_list(architecture.get('observability')), ['signal', 'owner'], '未同步到观察指标。', 'zh')}\n\n"
+            f"{render_named_items(as_list(architecture.get('monitoring_alerts')), ['signal', 'owner', 'trigger', 'action'], '未同步到告警策略。', 'zh')}\n\n"
             "## 十、下一步动作\n\n"
             f"- {render_next_action(status, delivery_review)}\n\n"
             "## 十一、证据引用\n\n"
@@ -655,6 +948,8 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"- Doc ID: `{doc_id}`\n"
             f"- Current decision: `{text(spec.get('decision'), 'unknown')}`\n"
             f"- Permission sensitivity: {text((spec.get('permission_scope') or {}).get('sensitive'), 'unknown')}\n\n"
+            "## Review Focus\n\n"
+            f"{render_review_context(spec, 'en')}\n\n"
             "## Background And Goals\n\n"
             f"{section_paragraph('Business Background', [text(spec.get('requirement_summary') or spec.get('summary') or heading)], 'Business background was not synced.')}\n\n"
             f"{section_paragraph('User Scenarios', [text(item.get('scenario') or item.get('summary') or item) for item in as_list(spec.get('user_scenarios')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('user_scenarios')) if not isinstance(item, dict)], 'No user scenarios were recorded.')}\n\n"
@@ -687,6 +982,8 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"- Technical decision: `{text(technical.get('decision'), 'draft')}`\n"
             f"- Architecture decision: `{text(architecture.get('decision'), 'draft')}`\n"
             f"- Delivery plan decision: `{text(delivery_plan.get('decision'), 'draft')}`\n\n"
+            "## Review Focus\n\n"
+            f"{render_design_review_context(technical, architecture, delivery_plan, 'en')}\n\n"
             "## Current State, Problem, And Goals\n\n"
             f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], 'No current-state analysis was synced.')}\n\n"
             f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], 'No current architecture analysis was synced.')}\n\n"
@@ -736,6 +1033,8 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"- Next stage: `{text(status.get('next_stage'), 'unknown')}`\n"
             f"- Implementation allowed: `{text(status.get('can_implement'), 'false')}`\n"
             f"- Release allowed: `{text(status.get('can_release'), 'false')}`\n\n"
+            "## Review Focus\n\n"
+            f"{render_release_review_context(status, delivery_plan, 'en')}\n\n"
             "## Missing Readiness\n\n"
             "### Before Implementation\n\n"
             f"{bullet_lines([str(item) for item in as_list(status.get('implementation_missing'))], 'No implementation gaps were synced.')}\n\n"

@@ -296,6 +296,25 @@ def test_human_doc_review_warns_missing_formal_sections_and_diagram() -> None:
         assert "background" in sources
 
 
+def test_human_doc_review_warns_outline_only_document() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "doc.md"
+        doc.write_text(
+            "# Design\n\n"
+            "## Summary\n\n"
+            "- Scope\n- Decision\n- Options\n- Risk\n- Evidence\n- Rollback\n"
+            "- Background\n- Goal\n- Clarification\n- Acceptance\n- Test\n"
+            "`spec.json`\n\n"
+            "```mermaid\nflowchart LR\nA-->B\n```\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert result["decision"] == "warn"
+        sources = {item["source"] for item in result["warnings"]}
+        assert "review_focus" in sources
+        assert "bullet_depth" in sources
+
+
 def test_human_doc_review_warns_chinese_doc_with_english_template_terms() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "doc.md"
@@ -662,6 +681,7 @@ def run_all() -> None:
     test_human_doc_review_detects_local_path()
     test_human_doc_review_warns_thin_doc()
     test_human_doc_review_warns_missing_formal_sections_and_diagram()
+    test_human_doc_review_warns_outline_only_document()
     test_human_doc_review_warns_chinese_doc_with_english_template_terms()
     test_forward_test_runner_passes_synthetic_case()
     test_scenario_catalog_documents_supported_development_scenarios()

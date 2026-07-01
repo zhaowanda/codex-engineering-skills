@@ -141,11 +141,15 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         design_doc = (docs_root / "human/designs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         release_doc = (docs_root / "human/releases/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         assert "## 一、摘要" in spec_doc
+        assert "### 阅读与评审重点" in spec_doc
+        assert "验收规模" in spec_doc
         assert "## 二、背景与目标" in spec_doc
         assert "## 四、需求澄清" in spec_doc
         assert "### 澄清记录" in spec_doc
         assert "## 八、需求到验收追踪图" in spec_doc
         assert "## 二、现状问题与设计目标" in design_doc
+        assert "设计覆盖" in design_doc
+        assert "实施边界" in design_doc
         assert "## 三、方案对比与选择" in design_doc
         assert "## 四、决策记录" in design_doc
         assert "## 五、业务流程" in design_doc
@@ -153,10 +157,14 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         assert "## 九、交付执行计划" in design_doc
         assert "## 十、测试与验收证据" in design_doc
         assert "## 二、发布前检查" in release_doc
+        assert "放行原则" in release_doc
         assert "## 四、发布与回滚顺序图" in release_doc
         assert "```mermaid" in spec_doc + design_doc + release_doc
         assert "## Executive Summary" not in spec_doc + design_doc + release_doc
         assert "Evidence References" not in spec_doc + design_doc + release_doc
+        assert "Role:" not in design_doc + release_doc
+        assert "edit files:" not in design_doc + release_doc
+        assert "evidence:" not in spec_doc + design_doc + release_doc
 
 
 def test_auto_runner_auto_detects_chinese_doc_request() -> None:
