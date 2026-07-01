@@ -180,6 +180,15 @@ ZH_DEFAULT_PHRASES = {
     "required tests pass": "必需测试通过",
     "evidence artifacts are attached to delivery": "证据产物已附加到交付记录",
     "rollback owner and steps are known": "已明确回滚责任方和步骤",
+    "prepare data": "准备测试数据",
+    "execute affected behavior": "执行受影响行为",
+    "verify expected result": "验证预期结果",
+    "unauthorized role cannot access changed behavior": "未授权角色不能访问变更后的行为",
+    "restricted role": "受限角色",
+    "attempt changed behavior": "尝试执行变更后的行为",
+    "access denied or hidden": "访问被拒绝或入口不可见",
+    "permission": "权限测试",
+    "permission test evidence": "权限测试证据",
     "Acceptance criteria pass.": "验收标准通过。",
     "Validation failure": "校验失败",
     "Dependency unavailable": "依赖不可用",
@@ -660,6 +669,37 @@ def render_delivery_tasks(delivery_plan: dict[str, Any], language: str = "en") -
     return "\n\n".join(sections) if sections else ("- 未同步到仓库任务。" if language == "zh" else "- No repo tasks were synced.")
 
 
+def render_test_cases(test_design: dict[str, Any], language: str = "en") -> str:
+    cases = [item for item in as_list(test_design.get("test_cases")) if isinstance(item, dict)]
+    if not cases:
+        return "- 未同步到测试用例；技术设计完成后必须生成 `test_design.json`。" if language == "zh" else "- No test cases were synced; `test_design.json` is required after technical design."
+    sections: list[str] = []
+    for case in cases:
+        steps = as_list(case.get("steps"))
+        evidence = as_list(case.get("evidence_required"))
+        if language == "zh":
+            sections.append(
+                f"### `{text(case.get('id'))}` {zh_text(case.get('title'))}\n\n"
+                f"- 关联验收：{zh_text(case.get('acceptance_id'), '未绑定')}\n"
+                f"- 类型：{zh_text(case.get('type'))}\n"
+                f"- 前置条件：{', '.join(zh_text(item) for item in as_list(case.get('preconditions'))) or '无'}\n"
+                f"- 执行步骤：{', '.join(zh_text(item) for item in steps) or '待补充'}\n"
+                f"- 预期结果：{zh_text(case.get('expected_result'))}\n"
+                f"- 所需证据：{', '.join(zh_text(item) for item in evidence) or '待补充'}"
+            )
+        else:
+            sections.append(
+                f"### `{text(case.get('id'))}` {text(case.get('title'))}\n\n"
+                f"- Acceptance: {text(case.get('acceptance_id'), 'unmapped')}\n"
+                f"- Type: {text(case.get('type'))}\n"
+                f"- Preconditions: {', '.join(text(item) for item in as_list(case.get('preconditions'))) or 'none'}\n"
+                f"- Steps: {', '.join(text(item) for item in steps) or 'TBD'}\n"
+                f"- Expected result: {text(case.get('expected_result'))}\n"
+                f"- Evidence required: {', '.join(text(item) for item in evidence) or 'TBD'}"
+            )
+    return "\n\n".join(sections)
+
+
 def render_solution_options(technical: dict[str, Any], architecture: dict[str, Any], language: str = "en") -> str:
     label_option = "方案" if language == "zh" else "Option"
     label_selected = "选中方案" if language == "zh" else "Selected"
@@ -794,6 +834,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
     spec = read_json(artifact_dir / "spec.json")
     technical = read_json(artifact_dir / "technical_design.json")
     architecture = read_json(artifact_dir / "architecture_design.json")
+    test_design = read_json(artifact_dir / "test_design.json")
     delivery_plan = read_json(artifact_dir / "delivery_plan.json")
     design_review = read_json(artifact_dir / "design_architecture_review.json")
     delivery_review = read_json(artifact_dir / "delivery_plan_review.json")
@@ -879,6 +920,8 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "## 十、测试与验收证据\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。', 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
+            "### 测试用例\n\n"
+            f"{render_test_cases(test_design, 'zh')}\n\n"
             "## 十一、风险与未过门禁\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## 十二、证据引用\n\n"
@@ -909,6 +952,8 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "## 五、验证步骤\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], '未同步到验收验证步骤。', 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试验证步骤。', 'zh')}\n\n"
+            "### 测试用例\n\n"
+            f"{render_test_cases(test_design, 'zh')}\n\n"
             "## 六、回滚步骤\n\n"
             f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚步骤。', 'zh')}\n\n"
             "## 七、评审结论\n\n"
@@ -935,6 +980,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
     spec = read_json(artifact_dir / "spec.json")
     technical = read_json(artifact_dir / "technical_design.json")
     architecture = read_json(artifact_dir / "architecture_design.json")
+    test_design = read_json(artifact_dir / "test_design.json")
     delivery_plan = read_json(artifact_dir / "delivery_plan.json")
     design_review = read_json(artifact_dir / "design_architecture_review.json")
     delivery_review = read_json(artifact_dir / "delivery_plan_review.json")
@@ -1018,6 +1064,8 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "## Test And Acceptance Evidence\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], 'No acceptance evidence mapping was synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
+            "### Test Cases\n\n"
+            f"{render_test_cases(test_design, 'en')}\n\n"
             "## Risks And Open Gates\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## Evidence References\n\n"
@@ -1047,6 +1095,8 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "## Validation Steps\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], 'No acceptance validation steps were synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test validation steps were synced.')}\n\n"
+            "### Test Cases\n\n"
+            f"{render_test_cases(test_design, 'en')}\n\n"
             "## Rollback Steps\n\n"
             f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], 'No rollback steps were synced.')}\n\n"
             "## Review Decisions\n\n"

@@ -107,9 +107,13 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
         assert "## Decision Records" in design_doc
         assert "## Process Flow" in design_doc
         assert "## Risks And Open Gates" in design_doc
+        assert "### Test Cases" in design_doc
+        assert "`TC-1`" in design_doc
+        assert "Acceptance:" in design_doc
         assert "## Missing Readiness" in release_doc
         assert "## Execution Steps" in release_doc
         assert "## Release And Rollback Sequence" in release_doc
+        assert "### Test Cases" in release_doc
         assert "### Before Implementation" in release_doc
         assert "- -" not in spec_doc + design_doc + release_doc
         assert "[{\"" not in spec_doc + design_doc + release_doc
@@ -156,9 +160,13 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         assert "## 六、模块与接口设计" in design_doc
         assert "## 九、交付执行计划" in design_doc
         assert "## 十、测试与验收证据" in design_doc
+        assert "### 测试用例" in design_doc
+        assert "`TC-1`" in design_doc
+        assert "关联验收" in design_doc
         assert "## 二、发布前检查" in release_doc
         assert "放行原则" in release_doc
         assert "## 四、发布与回滚顺序图" in release_doc
+        assert "### 测试用例" in release_doc
         assert "```mermaid" in spec_doc + design_doc + release_doc
         assert "## Executive Summary" not in spec_doc + design_doc + release_doc
         assert "Evidence References" not in spec_doc + design_doc + release_doc
