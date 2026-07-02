@@ -351,6 +351,35 @@ def test_human_doc_review_strict_requires_design_depth_for_designs() -> None:
         assert {"options", "risk", "rollback", "test", "traceability", "implementation_boundary"}.issubset(blocked_sources)
 
 
+def test_human_doc_review_strict_is_doc_type_aware_for_tests() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/tests/REQ-1.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# Order export Test Design\n\n"
+            "## Acceptance Evidence Mapping\n\n"
+            "- Acceptance AC-1 maps to `test_design.json` and `test_evidence_gate.json` evidence.\n\n"
+            "## Test Strategy Summary\n\n"
+            "- Test admin export, permission denial, regression scope, and frontend acceptance.\n\n"
+            "## Test Cases\n\n"
+            "- TC-1 verifies export output.\n"
+            "- TC-PERM-1 verifies unauthorized users cannot export.\n\n"
+            "## Traceability\n\n"
+            "- Traceability links spec acceptance criteria to test cases and release evidence.\n\n"
+            "## Evidence References\n\n"
+            "- `test_design.json`\n"
+            "- `test_evidence_gate.json`\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc, strict=True)
+        assert result["doc_type"] == "test"
+        assert result["decision"] != "block"
+        blocked_sources = {item["source"] for item in result["blockers"]}
+        assert "options" not in blocked_sources
+        assert "rollback" not in blocked_sources
+        assert "implementation_boundary" not in blocked_sources
+
+
 def test_human_doc_review_warns_missing_formal_sections_and_diagram() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "doc.md"
@@ -815,6 +844,7 @@ def run_all() -> None:
     test_human_doc_review_strict_blocks_warnings()
     test_human_doc_review_strict_is_doc_type_aware_for_specs()
     test_human_doc_review_strict_requires_design_depth_for_designs()
+    test_human_doc_review_strict_is_doc_type_aware_for_tests()
     test_human_doc_review_warns_missing_formal_sections_and_diagram()
     test_human_doc_review_warns_outline_only_document()
     test_human_doc_review_warns_chinese_doc_with_english_template_terms()

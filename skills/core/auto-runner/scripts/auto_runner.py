@@ -956,6 +956,25 @@ def run(
         steps,
     )
 
+    test_data_plan = out / "test_data_plan.json"
+    run_if_needed(
+        "test_data_plan",
+        test_data_plan,
+        [
+            "python3",
+            "skills/core/test-data-governor/scripts/test_data.py",
+            "render",
+            "--test-design",
+            str(test_design),
+            "--out",
+            str(test_data_plan),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
+
     design_review = out / "design_architecture_review.json"
     run_if_needed(
         "design_review",

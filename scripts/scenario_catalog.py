@@ -90,6 +90,7 @@ CORE_PRE_EDIT_GATES = [
     "technical_design.json",
     "architecture_design.json",
     "test_design.json",
+    "test_data_plan.json",
     "design_architecture_review.json",
     "delivery_plan_review.json",
     "docs_quality.json",
@@ -100,15 +101,15 @@ CORE_PRE_EDIT_GATES = [
 
 SCENARIO_MATRIX: dict[str, dict[str, Any]] = {
     "one_line_request": {
-        "required_skills": ["spec-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "delivery-plan-reviewer"],
+        "required_skills": ["spec-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "delivery-plan-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES,
     },
     "long_prd": {
-        "required_skills": ["requirement-question-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "human-doc-reviewer"],
+        "required_skills": ["requirement-question-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "human-doc-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES,
     },
     "bugfix": {
-        "required_skills": ["spec-governor", "technical-design-governor", "test-design-governor", "git-worktree-governor", "edit-readiness-governor"],
+        "required_skills": ["spec-governor", "technical-design-governor", "test-design-governor", "test-data-governor", "git-worktree-governor", "edit-readiness-governor"],
         "required_gates": CORE_PRE_EDIT_GATES,
     },
     "frontend_change": {
@@ -148,6 +149,7 @@ def catalog() -> dict[str, Any]:
                 "anti_bypass": [
                     "no implementation before design review and delivery plan review pass",
                     "no implementation before test_design.json exists",
+                    "no implementation before test_data_plan.json exists",
                     "no implementation before docs_quality.json is pass/ready",
                     "no implementation before git fetch and pull --ff-only evidence exists",
                     "no direct edits outside edit_permit.json and write_guard evidence",

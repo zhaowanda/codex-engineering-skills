@@ -89,6 +89,7 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
         assert (docs_root / "indexes/REQ-AUTO-DOCS.manifest.json").exists()
         spec_doc = (docs_root / "human/specs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         design_doc = (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
+        test_doc = (docs_root / "human/tests/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         release_doc = (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         assert "## Executive Summary" in spec_doc
         assert "## Background And Goals" in spec_doc
@@ -108,16 +109,21 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
         assert "## Decision Records" in design_doc
         assert "## Process Flow" in design_doc
         assert "## Risks And Open Gates" in design_doc
-        assert "### Test Cases" in design_doc
-        assert "`TC-1`" in design_doc
-        assert "Acceptance:" in design_doc
+        assert "## Test Strategy Summary" in design_doc
+        assert "### Test Cases" not in design_doc
+        assert "`TC-1`" not in design_doc
+        assert "Acceptance:" not in design_doc
+        assert "## Test Cases" in test_doc
+        assert "`TC-1`" in test_doc
+        assert "Acceptance:" in test_doc
+        assert "## Regression, Integration, Frontend, And Permission Scope" in test_doc
         assert "## Missing Readiness" in release_doc
         assert "## Execution Steps" in release_doc
         assert "## Release And Rollback Sequence" in release_doc
         assert "### Test Cases" in release_doc
         assert "### Before Implementation" in release_doc
-        assert "- -" not in spec_doc + design_doc + release_doc
-        assert "[{\"" not in spec_doc + design_doc + release_doc
+        assert "- -" not in spec_doc + design_doc + test_doc + release_doc
+        assert "[{\"" not in spec_doc + design_doc + test_doc + release_doc
         assert "{\"in_scope\"" not in spec_doc
         assert "acceptance_criteria:" not in spec_doc
         machine_spec = json.loads((docs_root / "machine/specs/REQ-AUTO-DOCS.spec.json").read_text(encoding="utf-8"))
@@ -144,6 +150,7 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         assert result["doc_language"] == "zh"
         spec_doc = (docs_root / "human/specs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         design_doc = (docs_root / "human/designs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
+        test_doc = (docs_root / "human/tests/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         release_doc = (docs_root / "human/releases/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         assert "## 一、摘要" in spec_doc
         assert "### 阅读与评审重点" in spec_doc
@@ -161,20 +168,24 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         assert "## 六、模块与接口设计" in design_doc
         assert "## 九、交付执行计划" in design_doc
         assert "## 十、需求追踪关系" in design_doc
-        assert "## 十一、测试与验收证据" in design_doc
-        assert "### 测试用例" in design_doc
-        assert "`TC-1`" in design_doc
-        assert "关联验收" in design_doc
+        assert "## 十一、测试策略摘要" in design_doc
+        assert "### 测试用例" not in design_doc
+        assert "`TC-1`" not in design_doc
+        assert "## 四、测试用例" in test_doc
+        assert "`TC-1`" in test_doc
+        assert "关联验收" in test_doc
+        assert "## 五、测试数据准备" in test_doc
+        assert "## 六、回归、集成、前端与权限范围" in test_doc
         assert "## 二、发布前检查" in release_doc
         assert "放行原则" in release_doc
         assert "## 四、发布与回滚顺序图" in release_doc
         assert "### 测试用例" in release_doc
         assert "```mermaid" in spec_doc + design_doc + release_doc
-        assert "## Executive Summary" not in spec_doc + design_doc + release_doc
-        assert "Evidence References" not in spec_doc + design_doc + release_doc
+        assert "## Executive Summary" not in spec_doc + design_doc + test_doc + release_doc
+        assert "Evidence References" not in spec_doc + design_doc + test_doc + release_doc
         assert "Role:" not in design_doc + release_doc
         assert "edit files:" not in design_doc + release_doc
-        assert "evidence:" not in spec_doc + design_doc + release_doc
+        assert "evidence:" not in spec_doc + design_doc + test_doc + release_doc
 
 
 def test_auto_runner_auto_detects_chinese_doc_request() -> None:

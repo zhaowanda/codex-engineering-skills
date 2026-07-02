@@ -37,6 +37,13 @@ DOC_TYPE_REQUIREMENTS = {
         "traceability",
         "implementation_boundary",
     },
+    "test": {
+        "scope",
+        "evidence",
+        "acceptance",
+        "test",
+        "traceability",
+    },
     "release": {
         "risk",
         "evidence",
@@ -104,12 +111,16 @@ def infer_doc_type(path: Path, text: str) -> str:
     heading_lines = "\n".join(line for line in text.splitlines()[:12] if line.lstrip().startswith("#")).lower()
     if "/human/designs/" in normalized or re.search(r"(^|/)(designs?|architectures?)(/|$)", normalized):
         return "design"
+    if "/human/tests/" in normalized or re.search(r"(^|/)(tests?|test-designs?)(/|$)", normalized):
+        return "test"
     if "/human/releases/" in normalized or re.search(r"(^|/)(releases?)(/|$)", normalized):
         return "release"
     if "/human/specs/" in normalized or re.search(r"(^|/)(specs?|requirements?)(/|$)", normalized):
         return "spec"
     if "技术设计" in heading_lines or re.search(r"\b(design|architecture)\b", heading_lines):
         return "design"
+    if "测试设计" in heading_lines or re.search(r"\b(test design|test)\b", heading_lines):
+        return "test"
     if "发布准备" in heading_lines or re.search(r"\b(release)\b", heading_lines):
         return "release"
     if "需求说明" in heading_lines or re.search(r"\b(spec|requirement)\b", heading_lines):

@@ -223,6 +223,7 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
             "technical_design",
             "architecture_design",
             "test_design",
+            "test_data_plan",
             "docs_quality",
             "git_worktree_evidence",
             "edit_permit",

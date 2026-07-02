@@ -11,7 +11,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[4]
-DIRS = ["human/specs", "human/designs", "human/releases", "machine/specs", "machine/designs", "machine/reviews", "machine/releases", "baseline", "indexes"]
+DIRS = ["human/specs", "human/designs", "human/tests", "human/releases", "machine/specs", "machine/designs", "machine/reviews", "machine/releases", "baseline", "indexes"]
 MACHINE_ARTIFACTS = {
     "spec": ("machine/specs", ".spec.json"),
     "design": ("machine/designs", ".design.json"),
@@ -61,7 +61,7 @@ def normalize_doc_language(language: str = "en") -> str:
 
 def markdown_template(doc_id: str, title: str, kind: str, language: str = "en") -> str:
     if normalize_doc_language(language) == "zh":
-        kind_label = {"spec": "需求说明", "design": "技术设计", "release": "发布准备"}.get(kind, kind)
+        kind_label = {"spec": "需求说明", "design": "技术设计", "test": "测试设计", "release": "发布准备"}.get(kind, kind)
         heading = title or doc_id
         return (
             f"# {heading} {kind_label}\n\n"
@@ -101,6 +101,7 @@ def materialize_doc_files(docs_root: Path, doc_id: str, title: str = "", languag
     human_paths = {
         "spec": docs_root / "human/specs" / f"{doc_id}.md",
         "design": docs_root / "human/designs" / f"{doc_id}.md",
+        "test": docs_root / "human/tests" / f"{doc_id}.md",
         "release": docs_root / "human/releases" / f"{doc_id}.md",
     }
     machine_paths = {
@@ -700,6 +701,41 @@ def render_test_cases(test_design: dict[str, Any], language: str = "en") -> str:
     return "\n\n".join(sections)
 
 
+def render_test_data_plan(test_data_plan: dict[str, Any], language: str = "en") -> str:
+    datasets = [item for item in as_list(test_data_plan.get("datasets")) if isinstance(item, dict)]
+    if not datasets:
+        return "- 未同步到测试数据计划；有测试用例时应生成 `test_data_plan.json`。" if language == "zh" else "- No test data plan was synced; `test_data_plan.json` is expected when test cases exist."
+    sections: list[str] = []
+    for dataset in datasets:
+        setup = zh_text(dataset.get("setup_method")) if language == "zh" else text(dataset.get("setup_method"))
+        cases = ", ".join(text(item) for item in as_list(dataset.get("case_ids"))) or ("未绑定" if language == "zh" else "unmapped")
+        cleanup = ", ".join(summarize_dict_item(item, ["method", "owner"], language) if isinstance(item, dict) else (zh_text(item) if language == "zh" else text(item)) for item in as_list(dataset.get("cleanup")))
+        accounts = ", ".join(summarize_dict_item(item, ["role", "source"], language) if isinstance(item, dict) else (zh_text(item) if language == "zh" else text(item)) for item in as_list(dataset.get("accounts")))
+        roles = ", ".join(zh_text(item) for item in as_list(dataset.get("roles"))) if language == "zh" else ", ".join(text(item) for item in as_list(dataset.get("roles")))
+        privacy = ", ".join(zh_text(item) for item in as_list(dataset.get("privacy_controls"))) if language == "zh" else ", ".join(text(item) for item in as_list(dataset.get("privacy_controls")))
+        if language == "zh":
+            sections.append(
+                f"### `{text(dataset.get('id'))}`\n\n"
+                f"- 关联用例：{cases}\n"
+                f"- 数据级别：{zh_text(dataset.get('data_classification'))}\n"
+                f"- 准备方式：{setup}\n"
+                f"- 账号/角色：{accounts or roles or '无'}\n"
+                f"- 清理要求：{cleanup or '待补充'}\n"
+                f"- 隐私控制：{privacy or '待补充'}"
+            )
+        else:
+            sections.append(
+                f"### `{text(dataset.get('id'))}`\n\n"
+                f"- Cases: {cases}\n"
+                f"- Classification: {text(dataset.get('data_classification'))}\n"
+                f"- Setup: {setup}\n"
+                f"- Accounts/roles: {accounts or roles or 'none'}\n"
+                f"- Cleanup: {cleanup or 'TBD'}\n"
+                f"- Privacy controls: {privacy or 'TBD'}"
+            )
+    return "\n\n".join(sections)
+
+
 def render_solution_options(technical: dict[str, Any], architecture: dict[str, Any], language: str = "en") -> str:
     label_option = "方案" if language == "zh" else "Option"
     label_selected = "选中方案" if language == "zh" else "Selected"
@@ -835,6 +871,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
     technical = read_json(artifact_dir / "technical_design.json")
     architecture = read_json(artifact_dir / "architecture_design.json")
     test_design = read_json(artifact_dir / "test_design.json")
+    test_data_plan = read_json(artifact_dir / "test_data_plan.json")
     delivery_plan = read_json(artifact_dir / "delivery_plan.json")
     design_review = read_json(artifact_dir / "design_architecture_review.json")
     delivery_review = read_json(artifact_dir / "delivery_plan_review.json")
@@ -920,17 +957,49 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "## 十、需求追踪关系\n\n"
             "- 追踪关系：每个设计决策必须能回到 `spec.json` 的验收标准，并向前关联到 `test_design.json` 测试用例、`delivery_plan.json` 任务和发布证据。\n"
             "- 如果任一验收标准缺少设计引用、测试用例或交付证据责任人，评审时应阻止进入实现。\n\n"
-            "## 十一、测试与验收证据\n\n"
+            "## 十一、测试策略摘要\n\n"
+            f"- 本节只保留验收证据映射和测试策略摘要；详细测试用例维护在 `human/tests/{doc_id}.md` 与 `test_design.json`。\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。', 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
-            "### 测试用例\n\n"
-            f"{render_test_cases(test_design, 'zh')}\n\n"
             "## 十二、风险与未过门禁\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## 十三、证据引用\n\n"
             "- `technical_design.json`：技术设计、接口、数据、权限和测试映射。\n"
             "- `architecture_design.json`：架构边界、跨仓依赖、部署和回滚策略。\n"
+            "- `test_design.json`：详细测试用例、回归范围和验收证据要求。\n"
             "- `delivery_plan.json`：实施顺序、文件范围、证据和回滚检查。\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
+        ),
+        "test": (
+            f"# {heading} 测试设计\n\n"
+            "## 一、摘要\n\n"
+            f"- 文档编号：`{doc_id}`\n"
+            f"- 测试设计状态：`{zh_text(test_design.get('decision'), '草稿')}`\n"
+            f"- 测试用例数：`{zh_text(len(as_list(test_design.get('test_cases'))), '0')}`\n"
+            "- 本文承载详细测试用例；技术设计只保留测试策略摘要和证据映射。\n\n"
+            "## 二、验收证据映射\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。', 'zh')}\n\n"
+            "## 三、测试策略摘要\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
+            "## 四、测试用例\n\n"
+            f"{render_test_cases(test_design, 'zh')}\n\n"
+            "## 五、测试数据准备\n\n"
+            f"{render_test_data_plan(test_data_plan, 'zh')}\n\n"
+            "## 六、回归、集成、前端与权限范围\n\n"
+            f"### 回归范围\n\n{render_named_items(as_list(test_design.get('regression_scope')), ['area', 'reason'], '未同步到回归范围。', 'zh')}\n\n"
+            f"### 集成范围\n\n{render_named_items(as_list(test_design.get('integration_scope')), ['id', 'title', 'evidence_required'], '未同步到集成范围。', 'zh')}\n\n"
+            f"### 前端范围\n\n{render_named_items(as_list(test_design.get('frontend_scope')), ['id', 'title', 'evidence_required'], '未同步到前端范围。', 'zh')}\n\n"
+            f"### 权限范围\n\n{render_named_items(as_list(test_design.get('permission_scope')), ['id', 'title', 'evidence_required'], '未同步到权限范围。', 'zh')}\n\n"
+            "## 七、证据要求\n\n"
+            f"{bullet_lines([zh_text(item) for item in as_list(test_design.get('evidence_required'))], '未同步到证据要求。')}\n\n"
+            "## 八、追踪关系\n\n"
+            "- 追踪关系：每个测试用例必须回到 `spec.json` 验收标准，并向前关联到 `test_data_plan.json`、`test_evidence_gate.json`、CI 记录、前端验收或发布证据。\n"
+            "- 未映射到验收标准的权限、集成、前端用例必须说明风险来源和证据要求。\n\n"
+            "## 九、证据引用\n\n"
+            "- `test_design.json`：测试设计、用例、回归范围和证据要求。\n"
+            "- `test_data_plan.json`：测试数据准备、账号角色、清理要求和隐私控制。\n"
+            "- `test_evidence_gate.json`：真实测试与 CI 证据门禁结论。\n"
+            "- `frontend_acceptance.json`：前端浏览器验收证据，如适用。\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "release": (
@@ -987,6 +1056,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
     technical = read_json(artifact_dir / "technical_design.json")
     architecture = read_json(artifact_dir / "architecture_design.json")
     test_design = read_json(artifact_dir / "test_design.json")
+    test_data_plan = read_json(artifact_dir / "test_data_plan.json")
     delivery_plan = read_json(artifact_dir / "delivery_plan.json")
     design_review = read_json(artifact_dir / "design_architecture_review.json")
     delivery_review = read_json(artifact_dir / "delivery_plan_review.json")
@@ -1070,17 +1140,49 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "## Requirement Traceability\n\n"
             "- Traceability: every design decision must map back to `spec.json` acceptance criteria and forward to `test_design.json` test cases, `delivery_plan.json` tasks, and release evidence.\n"
             "- Reviewers should reject implementation if an acceptance criterion has no design reference, test case, or delivery evidence owner.\n\n"
-            "## Test And Acceptance Evidence\n\n"
+            "## Test Strategy Summary\n\n"
+            f"- This section keeps only acceptance evidence mapping and test strategy summary. Detailed test cases live in `human/tests/{doc_id}.md` and `test_design.json`.\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], 'No acceptance evidence mapping was synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
-            "### Test Cases\n\n"
-            f"{render_test_cases(test_design, 'en')}\n\n"
             "## Risks And Open Gates\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## Evidence References\n\n"
             "- `technical_design.json`: technical design, API/data/permission/test mapping.\n"
             "- `architecture_design.json`: architecture boundaries, dependency graph, deployment, rollback.\n"
+            "- `test_design.json`: detailed test cases, regression scope, and evidence requirements.\n"
             "- `delivery_plan.json`: implementation sequence, file scope, evidence, rollback checks.\n\n"
+            f"{render_evidence_refs(artifact_dir)}\n"
+        ),
+        "test": (
+            f"# {heading} Test Design\n\n"
+            "## Executive Summary\n\n"
+            f"- Doc ID: `{doc_id}`\n"
+            f"- Test design decision: `{text(test_design.get('decision'), 'draft')}`\n"
+            f"- Test case count: `{len(as_list(test_design.get('test_cases')))}`\n"
+            "- This document owns detailed test cases. The technical design keeps only the test strategy summary and evidence mapping.\n\n"
+            "## Acceptance Evidence Mapping\n\n"
+            f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], 'No acceptance evidence mapping was synced.')}\n\n"
+            "## Test Strategy Summary\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
+            "## Test Cases\n\n"
+            f"{render_test_cases(test_design, 'en')}\n\n"
+            "## Test Data Preparation\n\n"
+            f"{render_test_data_plan(test_data_plan, 'en')}\n\n"
+            "## Regression, Integration, Frontend, And Permission Scope\n\n"
+            f"### Regression Scope\n\n{render_named_items(as_list(test_design.get('regression_scope')), ['area', 'reason'], 'No regression scope was synced.')}\n\n"
+            f"### Integration Scope\n\n{render_named_items(as_list(test_design.get('integration_scope')), ['id', 'title', 'evidence_required'], 'No integration scope was synced.')}\n\n"
+            f"### Frontend Scope\n\n{render_named_items(as_list(test_design.get('frontend_scope')), ['id', 'title', 'evidence_required'], 'No frontend scope was synced.')}\n\n"
+            f"### Permission Scope\n\n{render_named_items(as_list(test_design.get('permission_scope')), ['id', 'title', 'evidence_required'], 'No permission scope was synced.')}\n\n"
+            "## Evidence Requirements\n\n"
+            f"{bullet_lines([text(item) for item in as_list(test_design.get('evidence_required'))], 'No evidence requirements were synced.')}\n\n"
+            "## Traceability\n\n"
+            "- Traceability: every test case must map back to `spec.json` acceptance criteria and forward to `test_data_plan.json`, `test_evidence_gate.json`, CI records, frontend acceptance, or release evidence.\n"
+            "- Permission, integration, and frontend cases without direct acceptance IDs must explain their risk source and evidence requirement.\n\n"
+            "## Evidence References\n\n"
+            "- `test_design.json`: test design, cases, regression scope, and evidence requirements.\n"
+            "- `test_data_plan.json`: test data setup, accounts/roles, cleanup expectations, and privacy controls.\n"
+            "- `test_evidence_gate.json`: real test and CI evidence gate result.\n"
+            "- `frontend_acceptance.json`: browser acceptance evidence when applicable.\n\n"
             f"{render_evidence_refs(artifact_dir)}\n"
         ),
         "release": (
@@ -1139,6 +1241,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],
         "design": docs_root / manifest["human_docs"]["design"],
+        "test": docs_root / manifest["human_docs"]["test"],
         "release": docs_root / manifest["human_docs"]["release"],
     }
     for name, content in human_docs.items():
@@ -1147,7 +1250,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
 
     bundles = {
         "spec": ["spec.json"],
-        "design": ["technical_design.json", "architecture_design.json", "test_design.json", "delivery_plan.json"],
+        "design": ["technical_design.json", "architecture_design.json", "test_design.json", "test_data_plan.json", "delivery_plan.json"],
         "review": ["design_architecture_review.json", "delivery_plan_review.json", "delivery_status.json"],
         "release": ["implementation_completion_gate.json", "code_review_gate.json", "test_evidence_gate.json", "release_gate.json"],
     }
@@ -1247,6 +1350,7 @@ def init(docs_root: Path, doc_id: str, git_url: str = "", title: str = "", doc_l
         "human_docs": {
             "spec": f"human/specs/{doc_id}.md",
             "design": f"human/designs/{doc_id}.md",
+            "test": f"human/tests/{doc_id}.md",
             "release": f"human/releases/{doc_id}.md",
         },
         "machine_artifacts": {

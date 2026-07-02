@@ -131,7 +131,7 @@ python3 scripts/codex_eng.py auto \
 
 Configure the delivery docs repository once per workspace. Later requirements reuse the configured docs repo by `doc_id`; pass `--docs-root` only when overriding the workspace default.
 
-The auto runner ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/design/test/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
+The auto runner ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/design/test/test-data/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
 Check the next safe action later:
 
@@ -168,6 +168,7 @@ python3 scripts/codex_eng.py run sync-local-skills --prune-legacy --force
 - [Getting Started](docs/getting-started.md): run the synthetic workflow end to end.
 - [Workflow Guide](docs/workflow-guide.md): understand the gates, allowed implementation conditions, release conditions, and private overlay boundary.
 - [Skill Catalog](docs/skill-catalog.md): browse skills by delivery stage, maturity, and category.
+- [Skill Assessment](docs/skill-assessment.md): review current skill quality level, orchestration fit, and optimization backlog.
 - [Scenario Guide](docs/scenario-guide.md): browse synthetic example scenarios.
 - [FAQ](docs/faq.md): common open-core usage and boundary questions.
 - [Deprecation Policy](docs/deprecation-policy.md): public contract deprecation and migration rules.
@@ -215,6 +216,7 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/delivery-plan-reviewer`: reviews delivery plans for executable task depth, narrow file scope, evidence mapping, rollback controls, and unresolved gates before Git or edit readiness.
 - `skills/core/delivery-runner`: one-command status inspector that reports current stage, blockers, next command, and whether implementation/release is allowed.
 - `skills/core/test-design-governor`: generates and validates test design before implementation, including acceptance mapping, regression, integration, permission, and frontend scope.
+- `skills/core/test-data-governor`: generates and validates `test_data_plan.json` so test cases have synthetic/anonymized fixtures, accounts, roles, cleanup, and privacy controls before execution.
 - `skills/core/configuration-governor`: detects and gates runtime configuration readiness for database, MQ, email, SMS, payment, callbacks, secrets, certificates, and feature flags.
 - `skills/core/performance-governor`: creates performance review evidence plans for API timing, SQL/query impact, exports, frontend runtime, MQ throughput, and batch work.
 - `skills/core/data-security-governor`: creates data security review evidence for PII, permissions, tenants, payment data, secrets, exports, logs, and audit-sensitive changes.
@@ -272,7 +274,7 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/design-architecture-reviewer`: design-depth gate that scores technical and architecture designs for requirement coverage, flows, data, APIs, UI/UX, option comparison, security, performance, boundaries, rollback, observability, and testability.
 - `skills/core/code-design-quality-reviewer`: first-pass diff reviewer for cohesion, coupling, responsibility boundaries, API contracts, permission, transaction, performance, security, configuration, testability, and maintainability risks.
 - `skills/core/code-review-gate`: aggregate review gate that combines write audit, code review, design quality, security, performance, test, CI, frontend, configuration, and evidence-gap results into approve/request_changes/block.
-- `skills/core/test-evidence-gate`: validates real test execution, CI command evidence, blocker coverage, and optional frontend acceptance before release evidence binding.
+- `skills/core/test-evidence-gate`: validates real test execution, CI command evidence, test-data linkage, blocker coverage, and optional frontend acceptance before release evidence binding.
 - `skills/core/frontend-acceptance-runner`: generates and validates browser acceptance evidence for UI pages, routes, forms, lists, exports, permissions, responsive behavior, console errors, and network failures.
 - `skills/core/release-evidence-binder`: binds design, implementation, review, test, CI, frontend, configuration, environment, UAT, rollback, and post-release evidence into a final go/conditional_go/no_go release gate.
 - `skills/templates/design-doc-templates`: renderer for technical and architecture design JSON templates plus a synthetic example that passes the design reviewer.

@@ -28,7 +28,8 @@ spec
 - Do not leave placeholders such as `TBD`, `unknown`, or `confirm later`.
 - Include at least two technical solution options and two architecture options.
 - Include selected option, decision criteria, tradeoffs, and rejected alternative reasoning.
-- Include process flow, data flow, module split, API/UI impact decisions, security, performance, rollback, observability, and tests.
+- Include process flow, data flow, module split, API/UI impact decisions, security, performance, rollback, observability, and a test strategy summary.
+- Keep detailed test cases in `test_design.json` and human test-design docs, not in technical design.
 - Include current-state analysis, code entrypoints, interface examples, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
 - Run `design-architecture-reviewer` after filling the templates.
 

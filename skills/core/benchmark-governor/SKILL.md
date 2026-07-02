@@ -13,8 +13,16 @@ Use this skill before releases or major refactors to track quality signals.
 
 ## Command
 
+From an installed skill directory:
+
 ```bash
 python3 scripts/benchmark.py --root .
+```
+
+From this repository root, prefer the unified CLI:
+
+```bash
+python3 scripts/codex_eng.py run benchmark --root .
 ```
 
 ## Rules

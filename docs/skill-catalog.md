@@ -5,7 +5,7 @@ Skills are grouped by delivery stage. Each entry shows maturity and category fro
 ## Recommended Minimum Paths
 
 - Bugfix: `requirement-document-ingestor -> spec-governor -> technical-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`.
-- Standard feature: bugfix path plus `architecture-design-governor`, `test-design-governor`, and `traceability-governor` when acceptance coverage or cross-module scope is non-trivial.
+- Standard feature: bugfix path plus `architecture-design-governor`, `test-design-governor`, `test-data-governor`, and `traceability-governor` when acceptance coverage or cross-module scope is non-trivial.
 - Frontend change: standard feature path plus `frontend-acceptance-runner` and `test-evidence-gate`.
 - Data/config/security/performance change: standard feature path plus the matching `configuration-governor`, `data-security-governor`, and `performance-governor`.
 - Release readiness: start from `implementation-completion-gate`, then `code-review-gate`, `test-evidence-gate`, environment/UAT/release-change evidence, and `release-evidence-binder`.
@@ -67,6 +67,7 @@ Do not run every skill for every task. Use the workflow profile and change-risk 
 ## Testing
 
 - `skills/core/frontend-acceptance-runner`: frontend-acceptance-runner (expert-gate, workflow-gate)
+- `skills/core/test-data-governor`: test-data-governor (expert-gate, workflow-gate)
 - `skills/core/test-design-governor`: test-design-governor (expert-gate, workflow-gate)
 - `skills/core/test-evidence-gate`: test-evidence-gate (expert-gate, workflow-gate)
 

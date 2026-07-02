@@ -35,7 +35,16 @@ python3 scripts/test_design.py \
 - Cross-repo changes need integration tests.
 - UI changes need frontend/browser acceptance evidence.
 - Performance/security/config signals must be reflected in test scope.
+- Cases that need fixtures, accounts, roles, tenants, or records must declare `test_data_refs`, setup preconditions, and cleanup expectations.
+- Generate `test_data_plan.json` with `test-data-governor` before real execution when test data refs exist.
 
 ## Output
 
 The output uses schema `codex-test-design-v1`.
+
+Key fields:
+
+- `test_cases[].test_data_refs`
+- `test_cases[].data_requirements`
+- `test_cases[].cleanup_expectations`
+- `test_data_plan_ref`

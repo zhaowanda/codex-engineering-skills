@@ -54,6 +54,20 @@ def write_release_governance_examples(out_dir: Path) -> None:
 
 
 def write_frontend_happy_evidence(out_dir: Path) -> None:
+    test_design = {}
+    if (out_dir / "test_design.json").exists():
+        test_design = json.loads((out_dir / "test_design.json").read_text(encoding="utf-8"))
+    cases = [item for item in test_design.get("test_cases", []) if isinstance(item, dict)]
+    if cases and not (out_dir / "test_data_plan.json").exists():
+        datasets = []
+        matrix = []
+        for case in cases:
+            case_id = str(case.get("id") or "TC")
+            refs = [str(ref) for ref in case.get("test_data_refs", [])] or [f"TD-{case_id}"]
+            for ref in refs:
+                datasets.append({"id": ref, "case_ids": [case_id], "data_classification": "synthetic", "setup_method": "fixture_or_factory", "cleanup": [{"method": "delete synthetic fixture data"}]})
+            matrix.append({"case_id": case_id, "dataset_ids": refs})
+        write_json(out_dir / "test_data_plan.json", {"schema": "codex-test-data-plan-v1", "decision": "pass", "datasets": datasets, "case_data_matrix": matrix, "blockers": [], "warnings": []})
     write_json(
         out_dir / "frontend_acceptance.json",
         {
@@ -68,9 +82,18 @@ def write_frontend_happy_evidence(out_dir: Path) -> None:
             "failed_requests": [],
         },
     )
+    executed_cases = [
+        {
+            "id": str(case.get("id") or "TC"),
+            "name": str(case.get("title") or "synthetic frontend"),
+            "status": "passed",
+            "dataset_ids": [str(ref) for ref in case.get("test_data_refs", [])],
+        }
+        for case in cases
+    ] or [{"name": "synthetic frontend", "status": "passed"}]
     write_json(
         out_dir / "test_execution_evidence.json",
-        {"executed_cases": [{"name": "synthetic frontend", "status": "passed"}], "failed_cases": [], "untested_blockers": []},
+        {"executed_cases": executed_cases, "failed_cases": [], "untested_blockers": []},
     )
 
 

@@ -26,6 +26,7 @@ implementation
 - `block` if test evidence has no real executed cases or command/API/UI evidence.
 - `block` if `failed_cases` or `untested_blockers` exist.
 - `block` if CI has failed commands, unknown commands, manual-review-required commands, or plan-only mode.
+- `block` if `test_design.json` declares `test_data_refs` but `test_data_plan.json` is missing, blocked, incomplete, or not linked from executed cases.
 - `block` if `--require-frontend` is set and frontend acceptance is missing or failed.
 - `pass` only when required evidence exists, no blockers remain, and the minimum executed-case threshold is met.
 
@@ -54,6 +55,8 @@ The gate reads:
 
 - `test_execution_evidence.json`
 - `ci_execution_evidence.json`
+- `test_design.json`
+- `test_data_plan.json`
 - `frontend_acceptance.json`
 
 ## Output

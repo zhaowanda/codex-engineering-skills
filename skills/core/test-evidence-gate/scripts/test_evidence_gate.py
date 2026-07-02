@@ -87,6 +87,29 @@ def command_count(ci_evidence: dict[str, Any], key: str) -> int:
     return len(as_list(ci_evidence.get(key)))
 
 
+def data_refs_required(test_design: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for case in as_list(test_design.get("test_cases")):
+        if isinstance(case, dict):
+            refs.update(str(item) for item in as_list(case.get("test_data_refs")) if item)
+    return refs
+
+
+def data_refs_in_plan(test_data_plan: dict[str, Any]) -> set[str]:
+    return {str(item.get("id")) for item in as_list(test_data_plan.get("datasets")) if isinstance(item, dict) and item.get("id")}
+
+
+def executed_case_data_refs(test_evidence: dict[str, Any]) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for item in as_list(test_evidence.get("executed_cases")) + as_list(test_evidence.get("passed_cases")) + as_list(test_evidence.get("case_results")):
+        if not isinstance(item, dict):
+            continue
+        case_id = str(item.get("id") or item.get("case_id") or item.get("name") or "")
+        if case_id:
+            result[case_id] = [str(ref) for ref in as_list(item.get("dataset_ids") or item.get("test_data_refs")) if ref]
+    return result
+
+
 def evaluate(
     artifact_dir: Path,
     require_frontend: bool = False,
@@ -95,6 +118,8 @@ def evaluate(
     test_evidence = load_json(artifact_dir / "test_execution_evidence.json")
     ci_evidence = load_json(artifact_dir / "ci_execution_evidence.json")
     frontend = load_json(artifact_dir / "frontend_acceptance.json")
+    test_design = load_json(artifact_dir / "test_design.json")
+    test_data_plan = load_json(artifact_dir / "test_data_plan.json")
 
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -120,6 +145,32 @@ def evaluate(
             blockers.append({"source": "test_execution_evidence", "message": "untested blockers exist", "count": len(as_list(test_evidence.get("untested_blockers")))})
         if as_list(test_evidence.get("untested_non_blockers")):
             warnings.append({"source": "test_execution_evidence", "message": "untested non-blocking cases exist", "count": len(as_list(test_evidence.get("untested_non_blockers")))})
+
+    required_data_refs = data_refs_required(test_design)
+    if required_data_refs:
+        if not test_data_plan:
+            blockers.append({"source": "test_data_plan", "message": "test_data_plan.json is required because test_design.json declares test_data_refs"})
+        else:
+            if test_data_plan.get("decision") == "block":
+                blockers.append({"source": "test_data_plan", "message": "test data plan decision is block"})
+            planned_refs = data_refs_in_plan(test_data_plan)
+            missing_refs = sorted(required_data_refs - planned_refs)
+            if missing_refs:
+                blockers.append({"source": "test_data_plan", "message": "test data refs missing from plan", "missing_refs": missing_refs})
+        if test_evidence:
+            refs_by_case = executed_case_data_refs(test_evidence)
+            for case in as_list(test_design.get("test_cases")):
+                if not isinstance(case, dict):
+                    continue
+                case_id = str(case.get("id") or "")
+                refs = [str(ref) for ref in as_list(case.get("test_data_refs")) if ref]
+                if not case_id or not refs:
+                    continue
+                executed_refs = refs_by_case.get(case_id, [])
+                if not executed_refs:
+                    blockers.append({"source": "test_execution_evidence", "message": "executed case is missing dataset linkage", "case_id": case_id})
+                elif not set(refs).issubset(set(executed_refs)):
+                    blockers.append({"source": "test_execution_evidence", "message": "executed case dataset linkage does not cover required refs", "case_id": case_id, "required_refs": refs, "actual_refs": executed_refs})
 
     if not ci_evidence:
         warnings.append({"source": "ci_execution_evidence", "message": "ci_execution_evidence.json is missing"})
@@ -158,6 +209,9 @@ def evaluate(
         "test_execution_evidence_present": bool(test_evidence),
         "ci_execution_evidence_present": bool(ci_evidence),
         "frontend_acceptance_present": bool(frontend),
+        "test_design_present": bool(test_design),
+        "test_data_plan_present": bool(test_data_plan),
+        "required_test_data_ref_count": len(data_refs_required(test_design)),
         "executed_case_count": executed_count,
         "failed_case_count": len(as_list(test_evidence.get("failed_cases"))) if test_evidence else 0,
         "untested_blocker_count": len(as_list(test_evidence.get("untested_blockers"))) if test_evidence else 0,

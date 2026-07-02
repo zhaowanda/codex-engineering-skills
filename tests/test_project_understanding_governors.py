@@ -244,6 +244,7 @@ def test_docs_governor_init_and_validate() -> None:
             assert manifest["doc_language"] == "en"
             assert (root / "human/specs/REQ-1.md").read_text(encoding="utf-8").strip()
             assert (root / "human/designs/REQ-1.md").read_text(encoding="utf-8").strip()
+            assert (root / "human/tests/REQ-1.md").read_text(encoding="utf-8").strip()
             assert (root / "human/releases/REQ-1.md").read_text(encoding="utf-8").strip()
             assert json.loads((root / "machine/specs/REQ-1.spec.json").read_text(encoding="utf-8"))["doc_id"] == "REQ-1"
             validation = docs_governor.validate(root, "REQ-1")

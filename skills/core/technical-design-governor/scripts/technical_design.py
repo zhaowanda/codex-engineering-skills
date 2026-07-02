@@ -157,7 +157,8 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         ] or [{"requirement_id": req_id, "process_flow_refs": [title or summary], "module_refs": [owner_file], "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"], "api_contract_refs": route_refs or ["No API impact confirmed yet"], "ui_ue_refs": ["affected UI if any"], "test_refs": [f"TEST-{req_id}"], "acceptance_refs": [ac_id], "selected_option_id": "T1", "decision_reason": "lowest initial risk"}],
         "acceptance_mapping": [{"acceptance_id": str(item.get("id") or ac_id), "design_refs": [summary], "evidence_required": as_list(item.get("evidence_required")) or test_evidence} for item in acceptance] or [{"acceptance_id": ac_id, "design_refs": [summary], "evidence_required": test_evidence}],
         "ui_ue_design": [{"page_or_route": route_refs[0] if route_refs else "confirm if UI is affected", "user_goal": summary, "entry_point": "existing entry", "layout": "preserve existing layout unless requirement changes it", "interaction_flow": ["open affected behavior", "perform action", "verify result"], "states": ["loading", "success", "error"], "field_rules": ["preserve existing field validation and visibility"], "permission_visibility": "preserve role visibility", "acceptance_evidence": "browser evidence if UI changed"}],
-        "test_strategy": [{"case": summary, "evidence": test_evidence, "type": "functional"}],
+        "test_strategy": [{"summary": f"Validate acceptance criteria for {summary}; detailed cases belong in test_design.json.", "evidence": test_evidence, "type": "strategy_summary", "test_design_ref": "test_design.json"}],
+        "test_design_ref": "test_design.json",
         "open_questions": spec.get("open_questions", []),
     }
 

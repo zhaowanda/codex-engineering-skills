@@ -19,6 +19,7 @@ COMMANDS = {
     "technical-design": ["python3", "skills/core/technical-design-governor/scripts/technical_design.py"],
     "architecture-design": ["python3", "skills/core/architecture-design-governor/scripts/architecture_design.py"],
     "test-design": ["python3", "skills/core/test-design-governor/scripts/test_design.py", "render"],
+    "test-data": ["python3", "skills/core/test-data-governor/scripts/test_data.py"],
     "diff-impact": ["python3", "skills/core/diff-impact-analyzer/scripts/diff_impact.py"],
     "collect-evidence": ["python3", "skills/core/evidence-auto-collector/scripts/evidence_collect.py"],
     "install-skills": ["python3", "skills/core/skill-installation-governor/scripts/install_skills.py"],

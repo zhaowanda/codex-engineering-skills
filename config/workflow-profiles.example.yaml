@@ -9,6 +9,7 @@ profiles:
       - requirement-question-governor
       - technical-design-governor
       - test-design-governor
+      - test-data-governor
       - design-architecture-reviewer
       - delivery-plan-templates
       - delivery-plan-reviewer
@@ -21,6 +22,7 @@ profiles:
       - spec.json
       - technical_design.json
       - test_design.json
+      - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
@@ -32,6 +34,7 @@ profiles:
           - pass
       - artifact: technical_design.json
       - artifact: test_design.json
+      - artifact: test_data_plan.json
       - artifact: docs_quality.json
         accepted_decisions:
           - pass
@@ -65,6 +68,7 @@ profiles:
       - technical-design-governor
       - architecture-design-governor
       - test-design-governor
+      - test-data-governor
       - design-architecture-reviewer
       - delivery-plan-templates
       - delivery-plan-reviewer
@@ -75,6 +79,7 @@ profiles:
       - technical_design.json
       - architecture_design.json
       - test_design.json
+      - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
@@ -87,6 +92,7 @@ profiles:
       - artifact: technical_design.json
       - artifact: architecture_design.json
       - artifact: test_design.json
+      - artifact: test_data_plan.json
       - artifact: docs_quality.json
         accepted_decisions:
           - pass
@@ -116,6 +122,7 @@ profiles:
       - technical-design-governor
       - architecture-design-governor
       - test-design-governor
+      - test-data-governor
       - design-architecture-reviewer
       - delivery-plan-templates
       - delivery-plan-reviewer
@@ -128,6 +135,7 @@ profiles:
       - technical_design.json
       - architecture_design.json
       - test_design.json
+      - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
@@ -168,6 +176,7 @@ profiles:
       - artifact: technical_design.json
       - artifact: architecture_design.json
       - artifact: test_design.json
+      - artifact: test_data_plan.json
       - artifact: docs_quality.json
         accepted_decisions:
           - pass
@@ -205,6 +214,7 @@ profiles:
       - technical-design-governor
       - architecture-design-governor
       - test-design-governor
+      - test-data-governor
       - design-architecture-reviewer
       - delivery-plan-templates
       - delivery-plan-reviewer
@@ -219,6 +229,7 @@ profiles:
       - technical_design.json
       - architecture_design.json
       - test_design.json
+      - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
@@ -235,6 +246,7 @@ profiles:
       - artifact: technical_design.json
       - artifact: architecture_design.json
       - artifact: test_design.json
+      - artifact: test_data_plan.json
       - artifact: docs_quality.json
         accepted_decisions:
           - pass
@@ -263,6 +275,7 @@ profiles:
       - technical-design-governor
       - architecture-design-governor
       - test-design-governor
+      - test-data-governor
       - design-architecture-reviewer
       - delivery-plan-templates
       - delivery-plan-reviewer
@@ -278,6 +291,7 @@ profiles:
       - technical_design.json
       - architecture_design.json
       - test_design.json
+      - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
       - delivery_plan_review.json
@@ -350,6 +364,7 @@ profiles:
       - artifact: technical_design.json
       - artifact: architecture_design.json
       - artifact: test_design.json
+      - artifact: test_data_plan.json
       - artifact: docs_quality.json
         accepted_decisions:
           - pass

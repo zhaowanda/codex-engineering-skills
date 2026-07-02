@@ -59,6 +59,7 @@ def empty_technical(doc_id: str, title: str) -> dict[str, Any]:
         "acceptance_mapping": [],
         "ui_ue_design": [],
         "test_strategy": [],
+        "test_design_ref": "test_design.json",
         "open_questions": [],
     }
 
@@ -126,7 +127,8 @@ def example_technical(doc_id: str, title: str) -> dict[str, Any]:
         "design_traceability_matrix": [{"requirement_id": "REQ-1", "process_flow_refs": ["checkout review"], "module_refs": ["src/checkout/CheckoutSummary.tsx"], "data_flow_refs": ["pricing API->checkout summary"], "api_contract_refs": ["discounts[]"], "ui_ue_refs": ["checkout summary"], "test_refs": ["UI-1"], "acceptance_refs": ["AC-1"], "selected_option_id": "T1", "decision_reason": "lowest risk"}],
         "acceptance_mapping": [{"acceptance_id": "AC-1", "design_refs": ["checkout summary"], "evidence_required": ["browser screenshot"]}],
         "ui_ue_design": [{"page_or_route": "/checkout", "user_goal": "confirm price", "entry_point": "cart checkout", "layout": "summary panel", "interaction_flow": ["open page"], "states": ["loading", "success", "error"], "field_rules": ["show each discount label and amount"], "permission_visibility": "buyer own cart", "acceptance_evidence": "browser screenshot"}],
-        "test_strategy": [{"case": "discount breakdown visible", "evidence": "browser"}],
+        "test_strategy": [{"summary": "browser, regression, and acceptance evidence required", "evidence": ["browser screenshot", "regression evidence"], "test_design_ref": "test_design.json"}],
+        "test_design_ref": "test_design.json",
     })
     return data
 

@@ -27,11 +27,14 @@ def test_empty_templates_have_required_top_level_sections() -> None:
         assert key in technical
     for key in ["architecture_options", "selected_architecture", "component_boundaries", "module_topology", "repo_responsibilities", "rollback_strategy"]:
         assert key in architecture
+    assert technical["test_design_ref"] == "test_design.json"
 
 
 def test_example_templates_pass_design_reviewer() -> None:
     technical = render_design_templates.example_technical("REQ-1", "Checkout discount display")
     architecture = render_design_templates.example_architecture("REQ-1", "Checkout discount display")
+    assert "test_design_ref" in technical["test_strategy"][0]
+    assert "steps" not in technical["test_strategy"][0]
     result = design_arch_review.review(technical, architecture)
     assert result["decision"] == "pass"
     assert result["readiness_gate"]["implementation_allowed"]

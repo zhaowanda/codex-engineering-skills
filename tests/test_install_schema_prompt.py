@@ -75,6 +75,25 @@ def test_skill_docs_do_not_use_source_tree_script_paths() -> None:
     assert not offenders
 
 
+def test_skill_docs_script_commands_resolve_to_local_scripts() -> None:
+    offenders = []
+    pattern = re.compile(r"python3 scripts/([A-Za-z0-9_./-]+\.py)")
+    for path in sorted((ROOT / "skills").glob("*/*/SKILL.md")):
+        text = path.read_text(encoding="utf-8")
+        for match in pattern.finditer(text):
+            script = match.group(1)
+            if script == "codex_eng.py":
+                continue
+            if not (path.parent / "scripts" / script).exists():
+                offenders.append(f"{path.relative_to(ROOT).as_posix()}: scripts/{script}")
+    assert not offenders
+
+
+def test_benchmark_skill_documents_repository_root_cli() -> None:
+    text = (ROOT / "skills/core/benchmark-governor/SKILL.md").read_text(encoding="utf-8")
+    assert "python3 scripts/codex_eng.py run benchmark --root ." in text
+
+
 def run_all() -> None:
     test_install_skills_dry_run_counts_core_and_templates()
     test_default_target_uses_codex_skills_dir()
@@ -82,6 +101,8 @@ def run_all() -> None:
     test_artifact_schema_inventory_has_many_schemas()
     test_prompt_pack_validates_standard_prompts()
     test_skill_docs_do_not_use_source_tree_script_paths()
+    test_skill_docs_script_commands_resolve_to_local_scripts()
+    test_benchmark_skill_documents_repository_root_cli()
 
 
 if __name__ == "__main__":
