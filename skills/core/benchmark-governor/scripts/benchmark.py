@@ -45,6 +45,10 @@ def report(root: Path) -> dict[str, Any]:
     auto_runner_text = (root / "skills/core/auto-runner/scripts/auto_runner.py").read_text(encoding="utf-8") if (root / "skills/core/auto-runner/scripts/auto_runner.py").exists() else ""
     profiles = run_json(root, ["python3", "scripts/codex_eng.py", "scenarios"])["json"]
     scenario_catalog_count = int(profiles.get("scenario_count") or 0)
+    coverage_matrix = profiles.get("coverage_matrix", []) if isinstance(profiles.get("coverage_matrix"), list) else []
+    matrix_rows_with_gates = [
+        item for item in coverage_matrix if isinstance(item, dict) and item.get("scenario_id") and item.get("required_skills") and item.get("required_gates")
+    ]
     documented_text = (root / "docs/scenario-guide.md").read_text(encoding="utf-8") if (root / "docs/scenario-guide.md").exists() else ""
     documented_scenarios = [
         item for item in profiles.get("scenarios", []) if isinstance(item, dict) and str(item.get("id") or "") in documented_text
@@ -69,6 +73,8 @@ def report(root: Path) -> dict[str, Any]:
         blockers.append({"source": "skill_health", "message": "skill health blocked"})
     if scenario_catalog_count and len(documented_scenarios) != scenario_catalog_count:
         blockers.append({"source": "scenario_catalog", "message": "not all scenario catalog entries are documented"})
+    if scenario_catalog_count and len(matrix_rows_with_gates) != scenario_catalog_count:
+        blockers.append({"source": "scenario_matrix", "message": "not all scenarios have required skills and gate coverage"})
     if forward["returncode"] != 0:
         blockers.append({"source": "forward_test", "message": "forward test failed"})
     return {
@@ -87,11 +93,16 @@ def report(root: Path) -> dict[str, Any]:
             "human_output_available": "--format" in cli_text and "render_auto_human" in cli_text,
             "profile_scoring_available": "profile_selection_confidence" in auto_runner_text and "profile_selection_candidates" in auto_runner_text,
             "scenario_catalog_count": scenario_catalog_count,
+            "scenario_matrix_count": len(coverage_matrix),
+            "scenario_matrix_gate_coverage_count": len(matrix_rows_with_gates),
             "documented_scenario_count": len(documented_scenarios),
             "forward_tested_scenario_count": sum(1 for value in forward_scenario_results.values() if value),
             "test_file_count": len(tests),
             "privacy_decision": privacy["json"].get("decision"),
             "skill_health_decision": health["json"].get("decision"),
+            "skill_expert_level_count": health["json"].get("expert_level_count", 0),
+            "skill_advanced_or_better_count": health["json"].get("advanced_or_better_count", 0),
+            "skill_expert_readiness": health["json"].get("expert_readiness", ""),
             "forward_test_decision": forward["json"].get("decision"),
         },
         "blockers": blockers,

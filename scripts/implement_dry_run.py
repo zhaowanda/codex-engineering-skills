@@ -101,6 +101,8 @@ def design_chain_blockers(artifact_dir: Path) -> list[str]:
     blockers.extend(require_artifact(artifact_dir, "spec", "spec.json", {"ready_for_design", "pass"}))
     blockers.extend(require_artifact(artifact_dir, "technical_design", "technical_design.json"))
     blockers.extend(require_artifact(artifact_dir, "architecture_design", "architecture_design.json"))
+    blockers.extend(require_artifact(artifact_dir, "test_design", "test_design.json", {"pass", "ready"}))
+    blockers.extend(require_artifact(artifact_dir, "docs_quality", "docs_quality.json", {"pass", "ready"}))
     blockers.extend(review_allows_implementation(artifact_dir, "design_architecture_review.json"))
     blockers.extend(review_allows_implementation(artifact_dir, "delivery_plan_review.json"))
     return blockers

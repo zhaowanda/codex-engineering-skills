@@ -32,24 +32,55 @@ def text_of(*values: Any) -> str:
     return json.dumps(values, ensure_ascii=False).lower()
 
 
+def case_steps(title: str) -> list[str]:
+    target = title or "acceptance criterion"
+    return [
+        f"prepare representative data for: {target}",
+        f"execute requirement path for: {target}",
+        f"verify observable result matches: {target}",
+    ]
+
+
+def regression_steps(title: str) -> list[str]:
+    target = title or "changed behavior"
+    return [
+        f"prepare existing baseline scenario adjacent to: {target}",
+        f"execute unchanged behavior after the change",
+        "verify existing behavior and compatibility remain unchanged",
+    ]
+
+
 def render(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
     acceptance = [item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
     requirements = [item for item in as_list(spec.get("requirements")) if isinstance(item, dict)]
     signals = text_of(spec, technical, architecture)
     cases: list[dict[str, Any]] = []
     for idx, ac in enumerate(acceptance or [{"id": "AC-1", "criteria": spec.get("requirement_summary", "")}]):
+        ac_id = str(ac.get("id") or f"AC-{idx + 1}")
+        title = str(ac.get("criteria") or ac.get("summary") or "verify acceptance criterion")
+        evidence = as_list(ac.get("evidence_required")) or ["test execution evidence"]
         cases.append({
             "id": f"TC-{idx + 1}",
-            "acceptance_id": str(ac.get("id") or f"AC-{idx + 1}"),
+            "acceptance_id": ac_id,
             "type": "functional",
-            "title": str(ac.get("criteria") or ac.get("summary") or "verify acceptance criterion"),
+            "title": title,
             "preconditions": [],
-            "steps": ["prepare data", "execute affected behavior", "verify expected result"],
-            "expected_result": str(ac.get("criteria") or "acceptance criterion is satisfied"),
-            "evidence_required": as_list(ac.get("evidence_required")) or ["test execution evidence"],
+            "steps": case_steps(title),
+            "expected_result": title,
+            "evidence_required": evidence,
+        })
+        cases.append({
+            "id": f"TC-{idx + 1}-REG",
+            "acceptance_id": ac_id,
+            "type": "regression",
+            "title": f"regression coverage for {title}",
+            "preconditions": ["existing adjacent behavior is available"],
+            "steps": regression_steps(title),
+            "expected_result": "existing behavior remains compatible while the acceptance criterion still passes",
+            "evidence_required": sorted(set(evidence + ["regression evidence"])),
         })
     if any(term in signals for term in ["permission", "role", "tenant", "权限", "角色", "租户"]):
-        cases.append({"id": "TC-PERM-1", "acceptance_id": "", "type": "permission", "title": "unauthorized role cannot access changed behavior", "preconditions": ["restricted role"], "steps": ["attempt changed behavior"], "expected_result": "access denied or hidden", "evidence_required": ["permission test evidence"]})
+        cases.append({"id": "TC-PERM-1", "acceptance_id": "", "type": "permission", "title": "unauthorized role cannot access changed behavior", "preconditions": ["restricted role"], "steps": ["prepare restricted role", "attempt changed behavior", "verify access is denied or hidden"], "expected_result": "access denied or hidden", "evidence_required": ["permission test evidence"]})
     if len(as_list(architecture.get("repo_responsibilities"))) > 1 or "cross" in signals:
         cases.append({"id": "TC-INT-1", "acceptance_id": "", "type": "integration", "title": "cross-component integration remains compatible", "preconditions": ["all changed components deployed"], "steps": ["execute end-to-end flow"], "expected_result": "contracts remain compatible", "evidence_required": ["integration test evidence"]})
     if any(term in signals for term in ["ui", "page", "route", "frontend", "browser"]):
@@ -86,6 +117,15 @@ def validate_design(data: dict[str, Any]) -> dict[str, Any]:
         for key in ["id", "type", "title", "steps", "expected_result", "evidence_required"]:
             if not case.get(key):
                 blockers.append({"source": f"test_cases[{idx}].{key}", "message": f"{key} is required"})
+    generic_steps = {"prepare data", "execute affected behavior", "verify expected result"}
+    for idx, case in enumerate(cases):
+        steps = {str(item).strip().lower() for item in as_list(case.get("steps"))}
+        if steps & generic_steps:
+            blockers.append({"source": f"test_cases[{idx}].steps", "message": "generic test steps are not allowed"})
+    if acceptance_count:
+        for ac_id in mapped:
+            if not any(case.get("acceptance_id") == ac_id and case.get("type") == "regression" for case in cases):
+                blockers.append({"source": "regression_mapping", "message": f"acceptance criterion lacks regression coverage: {ac_id}"})
     if not data.get("regression_scope"):
         warnings.append({"source": "regression_scope", "message": "regression scope is recommended"})
     decision = "block" if blockers else "pass"

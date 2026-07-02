@@ -74,6 +74,10 @@ def test_skill_health_runs_on_repo() -> None:
     assert result["schema"] == "codex-skill-health-v1"
     assert result["decision"] in {"pass", "warn"}
     assert result["skill_count"] > 10
+    assert result["advanced_or_better_count"] > 0
+    assert result["expert_readiness"] in {"expert", "advanced", "mixed"}
+    assert len(result["skill_scores"]) == result["skill_count"]
+    assert {"skill", "score", "level", "dimensions"}.issubset(result["skill_scores"][0])
     assert not [item for item in result["warnings"] if item["message"] == "skill is not listed in README"]
 
 
@@ -150,6 +154,10 @@ def test_workflow_profiles_reference_existing_skills() -> None:
         assert profile.get("required_gate_artifacts")
         gate_artifacts = {item["artifact"] for item in profile["required_gate_artifacts"]}
         assert gate_artifacts.issubset(set(profile.get("expected_artifacts", [])))
+        if profile["name"] != "release_readiness":
+            expected = set(profile.get("expected_artifacts", []))
+            assert {"test_design.json", "docs_quality.json"}.issubset(expected)
+            assert {"test_design.json", "docs_quality.json"}.issubset(gate_artifacts)
     frontend = next(item for item in profiles["profiles"] if item["name"] == "frontend_change")
     assert "frontend-acceptance-runner" in frontend["required_skills"]
     assert "test-evidence-gate" in frontend["required_skills"]
@@ -280,6 +288,69 @@ def test_human_doc_review_warns_thin_doc() -> None:
         assert result["warnings"]
 
 
+def test_human_doc_review_strict_blocks_warnings() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "doc.md"
+        doc.write_text("short\n", encoding="utf-8")
+        result = human_doc_review.review(doc, strict=True)
+        assert result["decision"] == "block"
+        assert result["blockers"]
+
+
+def test_human_doc_review_strict_is_doc_type_aware_for_specs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/specs/REQ-1.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# Order export Spec\n\n"
+            "## Executive Summary\n\n"
+            "Review focus: confirm the requirement boundary, acceptance coverage, and evidence links before design starts.\n\n"
+            "## Background And Goals\n\n"
+            "Background: operations needs a clear export requirement. Goal: define scope and acceptance criteria without committing to implementation options.\n\n"
+            "## Scope\n\n"
+            "The scope is exporting filtered order data for authorized users while preserving existing behavior outside the export flow.\n\n"
+            "This scope explicitly excludes schema migration, release sequencing, rollback ownership, and design option selection because those belong to downstream design and release documents.\n\n"
+            "## Requirement Clarification\n\n"
+            "Clarification log: no open product questions remain. Confirmed understanding: export includes order id and status.\n\n"
+            "The clarification outcome is specific enough for design because the actor, exported fields, and expected evidence are all named.\n\n"
+            "## Acceptance Criteria\n\n"
+            "- `AC-1` exported file contains order id and status.\n\n"
+            "The acceptance criterion is intentionally narrow so the delivery plan can map it to functional and regression test cases without inventing extra product behavior.\n\n"
+            "## Requirement Traceability Diagram\n\n"
+            "Traceability links `AC-1` to downstream design, test, and release evidence.\n\n"
+            "```mermaid\nflowchart LR\nREQ-->AC1\n```\n\n"
+            "## Evidence References\n\n"
+            "- `spec.json`\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc, strict=True)
+        assert result["doc_type"] == "spec"
+        assert result["decision"] != "block"
+        blocked_sources = {item["source"] for item in result["blockers"]}
+        assert "options" not in blocked_sources
+        assert "rollback" not in blocked_sources
+
+
+def test_human_doc_review_strict_requires_design_depth_for_designs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/designs/REQ-1.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# Order export Design\n\n"
+            "## Decision Records\n\n"
+            "Decision: implement scoped export behavior.\n\n"
+            "## Evidence References\n\n"
+            "- `technical_design.json`\n\n"
+            "```mermaid\nflowchart LR\nA-->B\n```\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc, strict=True)
+        assert result["doc_type"] == "design"
+        assert result["decision"] == "block"
+        blocked_sources = {item["source"] for item in result["blockers"]}
+        assert {"options", "risk", "rollback", "test", "traceability", "implementation_boundary"}.issubset(blocked_sources)
+
+
 def test_human_doc_review_warns_missing_formal_sections_and_diagram() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "doc.md"
@@ -300,7 +371,7 @@ def test_human_doc_review_warns_outline_only_document() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "doc.md"
         doc.write_text(
-            "# Design\n\n"
+            "# Delivery Review\n\n"
             "## Summary\n\n"
             "- Scope\n- Decision\n- Options\n- Risk\n- Evidence\n- Rollback\n"
             "- Background\n- Goal\n- Clarification\n- Acceptance\n- Test\n"
@@ -359,6 +430,17 @@ def test_scenario_catalog_documents_supported_development_scenarios() -> None:
     guide = (ROOT / "docs/scenario-guide.md").read_text(encoding="utf-8")
     for scenario_id in scenario_ids:
         assert scenario_id in guide
+    matrix = result["coverage_matrix"]
+    assert len(matrix) == result["scenario_count"]
+    matrix_by_id = {item["scenario_id"]: item for item in matrix}
+    for scenario_id in scenario_ids:
+        assert matrix_by_id[scenario_id]["required_skills"]
+        assert matrix_by_id[scenario_id]["required_gates"]
+    for scenario_id in {"one_line_request", "long_prd", "bugfix", "frontend_change", "cross_repo_api", "data_migration"}:
+        gates = set(matrix_by_id[scenario_id]["required_gates"])
+        assert {"technical_design.json", "architecture_design.json", "test_design.json", "docs_quality.json", "git_worktree_evidence.json", "edit_permit.json"}.issubset(gates)
+        anti_bypass = " ".join(matrix_by_id[scenario_id]["anti_bypass"])
+        assert "pull --ff-only" in anti_bypass
     for item in result["scenarios"]:
         if item["id"] in {"one_line_request", "long_prd", "bugfix", "frontend_change", "cross_repo_api", "data_migration"}:
             next_step = item["next_step"]
@@ -483,6 +565,8 @@ def write_ready_design_gates(root: Path) -> None:
     (root / "spec.json").write_text('{ "decision": "ready_for_design" }', encoding="utf-8")
     (root / "technical_design.json").write_text('{ "schema": "codex-technical-design-v1" }', encoding="utf-8")
     (root / "architecture_design.json").write_text('{ "schema": "codex-architecture-design-v1" }', encoding="utf-8")
+    (root / "test_design.json").write_text('{ "decision": "pass", "test_cases": [{ "id": "TC-1" }] }', encoding="utf-8")
+    (root / "docs_quality.json").write_text('{ "decision": "pass", "blockers": [] }', encoding="utf-8")
     (root / "design_architecture_review.json").write_text(
         '{ "decision": "pass", "readiness_gate": { "implementation_allowed": true } }',
         encoding="utf-8",
@@ -534,7 +618,51 @@ def test_implement_dry_run_blocks_without_design_chain_even_if_git_ready() -> No
         assert result["decision"] == "blocked"
         assert "technical_design.json" in result["missing_gates"]
         assert "architecture_design.json" in result["missing_gates"]
+        assert "test_design.json" in result["missing_gates"]
+        assert "docs_quality.json" in result["missing_gates"]
         assert "design_architecture_review.json" in result["missing_gates"]
+
+
+def test_implement_dry_run_blocks_without_test_design() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-1.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        write_ready_design_gates(root)
+        (root / "test_design.json").unlink()
+        (root / "delivery_plan.json").write_text(
+            '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "allowed_files": ["src/app.py"] }] }',
+            encoding="utf-8",
+        )
+        (root / "git_worktree_evidence.json").write_text('{ "decision": "ready", "fetched": true, "base_updated": true }', encoding="utf-8")
+        (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+        result = implement_dry_run.run(root, docs_root=docs_root)
+        assert result["decision"] == "blocked"
+        assert "test_design.json" in result["missing_gates"]
+
+
+def test_implement_dry_run_blocks_when_docs_quality_warns() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        manifest = docs_root / "indexes/REQ-1.manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        write_ready_design_gates(root)
+        (root / "docs_quality.json").write_text('{ "decision": "warn", "warnings": [{ "source": "depth" }] }', encoding="utf-8")
+        (root / "delivery_plan.json").write_text(
+            '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "allowed_files": ["src/app.py"] }] }',
+            encoding="utf-8",
+        )
+        (root / "git_worktree_evidence.json").write_text('{ "decision": "ready", "fetched": true, "base_updated": true }', encoding="utf-8")
+        (root / "edit_permit.json").write_text('{ "decision": "ready" }', encoding="utf-8")
+        result = implement_dry_run.run(root, docs_root=docs_root)
+        assert result["decision"] == "blocked"
+        assert "docs_quality.json is not ready" in result["missing_gates"]
 
 
 def test_implement_dry_run_requires_git_fetch_and_pull_evidence() -> None:
@@ -659,8 +787,12 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["human_output_available"] is True
     assert metrics["profile_scoring_available"] is True
     assert metrics["scenario_catalog_count"] >= 8
+    assert metrics["scenario_matrix_count"] == metrics["scenario_catalog_count"]
+    assert metrics["scenario_matrix_gate_coverage_count"] == metrics["scenario_catalog_count"]
     assert metrics["documented_scenario_count"] == metrics["scenario_catalog_count"]
     assert metrics["forward_tested_scenario_count"] >= 8
+    assert metrics["skill_advanced_or_better_count"] > 0
+    assert metrics["skill_expert_readiness"] in {"expert", "advanced", "mixed"}
 
 
 def run_all() -> None:
@@ -680,6 +812,9 @@ def run_all() -> None:
     test_overlay_health_blocks_missing_registry()
     test_human_doc_review_detects_local_path()
     test_human_doc_review_warns_thin_doc()
+    test_human_doc_review_strict_blocks_warnings()
+    test_human_doc_review_strict_is_doc_type_aware_for_specs()
+    test_human_doc_review_strict_requires_design_depth_for_designs()
     test_human_doc_review_warns_missing_formal_sections_and_diagram()
     test_human_doc_review_warns_outline_only_document()
     test_human_doc_review_warns_chinese_doc_with_english_template_terms()
@@ -694,6 +829,8 @@ def run_all() -> None:
     test_codex_eng_next_human_cli_runs()
     test_implement_dry_run_blocks_missing_gates()
     test_implement_dry_run_allows_scoped_ready_artifacts()
+    test_implement_dry_run_blocks_without_test_design()
+    test_implement_dry_run_blocks_when_docs_quality_warns()
     test_implement_dry_run_requires_git_fetch_and_pull_evidence()
     test_implement_dry_run_requires_docs_git_repo()
     test_implement_dry_run_accepts_git_plan_summary()

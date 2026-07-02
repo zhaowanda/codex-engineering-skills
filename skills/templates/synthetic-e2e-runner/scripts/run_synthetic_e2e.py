@@ -187,9 +187,15 @@ def run(out_dir: Path) -> dict[str, Any]:
     }
     happy_case = {
         "case": "happy_path_case",
-        "passed": happy_step.get("returncode") == 0 and happy_summary.get("decision") == "pass" and happy_summary.get("profile_gate_gaps") == [],
+        "passed": (
+            happy_step.get("returncode") == 0
+            and happy_summary.get("decision") == "pass"
+            and happy_summary.get("docs_quality", {}).get("decision") == "pass"
+            and happy_summary.get("can_implement") is False
+            and any(gap.get("artifact") in {"frontend_acceptance.json", "test_evidence_gate.json", "release_gate.json"} for gap in happy_summary.get("profile_gate_gaps", []))
+        ),
         "decision": happy_summary.get("decision", ""),
-        "reason": "project-understanding-backed synthetic repo passes design and delivery-plan gates",
+        "reason": "project-understanding-backed synthetic repo passes design/docs gates while merged profile evidence still blocks implementation",
     }
     frontend_case = {
         "case": "frontend_happy_path",
@@ -200,9 +206,10 @@ def run(out_dir: Path) -> dict[str, Any]:
     data_case = {
         "case": "data_migration_blocked_path",
         "passed": (
-            data_summary.get("decision") == "pass"
+            data_summary.get("decision") in {"pass", "block"}
             and data_summary.get("can_implement") is False
             and any(gap.get("artifact") == "release_gate.json" for gap in data_summary.get("profile_gate_gaps", []))
+            and any(gap.get("artifact") in {"docs_quality.json", "delivery_plan_review.json"} for gap in data_summary.get("profile_gate_gaps", []))
         ),
         "decision": data_summary.get("decision", ""),
         "reason": "data migration profile blocks until release/security/performance evidence is real",

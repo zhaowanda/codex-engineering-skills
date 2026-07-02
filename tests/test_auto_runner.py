@@ -59,7 +59,7 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert (out / "delivery_plan.json").exists()
         assert (out / "delivery_plan_review.json").exists()
         assert (out / "auto_run_summary.json").exists()
-        assert result["workflow_profile"]["name"] in {"small_feature", "cross_repo_api", "bugfix", "frontend_change"}
+        assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) in {"small_feature", "cross_repo_api", "bugfix", "frontend_change", "data_migration"}
         assert "delivery-plan-reviewer" in result["required_gates"]
         assert "profile_gate_gaps" in result
         assert result["profile_selection_score"] > 0
@@ -160,7 +160,8 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         assert "## 五、业务流程" in design_doc
         assert "## 六、模块与接口设计" in design_doc
         assert "## 九、交付执行计划" in design_doc
-        assert "## 十、测试与验收证据" in design_doc
+        assert "## 十、需求追踪关系" in design_doc
+        assert "## 十一、测试与验收证据" in design_doc
         assert "### 测试用例" in design_doc
         assert "`TC-1`" in design_doc
         assert "关联验收" in design_doc
@@ -296,7 +297,7 @@ def test_auto_runner_explicit_profile_selects_required_gates() -> None:
             out=out,
             profile="frontend_change",
         )
-        assert result["workflow_profile"]["name"] == "frontend_change"
+        assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "frontend_change"
         assert "frontend-acceptance-runner" in result["required_gates"]
         assert "test-evidence-gate" in result["required_gates"]
         assert (out / "frontend_acceptance.json").exists()
@@ -345,7 +346,7 @@ def test_auto_runner_routes_bugfix_to_bugfix_profile() -> None:
         )
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-BUG", out=out)
-        assert result["workflow_profile"]["name"] == "bugfix"
+        assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "bugfix"
         assert result["profile_selection_reason"]["mode"] == "lane"
         assert "git-worktree-governor" in result["required_gates"]
 
@@ -366,7 +367,7 @@ def test_auto_runner_routes_long_prd_to_small_feature_full_design_path() -> None
         req.write_text("\n".join(lines), encoding="utf-8")
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-LONG", out=out)
-        assert result["workflow_profile"]["name"] == "small_feature"
+        assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "small_feature"
         assert result["profile_selection_reason"]["lane"] == "large_prd"
         assert "architecture-design-governor" in result["required_gates"]
 
@@ -391,10 +392,36 @@ def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
         )
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-COMPLEX", out=out)
-        assert result["workflow_profile"]["name"] == "data_migration"
+        assert result["workflow_profile"]["base_profile"] == "data_migration"
+        assert result["workflow_profile"]["composition_mode"] == "merged"
+        assert "frontend_change" in result["workflow_profile"]["overlay_profiles"]
+        assert "cross_repo_api" in result["workflow_profile"]["overlay_profiles"]
         assert result["profile_selection_reason"]["matched_impact"] == "data"
+        assert result["profile_selection_reason"]["composition_mode"] == "merged"
         assert "data-security-governor" in result["required_gates"]
         assert "performance-governor" in result["required_gates"]
+        assert "frontend-acceptance-runner" in result["required_gates"]
+        assert "traceability-governor" in result["required_gates"]
+        assert (out / "frontend_acceptance.json").exists()
+        assert any(gap["artifact"] == "frontend_acceptance.json" for gap in result["profile_gate_gaps"])
+
+
+def test_auto_runner_merges_repo_context_with_frontend_profile() -> None:
+    spec = {
+        "lane": "standard_requirement",
+        "impact_surface": [
+            {"area": "ui"},
+            {"area": "api"},
+        ],
+    }
+    profile, reason = auto_runner.select_workflow_profile_with_reason(spec, has_repo=True)
+    assert profile["composition_mode"] == "merged"
+    assert profile["base_profile"] == "cross_repo_api"
+    assert "frontend_change" in profile["overlay_profiles"]
+    assert "frontend-acceptance-runner" in profile["required_skills"]
+    assert "project-understanding-runner" in profile["required_skills"]
+    assert "frontend_acceptance.json" in profile["expected_artifacts"]
+    assert reason["composition_mode"] == "merged"
 
 
 def test_auto_runner_release_profile_only_checks_release_artifacts() -> None:

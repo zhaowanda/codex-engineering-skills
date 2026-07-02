@@ -151,7 +151,7 @@ def run_docs_quality(docs_root: Path | None, docs_sync: dict[str, Any], out: Pat
     warnings: list[dict[str, Any]] = []
     for rel in docs_sync.get("human_docs", []) if isinstance(docs_sync.get("human_docs"), list) else []:
         doc_path = docs_root / str(rel)
-        proc = subprocess.run(["python3", "skills/core/human-doc-reviewer/scripts/human_doc_review.py", "--file", str(doc_path)], cwd=ROOT, text=True, capture_output=True)
+        proc = subprocess.run(["python3", "skills/core/human-doc-reviewer/scripts/human_doc_review.py", "--file", str(doc_path), "--strict"], cwd=ROOT, text=True, capture_output=True)
         data: dict[str, Any] = {}
         if proc.stdout.strip():
             try:
@@ -170,7 +170,7 @@ def run_docs_quality(docs_root: Path | None, docs_sync: dict[str, Any], out: Pat
             blockers.append({"file": str(doc_path), "source": "human_doc_review", "message": "review command failed"})
     result = {
         "schema": "codex-docs-quality-aggregate-v1",
-        "decision": "block" if blockers else "pass",
+        "decision": "block" if blockers else "warn" if warnings else "pass",
         "blockers": blockers,
         "warnings": warnings,
         "reviews": reviews,
@@ -353,6 +353,54 @@ def profile_selection_confidence(candidates: list[dict[str, Any]]) -> str:
     return "low"
 
 
+def unique_extend(target: list[Any], values: list[Any]) -> None:
+    seen = {json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, dict) else str(item) for item in target}
+    for value in values:
+        key = json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, dict) else str(value)
+        if key not in seen:
+            target.append(value)
+            seen.add(key)
+
+
+def merge_workflow_profiles(base: dict[str, Any], overlays: list[dict[str, Any]]) -> dict[str, Any]:
+    merged = json.loads(json.dumps(base, ensure_ascii=False))
+    source_names = [str(base.get("name") or "")]
+    for overlay in overlays:
+        overlay_name = str(overlay.get("name") or "")
+        if overlay_name and overlay_name not in source_names:
+            source_names.append(overlay_name)
+        for key in ["required_skills", "optional_skills", "expected_artifacts"]:
+            values = as_list(overlay.get(key))
+            if values:
+                merged.setdefault(key, [])
+                unique_extend(merged[key], values)
+        if as_list(overlay.get("required_gate_artifacts")):
+            merged.setdefault("required_gate_artifacts", [])
+            unique_extend(merged["required_gate_artifacts"], as_list(overlay.get("required_gate_artifacts")))
+        if as_list(overlay.get("artifact_steps")):
+            merged.setdefault("artifact_steps", [])
+            unique_extend(merged["artifact_steps"], as_list(overlay.get("artifact_steps")))
+        if as_list(overlay.get("notes")):
+            merged.setdefault("notes", [])
+            unique_extend(merged["notes"], as_list(overlay.get("notes")))
+    merged["name"] = "+".join(name for name in source_names if name) or str(base.get("name") or "combined")
+    merged["base_profile"] = str(base.get("name") or "")
+    merged["overlay_profiles"] = [name for name in source_names[1:] if name]
+    merged["composition_mode"] = "merged" if merged["overlay_profiles"] else "single"
+    return merged
+
+
+def impact_overlay_profile_names(impacts: set[str], has_repo: bool) -> list[str]:
+    names: list[str] = []
+    if has_repo or "api" in impacts:
+        names.append("cross_repo_api")
+    if "ui" in impacts:
+        names.append("frontend_change")
+    if {"data", "security", "database", "configuration", "performance"} & impacts:
+        names.append("data_migration")
+    return names
+
+
 def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     profiles = load_profile_registry()
     lane = str(spec.get("lane") or "")
@@ -371,6 +419,8 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
             "reason": reason,
             "lane": lane,
             "impacts": sorted(impacts),
+            "matched_impact": "",
+            "matched_impacts": sorted(impacts),
             "profile_selection_score": next((item.get("score", 0) for item in candidates if item.get("profile") == selected_profile), 0),
             "profile_selection_confidence": confidence,
             "profile_selection_candidates": candidates,
@@ -379,31 +429,70 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
         payload.update(extra)
         return payload
 
+    base_profile: dict[str, Any]
+    mode = ""
+    reason = ""
     if explicit_profile and explicit_profile in profiles:
-        return profiles[explicit_profile], reason_payload("explicit_profile", explicit_profile, "Profile was explicitly requested.")
-    if has_repo and "cross_repo_api" in profiles:
-        return profiles["cross_repo_api"], reason_payload("repo_context", "cross_repo_api", "Project understanding was requested, so cross-repo/API contract gates are required.")
-    if lane in {"bugfix", "hotfix"}:
+        base_profile = profiles[explicit_profile]
+        mode = "explicit_profile"
+        reason = "Profile was explicitly requested."
+    elif lane in {"bugfix", "hotfix"}:
+        base_profile = profiles.get("bugfix", {})
         for profile in profiles.values():
             if lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
-                profile_name = str(profile.get("name") or "")
-                return profile, reason_payload("lane", profile_name, f"Spec lane {lane} takes precedence over impact routing for defect containment.")
-    priority = [
-        ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
-        ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
-        ("api", "cross_repo_api", "API changes require contract and traceability gates."),
-        ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
-    ]
-    for impact, profile_name, reason in priority:
-        if impact in impacts and profile_name in profiles:
-            return profiles[profile_name], reason_payload("impact_surface", profile_name, reason, matched_impact=impact)
-    for profile in profiles.values():
-        if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
-            profile_name = str(profile.get("name") or "")
-            return profile, reason_payload("lane", profile_name, f"Spec lane {lane} is declared in profile trigger_lanes.")
-    fallback = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
-    fallback_name = str(fallback.get("name") or "small_feature")
-    return fallback, reason_payload("fallback", fallback_name, "No explicit, repository, impact, or lane trigger matched; using default small feature workflow.")
+                base_profile = profile
+                break
+        mode = "lane"
+        reason = f"Spec lane {lane} anchors defect containment; impact overlays are merged instead of replacing bugfix gates."
+    else:
+        priority = [
+            ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
+            ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
+            ("api", "cross_repo_api", "API changes require contract and traceability gates."),
+            ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
+        ]
+        base_profile = {}
+        for impact, profile_name, item_reason in priority:
+            if impact in impacts and profile_name in profiles:
+                base_profile = profiles[profile_name]
+                mode = "impact_surface"
+                reason = item_reason
+                break
+        if not base_profile and has_repo and "cross_repo_api" in profiles:
+            base_profile = profiles["cross_repo_api"]
+            mode = "repo_context"
+            reason = "Project understanding was requested, so cross-repo/API contract gates are required."
+        if not base_profile:
+            for profile in profiles.values():
+                if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
+                    base_profile = profile
+                    mode = "lane"
+                    reason = f"Spec lane {lane} is declared in profile trigger_lanes."
+                    break
+        if not base_profile:
+            base_profile = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
+            mode = "fallback"
+            reason = "No explicit, repository, impact, or lane trigger matched; using default small feature workflow."
+    overlay_names = [name for name in impact_overlay_profile_names(impacts, has_repo) if name in profiles and name != str(base_profile.get("name") or "")]
+    overlays = [profiles[name] for name in overlay_names]
+    selected = merge_workflow_profiles(base_profile, overlays) if overlays else base_profile
+    selected_name = str(selected.get("name") or base_profile.get("name") or "small_feature")
+    primary_impact = next((item for item in ["data", "security", "api", "ui"] if item in impacts), "")
+    payload = reason_payload(
+        mode,
+        selected_name,
+        reason,
+        matched_impact=primary_impact,
+        base_profile=str(base_profile.get("name") or ""),
+        overlay_profiles=overlay_names,
+        composition_mode=selected.get("composition_mode", "single"),
+    )
+    if overlay_names:
+        base_name = str(base_profile.get("name") or "")
+        base_score = int(next((item.get("score", 0) for item in candidates if item.get("profile") == base_name), 0) or 0)
+        overlay_score = sum(int(next((item.get("score", 0) for item in candidates if item.get("profile") == name), 0) or 0) for name in overlay_names)
+        payload["profile_selection_score"] = base_score + overlay_score
+    return selected, payload
 
 
 def select_workflow_profile(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> dict[str, Any]:

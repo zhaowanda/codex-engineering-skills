@@ -54,11 +54,34 @@ def test_test_design_maps_acceptance_and_special_scopes() -> None:
     result = test_design.render(spec, technical, architecture)
     assert result["schema"] == "codex-test-design-v1"
     assert result["acceptance_count"] == 1
+    assert any(case["type"] == "regression" for case in result["test_cases"])
     assert result["permission_scope"]
     assert result["integration_scope"]
     assert result["frontend_scope"]
     validation = test_design.validate_design(result)
     assert validation["decision"] == "pass"
+
+
+def test_test_design_blocks_generic_steps() -> None:
+    data = {
+        "schema": "codex-test-design-v1",
+        "acceptance_count": 1,
+        "test_cases": [
+            {
+                "id": "TC-1",
+                "acceptance_id": "AC-1",
+                "type": "functional",
+                "title": "generic",
+                "steps": ["prepare data", "execute affected behavior", "verify expected result"],
+                "expected_result": "passes",
+                "evidence_required": ["test evidence"],
+            }
+        ],
+        "regression_scope": [{"area": "changed behavior"}],
+    }
+    validation = test_design.validate_design(data)
+    assert validation["decision"] == "block"
+    assert any(item["source"] == "test_cases[0].steps" for item in validation["blockers"])
 
 
 def test_configuration_detects_payment_email_database_and_blocks_missing_owners() -> None:
@@ -94,6 +117,7 @@ def test_data_security_detects_sensitive_signals() -> None:
 
 def run_all() -> None:
     test_test_design_maps_acceptance_and_special_scopes()
+    test_test_design_blocks_generic_steps()
     test_configuration_detects_payment_email_database_and_blocks_missing_owners()
     test_performance_requires_evidence_for_api_database_export_ui()
     test_data_security_detects_sensitive_signals()

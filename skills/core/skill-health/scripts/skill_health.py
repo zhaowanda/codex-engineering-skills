@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import py_compile
+import re
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,29 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def skill_expert_score(skill_text: str, script_text: str, script_count: int, test_refs: int) -> dict[str, Any]:
+    combined = f"{skill_text}\n{script_text}".lower()
+    dimensions = {
+        "instruction_structure": all(section in skill_text for section in ["## Rules", "## Output"]),
+        "execution_surface": script_count > 0,
+        "schema_contract": bool(re.search(r"codex-[a-z0-9-]+-v\d+", combined)),
+        "decision_contract": "decision" in combined and ("blockers" in combined or "warnings" in combined),
+        "test_coverage_signal": test_refs > 0,
+        "evidence_orientation": any(term in combined for term in ["evidence", "traceability", "readiness", "rollback", "gate"]),
+        "failure_path": any(term in combined for term in ["block", "blocked", "no_go", "needs_revision", "missing"]),
+    }
+    score = 50
+    score += 10 if dimensions["instruction_structure"] else 0
+    score += 10 if dimensions["execution_surface"] else 0
+    score += 10 if dimensions["schema_contract"] else 0
+    score += 8 if dimensions["decision_contract"] else 0
+    score += 8 if dimensions["test_coverage_signal"] else 0
+    score += 7 if dimensions["evidence_orientation"] else 0
+    score += 7 if dimensions["failure_path"] else 0
+    level = "expert" if score >= 90 else "advanced" if score >= 82 else "standard" if score >= 72 else "basic"
+    return {"score": min(score, 100), "level": level, "dimensions": dimensions}
+
+
 def check(root: Path) -> dict[str, Any]:
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -136,6 +160,7 @@ def check(root: Path) -> dict[str, Any]:
     tests_text = "\n".join(path.read_text(encoding="utf-8") for path in (root / "tests").glob("test_*.py"))
     skills = sorted(root.glob("skills/*/*/SKILL.md"))
     skill_names: set[str] = set()
+    expert_scores: list[dict[str, Any]] = []
     for skill in skills:
         rel = skill.relative_to(root).as_posix()
         skill_dir = skill.parent.relative_to(root).as_posix()
@@ -178,6 +203,12 @@ def check(root: Path) -> dict[str, Any]:
             test_ref_count = sum(1 for pattern in [name, name.replace("-", "_")] if pattern and pattern in tests_text)
             if test_ref_count == 0:
                 blockers.append({"source": rel, "message": "expert-gate skills require direct test coverage"})
+        test_refs = sum(1 for pattern in [name, name.replace("-", "_")] if pattern and pattern in tests_text)
+        expert_scores.append({
+            "skill": name or skill.parent.name,
+            "path": rel,
+            **skill_expert_score(skill_text, script_text, len(scripts), test_refs),
+        })
         for script in scripts:
             try:
                 py_compile.compile(str(script), doraise=True)
@@ -210,6 +241,10 @@ def check(root: Path) -> dict[str, Any]:
             if missing_skills:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "profile references unknown skills", "missing_skills": missing_skills})
             expected_artifacts = {str(item) for item in as_list(profile.get("expected_artifacts"))}
+            if profile_name != "release_readiness":
+                for required_artifact in ["test_design.json", "docs_quality.json"]:
+                    if required_artifact not in expected_artifacts:
+                        blockers.append({"source": f"workflow_profile.{profile_name}", "message": f"{required_artifact} must be listed in expected_artifacts"})
             for step in as_list(profile.get("artifact_steps")):
                 if not isinstance(step, dict):
                     blockers.append({"source": f"workflow_profile.{profile_name}", "message": "artifact_steps entries must be objects"})
@@ -228,6 +263,11 @@ def check(root: Path) -> dict[str, Any]:
             gates = as_list(profile.get("required_gate_artifacts"))
             if not gates:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required_gate_artifacts is required"})
+            gate_artifacts = {str(gate.get("artifact")) for gate in gates if isinstance(gate, dict)}
+            if profile_name != "release_readiness":
+                for required_artifact in ["test_design.json", "docs_quality.json"]:
+                    if required_artifact not in gate_artifacts:
+                        blockers.append({"source": f"workflow_profile.{profile_name}", "message": f"{required_artifact} must be listed in required_gate_artifacts"})
             for gate in gates:
                 if not isinstance(gate, dict):
                     blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required_gate_artifacts entries must be objects"})
@@ -268,10 +308,16 @@ def check(root: Path) -> dict[str, Any]:
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "duplicate stage artifact", "artifact": artifact_name})
             seen_stages.add(name)
             seen_artifacts.add(artifact_name)
+    expert_level_count = sum(1 for item in expert_scores if item["level"] == "expert")
+    advanced_or_better_count = sum(1 for item in expert_scores if item["level"] in {"expert", "advanced"})
     return {
         "schema": "codex-skill-health-v1",
         "decision": "block" if blockers else "warn" if warnings else "pass",
         "skill_count": len(skills),
+        "expert_level_count": expert_level_count,
+        "advanced_or_better_count": advanced_or_better_count,
+        "expert_readiness": "expert" if expert_level_count == len(skills) else "advanced" if advanced_or_better_count == len(skills) else "mixed",
+        "skill_scores": expert_scores,
         "blockers": blockers,
         "warnings": warnings,
     }
