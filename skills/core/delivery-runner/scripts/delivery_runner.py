@@ -21,6 +21,7 @@ FALLBACK_ORDER = [
     ("git", "git_worktree_evidence.json"),
     ("edit_permit", "edit_permit.json"),
     ("implementation", "implementation_completion_gate.json"),
+    ("post_change", "post_change_implementation_report.json"),
     ("review", "code_review_gate.json"),
     ("test", "test_evidence_gate.json"),
     ("environment", "environment_promotion.json"),
@@ -30,7 +31,7 @@ FALLBACK_ORDER = [
     ("post_release", "post_release_observation.json"),
 ]
 FALLBACK_IMPLEMENTATION_REQUIRED = ["spec", "technical_design", "architecture_design", "test_design", "delivery_plan", "delivery_plan_review", "design_review", "docs_quality", "git", "edit_permit"]
-FALLBACK_RELEASE_REQUIRED = ["implementation", "review", "test", "environment", "uat", "release_change", "release"]
+FALLBACK_RELEASE_REQUIRED = ["implementation", "post_change", "review", "test", "environment", "uat", "release_change", "release"]
 
 
 def load_json(path: Path) -> dict[str, Any]:

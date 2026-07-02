@@ -28,6 +28,7 @@ design review
 - `delivery_plan.json`
 - `design_architecture_review.json`
 - `implementation_completion_gate.json`
+- `post_change_implementation_report.json`
 - `write_guard_audit.json`
 - `code_review_gate.json`
 - `test_evidence_gate.json`

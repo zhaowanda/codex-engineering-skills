@@ -37,6 +37,10 @@ stages:
   - name: implementation
     artifact: implementation_completion_gate.json
     release_required: true
+  - name: post_change
+    artifact: post_change_implementation_report.json
+    next_command: python3 skills/core/post-change-skill-sync/scripts/sync_after_change.py --repo /path/to/repo --artifact-dir artifacts/REQ-001 --doc-id REQ-001
+    release_required: true
   - name: review
     artifact: code_review_gate.json
     release_required: true

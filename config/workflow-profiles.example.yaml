@@ -378,6 +378,7 @@ profiles:
       - release
     required_skills:
       - implementation-completion-gate
+      - post-change-skill-sync
       - code-review-gate
       - test-evidence-gate
       - environment-promotion-governor
@@ -388,6 +389,7 @@ profiles:
       - post-release-observer
     expected_artifacts:
       - implementation_completion_gate.json
+      - post_change_implementation_report.json
       - code_review_gate.json
       - test_evidence_gate.json
       - environment_promotion.json
@@ -435,6 +437,10 @@ profiles:
         accepted_decisions:
           - pass
           - ready
+      - artifact: post_change_implementation_report.json
+        accepted_decisions:
+          - pass
+          - warn
       - artifact: code_review_gate.json
         accepted_decisions:
           - pass

@@ -12,6 +12,7 @@ BLOCK_DECISIONS = {"block", "blocked", "no_go", "fail", "failed", "request_chang
 WARN_DECISIONS = {"conditional_go", "needs_review", "needs_revision", "needs_evidence", "warning"}
 COMMAND_HINTS = {
     "implementation_completion_gate": "python3 skills/core/implementation-completion-gate/scripts/implementation_complete.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/implementation_completion_gate.json",
+    "post_change_implementation_report": "python3 skills/core/post-change-skill-sync/scripts/sync_after_change.py --repo /path/to/repo --artifact-dir artifacts/REQ-001 --doc-id REQ-001",
     "code_review_gate": "python3 skills/core/code-review-gate/scripts/review_gate.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/code_review_gate.json",
     "test_evidence_gate": "python3 skills/core/test-evidence-gate/scripts/test_evidence_gate.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/test_evidence_gate.json",
     "ci_execution_evidence": "attach ci_execution_evidence.json with executed command results",
@@ -76,6 +77,7 @@ def collect_artifacts(artifact_dir: Path) -> dict[str, dict[str, Any]]:
         "delivery_plan",
         "design_architecture_review",
         "implementation_completion_gate",
+        "post_change_implementation_report",
         "write_guard_audit",
         "code_review_gate",
         "test_evidence_gate",
@@ -103,6 +105,7 @@ def required_for(change_type: str) -> list[str]:
             "delivery_plan",
             "design_architecture_review",
             "implementation_completion_gate",
+            "post_change_implementation_report",
             "write_guard_audit",
             "code_review_gate",
             "test_evidence_gate",
@@ -116,6 +119,7 @@ def required_for(change_type: str) -> list[str]:
         "delivery_plan",
         "design_architecture_review",
         "implementation_completion_gate",
+        "post_change_implementation_report",
         "write_guard_audit",
         "code_review_gate",
         "test_evidence_gate",

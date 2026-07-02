@@ -254,6 +254,7 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/docs-readability-governor`: checks public documentation readability, onboarding path, boundary explanation, maintenance commands, and local path safety.
 - `skills/core/prompt-effectiveness-governor`: evaluates prompt packs for design-first behavior, boundaries, Git readiness, tests, evidence, stop conditions, and token/source-reading controls.
 - `skills/core/implementation-completion-gate`: validates real diff evidence, delivery-plan scope alignment, changed files, and implementation summary before review/testing.
+- `skills/core/post-change-skill-sync`: generates post-change implementation evidence after edits, including changed files, validation needs, baseline candidates, project-skill sync candidates, and docs binding status.
 - `skills/core/evidence-auto-collector`: creates conservative evidence gap summaries from diff impact and command logs.
 - `skills/core/environment-promotion-governor`: validates DEV/SIT/UAT/PRE/PROD promotion evidence, entry/exit criteria, configuration differences, approvers, and rollback readiness.
 - `skills/core/uat-acceptance-governor`: validates business UAT scope, acceptors, cases, known issues, and signoff.

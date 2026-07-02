@@ -19,6 +19,7 @@ def load_module(name: str, path: Path):
 
 diff_impact = load_module("diff_impact", ROOT / "skills/core/diff-impact-analyzer/scripts/diff_impact.py")
 implementation_complete = load_module("implementation_complete", ROOT / "skills/core/implementation-completion-gate/scripts/implementation_complete.py")
+post_change_sync = load_module("post_change_sync", ROOT / "skills/core/post-change-skill-sync/scripts/sync_after_change.py")
 evidence_collect = load_module("evidence_collect", ROOT / "skills/core/evidence-auto-collector/scripts/evidence_collect.py")
 synthetic_e2e = load_module("synthetic_e2e", ROOT / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py")
 
@@ -79,6 +80,44 @@ def test_evidence_collector_detects_missing_and_failed_logs() -> None:
         assert result["failed_logs"]
 
 
+def test_post_change_sync_generates_report_from_git_changes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess = __import__("subprocess")
+        subprocess.run(["git", "init"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, text=True, capture_output=True, check=True)
+        (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, text=True, capture_output=True, check=True)
+        (repo / "src/api").mkdir(parents=True)
+        (repo / "src/api/orders.py").write_text("def export_orders():\n    return []\n", encoding="utf-8")
+        artifact_dir = root / "artifacts"
+        result = post_change_sync.generate(repo, artifact_dir, doc_id="REQ-1")
+        assert result["schema"] == "codex-post-change-implementation-report-v1"
+        assert result["decision"] in {"pass", "warn"}
+        assert "src/api/orders.py" in result["changed_files"]
+        assert result["baseline_update_candidates"]
+        assert result["project_skill_sync_candidates"]
+        assert (artifact_dir / "post_change_implementation_report.json").exists()
+        assert post_change_sync.validate(result)["decision"] == "pass"
+
+
+def test_post_change_sync_blocks_required_docs_when_unbound() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess = __import__("subprocess")
+        subprocess.run(["git", "init"], cwd=repo, text=True, capture_output=True, check=True)
+        artifact_dir = root / "artifacts"
+        result = post_change_sync.generate(repo, artifact_dir, require_docs=True)
+        assert result["decision"] == "block"
+        assert any(item["source"] in {"docs_root", "doc_id"} for item in result["blockers"])
+
+
 def test_synthetic_e2e_runner_completes_core_flow() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         result = synthetic_e2e.run(Path(tmp))
@@ -103,6 +142,8 @@ def run_all() -> None:
     test_implementation_completion_blocks_out_of_scope()
     test_implementation_completion_passes_with_allowed_scope()
     test_evidence_collector_detects_missing_and_failed_logs()
+    test_post_change_sync_generates_report_from_git_changes()
+    test_post_change_sync_blocks_required_docs_when_unbound()
     test_synthetic_e2e_runner_completes_core_flow()
 
 

@@ -61,6 +61,7 @@ Do not run every skill for every task. Use the workflow profile and change-risk 
 - `skills/core/diff-impact-analyzer`: diff-impact-analyzer (deterministic-helper, extractor-analyzer)
 - `skills/core/evidence-auto-collector`: evidence-auto-collector (deterministic-helper, extractor-analyzer)
 - `skills/core/implementation-completion-gate`: implementation-completion-gate (expert-gate, workflow-gate)
+- `skills/core/post-change-skill-sync`: post-change-skill-sync (deterministic-helper, artifact-generator)
 - `skills/core/traceability-governor`: traceability-governor (expert-gate, workflow-gate)
 
 ## Testing

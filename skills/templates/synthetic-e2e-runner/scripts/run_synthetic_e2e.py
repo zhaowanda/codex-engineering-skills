@@ -78,6 +78,7 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "delivery_plan.json", {"decision": "pass", "rollback_order": ["rollback synthetic"], "post_release_checks": ["check synthetic metric"]})
     write_json(out_dir / "design_architecture_review.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(out_dir / "implementation_completion_gate.json", {"decision": "pass", "blockers": []})
+    write_json(out_dir / "post_change_implementation_report.json", {"schema": "codex-post-change-implementation-report-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"]})
     write_json(out_dir / "write_guard_audit.json", {"decision": "ready", "blockers": []})
     write_json(out_dir / "code_review_gate.json", {"decision": "approve", "active_blockers": [], "active_concerns": []})
     write_json(out_dir / "test_evidence_gate.json", {"decision": "pass", "blockers": [], "warnings": []})

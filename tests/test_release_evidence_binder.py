@@ -28,6 +28,7 @@ def write_passing_release_artifacts(root: Path) -> None:
     )
     write_json(root / "design_architecture_review.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(root / "implementation_completion_gate.json", {"decision": "pass", "blockers": []})
+    write_json(root / "post_change_implementation_report.json", {"schema": "codex-post-change-implementation-report-v1", "decision": "pass", "blockers": [], "changed_files": ["src/api/orders.py"]})
     write_json(root / "write_guard_audit.json", {"decision": "ready", "blockers": []})
     write_json(root / "code_review_gate.json", {"decision": "approve", "active_blockers": [], "active_concerns": []})
     write_json(root / "test_evidence_gate.json", {"decision": "pass", "blockers": [], "warnings": []})
@@ -63,7 +64,19 @@ def test_bind_no_go_when_required_evidence_missing() -> None:
         result = bind_release.bind(root)
         assert result["decision"] == "no_go"
         assert "code_review_gate" in result["missing_evidence"]
+        assert "post_change_implementation_report" in result["missing_evidence"]
         assert any(item["artifact"] == "code_review_gate.json" for item in result["next_required_actions"])
+
+
+def test_bind_no_go_without_post_change_report() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        (root / "post_change_implementation_report.json").unlink()
+        result = bind_release.bind(root)
+        assert result["decision"] == "no_go"
+        assert "post_change_implementation_report" in result["missing_evidence"]
+        assert any(item["artifact"] == "post_change_implementation_report.json" for item in result["next_required_actions"])
 
 
 def test_bind_no_go_when_review_gate_blocks() -> None:
@@ -112,6 +125,7 @@ def test_docs_change_uses_light_required_evidence() -> None:
 def run_all() -> None:
     test_bind_go_with_complete_clean_evidence()
     test_bind_no_go_when_required_evidence_missing()
+    test_bind_no_go_without_post_change_report()
     test_bind_no_go_when_review_gate_blocks()
     test_bind_conditional_go_with_warnings()
     test_bind_no_go_without_rollback_or_post_release_checks()

@@ -124,8 +124,8 @@ SCENARIO_MATRIX: dict[str, dict[str, Any]] = {
         "required_gates": CORE_PRE_EDIT_GATES + ["configuration_readiness.json", "data_security_review.json", "performance_review.json", "release_gate.json"],
     },
     "release_readiness": {
-        "required_skills": ["implementation-completion-gate", "code-review-gate", "test-evidence-gate", "release-evidence-binder"],
-        "required_gates": ["implementation_completion_gate.json", "code_review_gate.json", "test_evidence_gate.json", "ci_execution_evidence.json", "release_gate.json"],
+        "required_skills": ["implementation-completion-gate", "post-change-skill-sync", "code-review-gate", "test-evidence-gate", "release-evidence-binder"],
+        "required_gates": ["implementation_completion_gate.json", "post_change_implementation_report.json", "code_review_gate.json", "test_evidence_gate.json", "ci_execution_evidence.json", "release_gate.json"],
     },
     "code_review": {
         "required_skills": ["diff-impact-analyzer", "code-design-quality-reviewer", "code-review-gate", "test-evidence-gate"],
