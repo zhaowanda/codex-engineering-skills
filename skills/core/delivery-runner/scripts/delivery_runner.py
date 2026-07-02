@@ -13,9 +13,11 @@ FALLBACK_ORDER = [
     ("spec", "spec.json"),
     ("technical_design", "technical_design.json"),
     ("architecture_design", "architecture_design.json"),
+    ("test_design", "test_design.json"),
     ("delivery_plan", "delivery_plan.json"),
     ("delivery_plan_review", "delivery_plan_review.json"),
     ("design_review", "design_architecture_review.json"),
+    ("docs_quality", "docs_quality.json"),
     ("git", "git_worktree_evidence.json"),
     ("edit_permit", "edit_permit.json"),
     ("implementation", "implementation_completion_gate.json"),
@@ -27,7 +29,7 @@ FALLBACK_ORDER = [
     ("release", "release_gate.json"),
     ("post_release", "post_release_observation.json"),
 ]
-FALLBACK_IMPLEMENTATION_REQUIRED = ["spec", "technical_design", "architecture_design", "delivery_plan", "delivery_plan_review", "design_review", "git", "edit_permit"]
+FALLBACK_IMPLEMENTATION_REQUIRED = ["spec", "technical_design", "architecture_design", "test_design", "delivery_plan", "delivery_plan_review", "design_review", "docs_quality", "git", "edit_permit"]
 FALLBACK_RELEASE_REQUIRED = ["implementation", "review", "test", "environment", "uat", "release_change", "release"]
 
 
@@ -287,6 +289,9 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     docs_status = docs_readiness(artifact_dir)
     if docs_status.get("decision") != "pass":
         blockers.extend(docs_status.get("blockers", []))
+    docs_quality = artifacts.get("docs_quality", {})
+    if docs_quality and str(docs_quality.get("decision") or "") not in {"pass", "ready"}:
+        blockers.append({"source": "docs_quality", "message": "human documentation quality decision is not pass/ready"})
     git_status = git_edit_readiness(artifact_dir, artifacts.get("git", {}))
     if git_status.get("decision") != "ready":
         blockers.extend(git_status.get("blockers", []))

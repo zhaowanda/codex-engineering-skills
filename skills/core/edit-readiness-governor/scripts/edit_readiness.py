@@ -130,6 +130,7 @@ def design_evidence_check(args: argparse.Namespace) -> dict[str, Any]:
         "spec": artifact(args.spec),
         "technical_design": artifact(args.technical_design),
         "architecture_design": artifact(args.architecture_design),
+        "test_design": artifact(getattr(args, "test_design", "")),
         "delivery_plan": artifact(args.delivery_plan),
         "delivery_plan_review": artifact(args.delivery_plan_review),
         "design_review": artifact(args.design_review),
@@ -137,7 +138,7 @@ def design_evidence_check(args: argparse.Namespace) -> dict[str, Any]:
         "reproduction": artifact(args.reproduction),
     }
     if lane in FULL_DOC_LANES:
-        required = ["spec", "technical_design", "architecture_design", "delivery_plan", "delivery_plan_review", "design_review", "docs_quality"]
+        required = ["spec", "technical_design", "architecture_design", "test_design", "delivery_plan", "delivery_plan_review", "design_review", "docs_quality"]
         for key in required:
             if not items[key]["exists"]:
                 blockers.append(f"missing required design artifact: {key}")
@@ -313,6 +314,7 @@ def permit_payload(args: argparse.Namespace, readiness: dict[str, Any]) -> dict[
             "spec": args.spec,
             "technical_design": args.technical_design,
             "architecture_design": args.architecture_design,
+            "test_design": getattr(args, "test_design", ""),
             "delivery_plan": args.delivery_plan,
             "delivery_plan_review": args.delivery_plan_review,
             "design_review": args.design_review,
@@ -401,6 +403,7 @@ def add_common_assert_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--spec", default="")
     parser.add_argument("--technical-design", default="")
     parser.add_argument("--architecture-design", default="")
+    parser.add_argument("--test-design", default="")
     parser.add_argument("--delivery-plan", default="")
     parser.add_argument("--delivery-plan-review", default="")
     parser.add_argument("--design-review", default="")

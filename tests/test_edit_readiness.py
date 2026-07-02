@@ -74,11 +74,12 @@ def ready_standard_args(root: Path, repo: Path) -> Namespace:
     git_worktree.write_artifact(str(artifacts), git_result)
     delivery_state.init_state("REQ-1", "standard_requirement", artifacts)
     state_file = artifacts / "delivery_state.json"
-    for gate in ["spec", "technical_design", "architecture_design", "delivery_plan", "docs_quality", "design_review", "freeze", "git"]:
+    for gate in ["spec", "technical_design", "architecture_design", "test_design", "delivery_plan", "docs_quality", "design_review", "freeze", "git"]:
         delivery_state.advance_state(state_file, gate, gate, f"{gate}.json")
     spec_file = artifacts / "spec.json"
     technical = artifacts / "technical_design.json"
     architecture = artifacts / "architecture_design.json"
+    test_design = artifacts / "test_design.json"
     plan = artifacts / "delivery_plan.json"
     plan_review = artifacts / "delivery_plan_review.json"
     review = artifacts / "design_review.json"
@@ -86,6 +87,7 @@ def ready_standard_args(root: Path, repo: Path) -> Namespace:
     write_json(spec_file, {"schema": "spec"})
     write_json(technical, {"schema": "technical"})
     write_json(architecture, {"schema": "architecture"})
+    write_json(test_design, {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [{"id": "TC-1"}]})
     write_json(plan, {"repo_tasks": [{"role": "modify", "paths": ["src/service.py"]}]})
     write_json(plan_review, {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
     write_json(review, {"decision": "approved"})
@@ -102,6 +104,7 @@ def ready_standard_args(root: Path, repo: Path) -> Namespace:
         spec=str(spec_file),
         technical_design=str(technical),
         architecture_design=str(architecture),
+        test_design=str(test_design),
         delivery_plan=str(plan),
         delivery_plan_review=str(plan_review),
         design_review=str(review),
@@ -132,6 +135,7 @@ class EditReadinessTests(unittest.TestCase):
                 spec="",
                 technical_design="",
                 architecture_design="",
+                test_design="",
                 delivery_plan="",
                 delivery_plan_review="",
                 design_review="",

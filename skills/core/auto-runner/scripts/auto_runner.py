@@ -135,6 +135,50 @@ def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifac
         return {"decision": "block", "reason": str(exc), "blockers": [{"source": "docs_sync", "message": str(exc)}]}
 
 
+def run_docs_quality(docs_root: Path | None, docs_sync: dict[str, Any], out: Path) -> dict[str, Any]:
+    quality_path = out / "docs_quality.json"
+    if not docs_root or docs_sync.get("decision") != "pass":
+        result = {
+            "schema": "codex-docs-quality-aggregate-v1",
+            "decision": "block",
+            "blockers": [{"source": "docs_sync", "message": "docs sync must pass before docs quality review"}],
+            "reviews": [],
+        }
+        write_json(quality_path, result)
+        return result
+    reviews: list[dict[str, Any]] = []
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    for rel in docs_sync.get("human_docs", []) if isinstance(docs_sync.get("human_docs"), list) else []:
+        doc_path = docs_root / str(rel)
+        proc = subprocess.run(["python3", "skills/core/human-doc-reviewer/scripts/human_doc_review.py", "--file", str(doc_path)], cwd=ROOT, text=True, capture_output=True)
+        data: dict[str, Any] = {}
+        if proc.stdout.strip():
+            try:
+                data = json.loads(proc.stdout)
+            except Exception:
+                data = {}
+        review = {"file": str(doc_path), "returncode": proc.returncode, "result": data}
+        reviews.append(review)
+        for item in data.get("blockers", []) if isinstance(data.get("blockers"), list) else []:
+            if isinstance(item, dict):
+                blockers.append({"file": str(doc_path), **item})
+        for item in data.get("warnings", []) if isinstance(data.get("warnings"), list) else []:
+            if isinstance(item, dict):
+                warnings.append({"file": str(doc_path), **item})
+        if proc.returncode != 0:
+            blockers.append({"file": str(doc_path), "source": "human_doc_review", "message": "review command failed"})
+    result = {
+        "schema": "codex-docs-quality-aggregate-v1",
+        "decision": "block" if blockers else "pass",
+        "blockers": blockers,
+        "warnings": warnings,
+        "reviews": reviews,
+    }
+    write_json(quality_path, result)
+    return result
+
+
 def parse_scalar(value: str) -> Any:
     value = value.strip().strip('"').strip("'")
     if value.lower() == "true":
@@ -889,6 +933,12 @@ def run(
     )
     run_profile_artifact_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
+    docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
+    if docs_sync.get("decision") == "pass":
+        docs_status = docs_readiness(effective_docs_root, doc_id)
+    docs_quality = run_docs_quality(effective_docs_root, docs_sync, out)
+    generated.append("docs_quality.json")
+
     delivery_status = out / "delivery_status.json"
     inspect_command = [
         "python3",
@@ -913,15 +963,14 @@ def run(
         except Exception:
             inspect_status = {}
 
-    docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
-    if docs_sync.get("decision") == "pass":
-        docs_status = docs_readiness(effective_docs_root, doc_id)
     blockers = collect_blockers(steps, inspect_status, include_inspect=False)
     readiness_blockers = [item for item in inspect_status.get("blockers", []) or [] if isinstance(item, dict)]
     if docs_sync.get("decision") == "block":
         blockers.extend(docs_sync.get("blockers", []))
     if docs_status.get("decision") == "block":
         blockers.extend(docs_status.get("blockers", []))
+    if docs_quality.get("decision") == "block":
+        blockers.extend(docs_quality.get("blockers", []))
     missing_profile = missing_profile_artifacts(selected_profile, out)
     gate_gaps = profile_gate_gaps(selected_profile, out)
     summary = {
@@ -943,6 +992,7 @@ def run(
         "required_gates": selected_profile.get("required_skills", []),
         "docs_readiness": docs_status,
         "docs_sync": docs_sync,
+        "docs_quality": docs_quality,
         "doc_language": effective_doc_language,
         "readiness_blockers": readiness_blockers,
         "missing_profile_artifacts": missing_profile,

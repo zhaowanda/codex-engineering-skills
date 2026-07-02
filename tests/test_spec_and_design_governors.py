@@ -222,6 +222,8 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
             "spec",
             "technical_design",
             "architecture_design",
+            "test_design",
+            "docs_quality",
             "git_worktree_evidence",
             "edit_permit",
         ]:
@@ -251,17 +253,16 @@ def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None
             write_json(root / f"{name}.json", {"decision": "pass"})
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is False
-        assert status["next_stage"] == "delivery_plan_review"
+        assert status["next_stage"] == "test_design"
         assert status["next_action_type"] == "fix_blocker"
-        assert status["primary_next_action"]["artifact"] == "delivery_plan_review.json"
-        assert "delivery_plan_review.py" in status["next_command"]
+        assert "test_design.py" in status["next_command"]
 
 
 def test_delivery_runner_blocks_when_profile_gate_readiness_fails() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = make_docs_repo(root, "REQ-1")
-        for name in ["spec", "technical_design", "architecture_design", "delivery_plan", "git_worktree_evidence", "edit_permit"]:
+        for name in ["spec", "technical_design", "architecture_design", "test_design", "docs_quality", "delivery_plan", "git_worktree_evidence", "edit_permit"]:
             write_json(root / f"{name}.json", {"decision": "pass"})
         write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
         write_json(root / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True})
@@ -283,7 +284,7 @@ def test_delivery_runner_blocks_when_profile_gate_readiness_fails() -> None:
 def test_delivery_runner_requires_docs_and_fresh_git_before_implementation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        for name in ["spec", "technical_design", "architecture_design", "edit_permit"]:
+        for name in ["spec", "technical_design", "architecture_design", "test_design", "docs_quality", "edit_permit"]:
             write_json(root / f"{name}.json", {"decision": "pass"})
         write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
         write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
@@ -294,6 +295,30 @@ def test_delivery_runner_requires_docs_and_fresh_git_before_implementation() -> 
         assert any(item["source"] == "docs_root" for item in status["blockers"])
         assert any("fetch evidence is missing" in item["message"] for item in status["blockers"])
         assert any("pull --ff-only evidence is missing" in item["message"] for item in status["blockers"])
+
+
+def test_delivery_runner_blocks_when_docs_quality_not_pass() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        for name in ["spec", "technical_design", "architecture_design", "test_design", "delivery_plan", "git_worktree_evidence", "edit_permit"]:
+            write_json(root / f"{name}.json", {"decision": "pass"})
+        write_json(root / "docs_quality.json", {"decision": "warn", "warnings": [{"source": "depth"}]})
+        write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
+        write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_json(root / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True})
+        write_json(root / "auto_run_summary.json", {
+            "doc_id": "REQ-1",
+            "docs_readiness": {
+                "decision": "pass",
+                "docs_root": str(docs_root),
+                "manifest": str(docs_root / "indexes/REQ-1.manifest.json"),
+            },
+        })
+        status = delivery_runner.inspect(root)
+        assert status["can_implement"] is False
+        assert any(item["source"] == "docs_quality" for item in status["blockers"])
 
 
 def run_all() -> None:
@@ -312,6 +337,7 @@ def run_all() -> None:
     test_delivery_runner_requires_delivery_plan_review_before_git_edit()
     test_delivery_runner_blocks_when_profile_gate_readiness_fails()
     test_delivery_runner_requires_docs_and_fresh_git_before_implementation()
+    test_delivery_runner_blocks_when_docs_quality_not_pass()
 
 
 if __name__ == "__main__":

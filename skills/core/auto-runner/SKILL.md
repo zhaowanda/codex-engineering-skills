@@ -32,6 +32,7 @@ user requirement
 - Run project understanding only when both `--repo` and `--project` are provided.
 - Human-readable delivery docs default to automatic language detection: if the requirement asks for Chinese docs, generate Chinese; otherwise generate English.
 - Use `--doc-language en|zh|auto` to force or auto-detect the human doc language.
+- After docs sync, run human documentation review and write `docs_quality.json`.
 - Always finish by running delivery inspection and writing `auto_run_summary.json`.
 - Surface blockers and next action instead of hiding failed gates.
 

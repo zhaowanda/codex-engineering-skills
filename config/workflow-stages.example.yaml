@@ -9,6 +9,10 @@ stages:
   - name: architecture_design
     artifact: architecture_design.json
     next_command: python3 skills/core/architecture-design-governor/scripts/architecture_design.py --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --out artifacts/REQ-001/architecture_design.json
+  - name: test_design
+    artifact: test_design.json
+    next_command: python3 skills/core/test-design-governor/scripts/test_design.py render --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/test_design.json
+    implementation_required: true
   - name: delivery_plan
     artifact: delivery_plan.json
     next_command: python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py --doc-id REQ-001 --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/delivery_plan.json
@@ -19,6 +23,10 @@ stages:
   - name: design_review
     artifact: design_architecture_review.json
     next_command: python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json
+    implementation_required: true
+  - name: docs_quality
+    artifact: docs_quality.json
+    next_command: python3 skills/core/human-doc-reviewer/scripts/human_doc_review.py --file delivery-docs/human/designs/REQ-001.md
     implementation_required: true
   - name: git
     artifact: git_worktree_evidence.json

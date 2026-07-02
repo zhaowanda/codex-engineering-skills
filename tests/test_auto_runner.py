@@ -55,6 +55,7 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert (out / "technical_design.json").exists()
         assert (out / "architecture_design.json").exists()
         assert (out / "test_design.json").exists()
+        assert (out / "docs_quality.json").exists()
         assert (out / "delivery_plan.json").exists()
         assert (out / "delivery_plan_review.json").exists()
         assert (out / "auto_run_summary.json").exists()

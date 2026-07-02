@@ -33,6 +33,7 @@ spec/design/plan
 - Current branch must match the Git evidence branch and must not be `master` or `main`.
 - If a delivery state is provided, it must validate for `implementation`.
 - Standard, large, and migration lanes require design-first evidence before editing.
+- Standard, large, and migration lanes require `test_design.json` with test cases before editing.
 - Standard, large, and migration lanes require `delivery_plan_review.json` with `decision=pass` and `readiness_gate.implementation_allowed=true`.
 - Bugfix, hotfix, and small-change lanes still need a doc id, Git evidence, and lane-appropriate lightweight evidence.
 - Allowed files should be bound into the permit; files outside the permit require a new permit.
@@ -55,6 +56,7 @@ python3 scripts/edit_readiness.py \
   --spec artifacts/spec.json \
   --technical-design artifacts/technical_design.json \
   --architecture-design artifacts/architecture_design.json \
+  --test-design artifacts/test_design.json \
   --delivery-plan artifacts/delivery_plan.json \
   --delivery-plan-review artifacts/delivery_plan_review.json \
   --design-review artifacts/design_review.json \
@@ -77,6 +79,7 @@ python3 scripts/edit_readiness.py \
   --spec artifacts/spec.json \
   --technical-design artifacts/technical_design.json \
   --architecture-design artifacts/architecture_design.json \
+  --test-design artifacts/test_design.json \
   --delivery-plan artifacts/delivery_plan.json \
   --delivery-plan-review artifacts/delivery_plan_review.json \
   --design-review artifacts/design_review.json \
