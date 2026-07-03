@@ -65,6 +65,9 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert result["profile_selection_score"] > 0
         assert result["profile_selection_confidence"] in {"high", "medium", "low"}
         assert result["profile_selection_candidates"]
+        assert result["workflow_strictness"]["tier"] in {"light", "standard", "regulated"}
+        assert result["effective_workflow_controls"]["required_skills"]
+        assert "strictness_gate_gaps" in result
         assert result["docs_readiness"]["decision"] == "block"
         assert result["next_stage"]
         assert result["can_implement"] is False
@@ -435,6 +438,29 @@ def test_auto_runner_merges_repo_context_with_frontend_profile() -> None:
     assert reason["composition_mode"] == "merged"
 
 
+def test_workflow_strictness_classifies_light_standard_and_regulated() -> None:
+    light = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": []}, {"name": "bugfix"}, "high")
+    assert light["tier"] == "light"
+    controls = auto_runner.effective_workflow_controls(
+        {
+            "name": "bugfix",
+            "expected_artifacts": ["spec.json", "technical_design.json", "architecture_design.json", "test_design.json"],
+            "required_gate_artifacts": [{"artifact": "spec.json"}, {"artifact": "architecture_design.json"}, {"artifact": "test_design.json"}],
+        },
+        light,
+    )
+    assert "architecture_design.json" not in controls["expected_artifacts"]
+    assert all(item["artifact"] != "architecture_design.json" for item in controls["required_gate_artifacts"])
+    assert controls["gate_overrides"]
+    standard = auto_runner.workflow_strictness({"lane": "small_change", "impact_surface": [{"area": "ui"}]}, {"name": "frontend_change"}, "medium")
+    assert standard["tier"] == "standard"
+    regulated = auto_runner.workflow_strictness({"lane": "standard_requirement", "impact_surface": [{"area": "data"}]}, {"name": "data_migration"}, "high")
+    assert regulated["tier"] == "regulated"
+    profile = {"name": "data_migration", "required_skills": ["release-evidence-binder"]}
+    gaps = auto_runner.strictness_gate_gaps(profile, regulated)
+    assert any("data-security-governor" in item["message"] for item in gaps)
+
+
 def test_auto_runner_release_profile_only_checks_release_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -511,6 +537,7 @@ def run_all() -> None:
     test_auto_runner_routes_bugfix_to_bugfix_profile()
     test_auto_runner_routes_long_prd_to_small_feature_full_design_path()
     test_auto_runner_routes_complex_multi_impact_to_high_risk_profile()
+    test_workflow_strictness_classifies_light_standard_and_regulated()
     test_auto_runner_release_profile_only_checks_release_artifacts()
     test_codex_eng_auto_cli_runs()
     test_codex_eng_auto_human_output_runs()

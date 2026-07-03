@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import subprocess
 from pathlib import Path
@@ -41,6 +42,11 @@ def git_log(repo: Path) -> list[str]:
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
+def source_revision(repo: Path) -> str:
+    proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True, capture_output=True, check=False)
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
 def reverse(repo: Path, project: str) -> dict[str, Any]:
     suffixes = files_by_suffix(repo)
     modules = [{"module": name, "reason": "top-level directory"} for name in top_dirs(repo)]
@@ -50,6 +56,8 @@ def reverse(repo: Path, project: str) -> dict[str, Any]:
         "schema": "codex-project-baseline-v1",
         "project": project,
         "repo_root": str(repo),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source_revision": source_revision(repo),
         "overview": f"{project} baseline inferred from repository structure, file types, tests, config files, and recent git history.",
         "top_level_directories": top_dirs(repo),
         "file_type_summary": suffixes,

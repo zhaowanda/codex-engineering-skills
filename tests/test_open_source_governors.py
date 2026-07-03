@@ -68,12 +68,18 @@ def test_example_scenario_runner_outputs_all_scenarios() -> None:
         result = example_scenario.run(ROOT, Path(tmp))
         assert result["schema"] == "codex-example-scenario-run-v1"
         assert result["decision"] == "pass"
-        assert result["scenario_count"] == 4
+        assert result["scenario_count"] == 8
+        kinds = set()
         for case in result["cases"]:
             data = json.loads(Path(case["summary"]).read_text(encoding="utf-8"))
+            kinds.add(data["kind"])
             assert data["spec"]["acceptance_criteria"]
             assert data["traceability"]["acceptance_covered"] is True
             assert data["risk"]["required_controls"]
+            if case["name"] in {"cross-repo-api", "frontend-change", "data-migration", "release-readiness"}:
+                assert data["replay"]["schema"] == "codex-delivery-replay-skeleton-v1"
+                assert data["replay"]["artifact_count"] > 0
+        assert {"bugfix", "small-feature", "config-change", "frontend-change", "cross-repo-api", "data-migration", "release-readiness", "code-review"}.issubset(kinds)
 
 
 def run_all() -> None:

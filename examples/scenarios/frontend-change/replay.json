@@ -1,0 +1,17 @@
+{
+  "schema": "codex-delivery-replay-skeleton-v1",
+  "case_id": "REPLAY-FRONTEND-UI",
+  "anonymized": true,
+  "source": "artifact_summaries_only",
+  "artifacts": [
+    {"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "ready_for_design", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "frontend_acceptance.json", "schema": "codex-frontend-acceptance-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "test_evidence_gate.json", "schema": "codex-test-evidence-gate-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0}
+  ],
+  "replay_steps": [
+    {"step": "ingest_requirement", "expected_artifact": "spec.json"},
+    {"step": "capture_browser_evidence", "expected_artifact": "frontend_acceptance.json"},
+    {"step": "review_tests", "expected_artifact": "test_evidence_gate.json"}
+  ],
+  "privacy_note": "No source text, customer names, repo paths, or local absolute paths are included."
+}

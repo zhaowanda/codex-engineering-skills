@@ -33,14 +33,27 @@ def write_passing_release_artifacts(root: Path) -> None:
     write_json(root / "code_review_gate.json", {"decision": "approve", "active_blockers": [], "active_concerns": []})
     write_json(root / "test_evidence_gate.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(root / "ci_execution_evidence.json", {"failed_commands": [], "unknown_commands": [], "executed_commands": [{"command": "pytest", "status": "passed"}]})
-    write_json(root / "environment_promotion.json", {"decision": "pass", "blockers": []})
+    write_json(
+        root / "environment_promotion.json",
+        {
+            "decision": "pass",
+            "blockers": [],
+            "environments": [
+                {"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke log"], "approver": "release-owner", "rollback_ready": True},
+                {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke log"], "approver": "release-owner", "rollback_ready": True},
+            ],
+        },
+    )
     write_json(root / "uat_acceptance.json", {"decision": "pass", "blockers": []})
     write_json(
         root / "release_change.json",
         {
             "decision": "pass",
             "blockers": [],
+            "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"},
+            "approvers": ["release-owner"],
             "rollback_plan": ["rollback api-service"],
+            "rollback_owner": "release-owner",
             "post_release_checks": ["check error rate"],
         },
     )
@@ -112,6 +125,60 @@ def test_bind_no_go_without_rollback_or_post_release_checks() -> None:
         assert "post-release checks" in messages
 
 
+def test_bind_no_go_when_release_policy_is_template_only() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "environment_promotion.json", {"decision": "pass", "blockers": []})
+        write_json(root / "release_change.json", {"decision": "pass", "blockers": [], "rollback_plan": ["rollback"], "post_release_checks": ["monitor"]})
+        result = bind_release.bind(root)
+        assert result["decision"] == "no_go"
+        messages = " ".join(item["message"] for item in result["blockers"])
+        assert "prod environment policy" in messages
+        assert "release_window" in messages
+        assert "rollback_owner" in messages
+
+
+def test_bind_applies_optional_release_policy_overlay() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        policy = {
+            "required_environments": ["prod"],
+            "environment_required_fields": ["entry_criteria", "change_ticket"],
+            "release_change_required_fields": ["release_window", "approvers", "rollback_owner", "release_manager"],
+            "require_prod_rollback_ready": True,
+        }
+        result = bind_release.bind(root, policy=policy)
+        assert result["decision"] == "no_go"
+        messages = " ".join(item["message"] for item in result["blockers"])
+        assert "prod.change_ticket is required" in messages
+        assert "release_manager is required" in messages
+        assert result["release_policy"] == policy
+
+
+def test_bind_go_when_optional_release_policy_is_satisfied() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        release_change = json.loads((root / "release_change.json").read_text(encoding="utf-8"))
+        release_change["approvers"] = [{"role": "release_owner", "name": "owner"}]
+        release_change["ticket"] = {"id": "CHG-1", "url": "https://change.example/CHG-1"}
+        release_change["observation_metrics"] = ["error_rate", "latency_p95"]
+        write_json(root / "release_change.json", release_change)
+        policy = {
+            "required_environments": ["prod"],
+            "environment_aliases": {"prod": ["production"]},
+            "environment_required_fields": ["entry_criteria", "exit_criteria", "validation_evidence", "approver"],
+            "release_change_required_fields": ["release_window", "approvers", "rollback_owner"],
+            "required_approver_roles": ["release_owner"],
+            "required_ticket_fields": ["id", "url"],
+            "required_observation_metrics": ["error_rate", "latency_p95"],
+        }
+        result = bind_release.bind(root, policy=policy)
+        assert result["decision"] == "go"
+
+
 def test_docs_change_uses_light_required_evidence() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -129,6 +196,9 @@ def run_all() -> None:
     test_bind_no_go_when_review_gate_blocks()
     test_bind_conditional_go_with_warnings()
     test_bind_no_go_without_rollback_or_post_release_checks()
+    test_bind_no_go_when_release_policy_is_template_only()
+    test_bind_applies_optional_release_policy_overlay()
+    test_bind_go_when_optional_release_policy_is_satisfied()
     test_docs_change_uses_light_required_evidence()
 
 

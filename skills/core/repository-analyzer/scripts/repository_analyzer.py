@@ -31,6 +31,29 @@ def iter_files(repo: Path):
 
 
 def analyze(repo: Path, project: str) -> dict[str, Any]:
+    if not repo.exists() or not repo.is_dir():
+        return {
+            "schema": SCHEMA,
+            "project": project,
+            "repo_root": str(repo),
+            "decision": "block",
+            "confidence": "low",
+            "confidence_details": [{"dimension": "repo", "score": 0, "reason": "repo path is missing or not a directory"}],
+            "file_count": 0,
+            "languages": {},
+            "suffix_counts": {},
+            "top_level_directories": [],
+            "framework_hints": [],
+            "entrypoint_hints": [],
+            "build_files": [],
+            "config_files": [],
+            "test_hints": [],
+            "ci_files": [],
+            "blockers": [{"source": "repo", "message": "repo path is missing or not a directory"}],
+            "warnings": [],
+        }
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     suffix_counts: dict[str, int] = {}
     languages: dict[str, int] = {}
     files = list(iter_files(repo))
@@ -61,10 +84,24 @@ def analyze(repo: Path, project: str) -> dict[str, Any]:
         framework_hints.append("node")
     if "pom.xml" in text_names:
         framework_hints.append("maven")
+    if not files:
+        warnings.append({"source": "repo", "message": "no readable files found"})
+    elif not languages:
+        warnings.append({"source": "languages", "message": "no known implementation language detected"})
+    confidence = "high" if languages and build_files else "medium" if files else "low"
     return {
         "schema": SCHEMA,
         "project": project,
         "repo_root": repo.name,
+        "decision": "block" if blockers else "warn" if warnings else "pass",
+        "confidence": confidence,
+        "confidence_details": [
+            {"dimension": "files", "score": min(100, len(files)), "reason": f"{len(files)} files scanned"},
+            {"dimension": "languages", "score": 100 if languages else 0, "reason": "known implementation language detected" if languages else "no known implementation language detected"},
+            {"dimension": "build", "score": 100 if build_files else 0, "reason": "build manifest detected" if build_files else "no build manifest detected"},
+            {"dimension": "tests", "score": 100 if test_hints else 20, "reason": "test files detected" if test_hints else "no test files detected"},
+            {"dimension": "ci", "score": 100 if ci_files else 20, "reason": "CI config detected" if ci_files else "no CI config detected"},
+        ],
         "file_count": len(files),
         "languages": dict(sorted(languages.items())),
         "suffix_counts": dict(sorted(suffix_counts.items())),
@@ -75,6 +112,8 @@ def analyze(repo: Path, project: str) -> dict[str, Any]:
         "config_files": config_files,
         "test_hints": test_hints[:100],
         "ci_files": sorted(ci_files),
+        "blockers": blockers,
+        "warnings": warnings,
     }
 
 
@@ -89,7 +128,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if result["decision"] != "block" else 1
 
 
 if __name__ == "__main__":

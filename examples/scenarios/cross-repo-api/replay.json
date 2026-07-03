@@ -1,0 +1,17 @@
+{
+  "schema": "codex-delivery-replay-skeleton-v1",
+  "case_id": "REPLAY-CROSS-REPO-API",
+  "anonymized": true,
+  "source": "artifact_summaries_only",
+  "artifacts": [
+    {"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "ready_for_design", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "architecture_design.json", "schema": "codex-architecture-design-v1", "decision": "pass", "blocker_count": 0, "warning_count": 1},
+    {"artifact": "delivery_plan.json", "schema": "codex-delivery-plan-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0}
+  ],
+  "replay_steps": [
+    {"step": "ingest_requirement", "expected_artifact": "spec.json"},
+    {"step": "review_contract", "expected_artifact": "architecture_design.json"},
+    {"step": "review_delivery", "expected_artifact": "delivery_plan.json"}
+  ],
+  "privacy_note": "No source text, customer names, repo paths, or local absolute paths are included."
+}

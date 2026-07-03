@@ -50,13 +50,42 @@ def capture(artifact_dir: Path, case_id: str) -> dict[str, Any]:
     }
 
 
+def replay_skeleton(artifact_dir: Path, case_id: str) -> dict[str, Any]:
+    case = capture(artifact_dir, case_id)
+    artifacts = []
+    for name, summary in case["artifact_summaries"].items():
+        artifacts.append({
+            "artifact": name,
+            "schema": summary.get("schema", ""),
+            "decision": summary.get("decision", ""),
+            "blocker_count": summary.get("blocker_count", 0),
+            "warning_count": summary.get("warning_count", 0),
+        })
+    return {
+        "schema": "codex-delivery-replay-skeleton-v1",
+        "case_id": case_id,
+        "anonymized": True,
+        "source": "artifact_summaries_only",
+        "artifacts": artifacts,
+        "replay_steps": [
+            {"step": "ingest_requirement", "expected_artifact": "spec.json"},
+            {"step": "review_design", "expected_artifact": "design_architecture_review.json"},
+            {"step": "review_delivery", "expected_artifact": "delivery_plan.json"},
+            {"step": "review_tests", "expected_artifact": "test_evidence_gate.json"},
+            {"step": "bind_release", "expected_artifact": "release_gate.json"},
+        ],
+        "privacy_note": "No source text, customer names, repo paths, or local absolute paths are included.",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture delivery case summary")
     parser.add_argument("--artifact-dir", required=True)
     parser.add_argument("--case-id", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--replay-skeleton", action="store_true")
     args = parser.parse_args()
-    result = capture(Path(args.artifact_dir), args.case_id)
+    result = replay_skeleton(Path(args.artifact_dir), args.case_id) if args.replay_skeleton else capture(Path(args.artifact_dir), args.case_id)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

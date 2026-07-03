@@ -55,6 +55,11 @@ def test_code_index_build_and_lookup() -> None:
         repo = create_repo(Path(tmp))
         index = build_index.build(repo, "web-app")
         assert index["schema"] == "codex-code-index-v1"
+        assert index["decision"] == "pass"
+        assert index["confidence"] == "high"
+        assert index["confidence_details"]
+        assert index["generated_at"]
+        assert "source_revision" in index
         assert index["file_count"] >= 2
         result = lookup_index.lookup(index, "checkout", 5)
         assert result["schema"] == "codex-code-index-lookup-v1"
@@ -166,10 +171,11 @@ def test_project_runner_new_and_legacy_manage_project_assets() -> None:
             dependencies=["api-service"],
         )
         assert new_result["schema"] == "codex-project-runner-summary-v1"
-        assert new_result["decision"] in {"pass", "warn"}
+        assert new_result["decision"] == "pass"
         assert (overlay / "skills/web-app/SKILL.md").exists()
         assert (overlay / "projects.yaml").exists()
         assert (overlay / "indexes/web-app.code_index.json").exists()
+        assert (overlay / "baseline/web-app.baseline.json").exists()
         assert root.as_posix() not in (overlay / "skills/web-app/SKILL.md").read_text(encoding="utf-8")
 
         legacy_out = root / "understanding"
@@ -184,6 +190,7 @@ def test_project_runner_new_and_legacy_manage_project_assets() -> None:
             dependencies=["api-service"],
         )
         assert legacy_result["schema"] == "codex-project-runner-summary-v1"
+        assert legacy_result["decision"] == "pass"
         assert legacy_result["mode"] == "legacy"
         assert (overlay / "baseline/web-app.baseline.json").exists()
         assert "src/app.py" in (overlay / "skills/web-app/references/code-index.md").read_text(encoding="utf-8")

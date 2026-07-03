@@ -35,6 +35,25 @@ def load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def load_policy(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".json":
+        try:
+            data = json.loads(text)
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+    try:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(text)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -153,7 +172,77 @@ def post_release_items(evidence: dict[str, dict[str, Any]]) -> list[Any]:
     return result
 
 
-def bind(artifact_dir: Path, change_type: str = "code") -> dict[str, Any]:
+def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    gaps: list[dict[str, Any]] = []
+    policy = policy or {}
+    required_envs = [str(item) for item in as_list(policy.get("required_environments"))] or ["pre", "prod"]
+    env_required_fields = [str(item) for item in as_list(policy.get("environment_required_fields"))] or ["entry_criteria", "exit_criteria", "validation_evidence", "approver"]
+    release_required_fields = [str(item) for item in as_list(policy.get("release_change_required_fields"))] or ["release_window", "approvers", "rollback_owner"]
+    environment_aliases = policy.get("environment_aliases") if isinstance(policy.get("environment_aliases"), dict) else {}
+    approver_roles = [str(item) for item in as_list(policy.get("required_approver_roles"))]
+    ticket_fields = [str(item) for item in as_list(policy.get("required_ticket_fields"))]
+    observation_metrics = [str(item) for item in as_list(policy.get("required_observation_metrics"))]
+    require_prod_rollback = policy.get("require_prod_rollback_ready", True) is not False
+    environment = evidence.get("environment_promotion", {})
+    envs = environment.get("environments") if isinstance(environment.get("environments"), list) else []
+    by_name = {item.get("name"): item for item in envs if isinstance(item, dict)}
+    for env in required_envs:
+        aliases = [env, *[str(item) for item in as_list(environment_aliases.get(env))]]
+        item = next((by_name.get(alias) for alias in aliases if by_name.get(alias)), None)
+        if not item:
+            gaps.append({"source": "environment_promotion", "message": f"{env} environment policy is required"})
+            continue
+        for key in env_required_fields:
+            value = item.get(key)
+            missing = not as_list(value) if isinstance(value, list) else not value
+            if missing:
+                gaps.append({"source": "environment_promotion", "message": f"{env}.{key} is required"})
+        if env == "prod" and require_prod_rollback and item.get("rollback_ready") is not True:
+            gaps.append({"source": "environment_promotion", "message": "prod.rollback_ready must be true"})
+    release_change = evidence.get("release_change", {})
+    window = release_change.get("release_window") if isinstance(release_change.get("release_window"), dict) else {}
+    if "release_window" in release_required_fields and not all(window.get(key) for key in ["start", "end", "timezone"]):
+        gaps.append({"source": "release_change", "message": "release_window start/end/timezone are required"})
+    for key in release_required_fields:
+        if key == "release_window":
+            continue
+        value = release_change.get(key)
+        missing = not as_list(value) if isinstance(value, list) else not value
+        if missing:
+            message = "release approvers are required" if key == "approvers" else f"{key} is required"
+            gaps.append({"source": "release_change", "message": message})
+    approvers = as_list(release_change.get("approvers"))
+    approver_role_values = set()
+    for item in approvers:
+        if isinstance(item, dict):
+            approver_role_values.add(str(item.get("role") or item.get("type") or item.get("name") or ""))
+        elif isinstance(item, str):
+            approver_role_values.add(item)
+    missing_roles = [role for role in approver_roles if role not in approver_role_values]
+    for role in missing_roles:
+        gaps.append({"source": "release_change", "message": f"required approver role missing: {role}"})
+    ticket = release_change.get("ticket") if isinstance(release_change.get("ticket"), dict) else {}
+    for field in ticket_fields:
+        if not ticket.get(field):
+            gaps.append({"source": "release_change", "message": f"ticket.{field} is required"})
+    post_release = evidence.get("post_release_checks", {})
+    metric_sources = []
+    metric_sources.extend(as_list(release_change.get("observation_metrics")))
+    metric_sources.extend(as_list(post_release.get("observation_metrics")))
+    metric_sources.extend(as_list(post_release.get("checks")))
+    rendered_metrics = set()
+    for item in metric_sources:
+        if isinstance(item, dict):
+            rendered_metrics.add(str(item.get("name") or ""))
+        elif isinstance(item, str):
+            rendered_metrics.add(item)
+    for metric in observation_metrics:
+        if metric not in rendered_metrics:
+            gaps.append({"source": "post_release_checks", "message": f"observation metric required: {metric}"})
+    return gaps
+
+
+def bind(artifact_dir: Path, change_type: str = "code", policy: dict[str, Any] | None = None) -> dict[str, Any]:
     evidence = collect_artifacts(artifact_dir)
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -203,6 +292,8 @@ def bind(artifact_dir: Path, change_type: str = "code") -> dict[str, Any]:
         blockers.append({"source": "rollback", "message": "rollback plan is required"})
     if change_type != "docs" and not post_release:
         blockers.append({"source": "post_release_checks", "message": "post-release checks are required"})
+    if change_type != "docs":
+        blockers.extend(release_policy_gaps(evidence, policy=policy))
 
     missing_evidence = [item["source"] for item in blockers if "is required" in item.get("message", "")]
     next_required_actions = [
@@ -234,6 +325,7 @@ def bind(artifact_dir: Path, change_type: str = "code") -> dict[str, Any]:
         "rollback_plan": rollback,
         "post_release_checks": post_release,
         "source_files": sorted(set(source_files)),
+        "release_policy": policy or {},
         "next_action": "Do not release. Fix blockers and re-bind evidence." if blockers else "Proceed to release approval/change process.",
     }
 
@@ -259,11 +351,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Bind release evidence into a final gate")
     parser.add_argument("--artifact-dir", required=True)
     parser.add_argument("--change-type", choices=["code", "config", "docs"], default="code")
+    parser.add_argument("--policy", help="Optional release policy YAML/JSON file")
     parser.add_argument("--out")
     parser.add_argument("--validate", action="store_true")
     args = parser.parse_args()
 
-    result = bind(Path(args.artifact_dir), change_type=args.change_type)
+    result = bind(Path(args.artifact_dir), change_type=args.change_type, policy=load_policy(Path(args.policy) if args.policy else None))
     if args.out:
         Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))

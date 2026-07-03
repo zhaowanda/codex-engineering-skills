@@ -33,6 +33,22 @@ def extract_package_json(path: Path) -> tuple[list[str], list[str], list[str]]:
 
 
 def analyze(repo: Path, project: str) -> dict[str, Any]:
+    if not repo.exists() or not repo.is_dir():
+        return {
+            "schema": SCHEMA,
+            "project": project,
+            "decision": "block",
+            "confidence": "low",
+            "confidence_details": [{"dimension": "repo", "score": 0, "reason": "repo path is missing or not a directory"}],
+            "ecosystems": [],
+            "manifests": [],
+            "build_command_hints": [],
+            "test_command_hints": [],
+            "blockers": [{"source": "repo", "message": "repo path is missing or not a directory"}],
+            "warnings": [],
+        }
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     manifests: list[dict[str, Any]] = []
     ecosystems: set[str] = set()
     build_hints: list[str] = []
@@ -55,13 +71,24 @@ def analyze(repo: Path, project: str) -> dict[str, Any]:
         test_hints.append("pytest")
     if "node" in ecosystems and not test_hints:
         test_hints.append("npm test")
+    if not manifests:
+        warnings.append({"source": "dependency_surface", "message": "no dependency manifests detected"})
     return {
         "schema": SCHEMA,
         "project": project,
+        "decision": "block" if blockers else "warn" if warnings else "pass",
+        "confidence": "high" if manifests else "low",
+        "confidence_details": [
+            {"dimension": "manifests", "score": min(100, len(manifests) * 35), "reason": f"{len(manifests)} dependency manifests detected"},
+            {"dimension": "ecosystems", "score": min(100, len(ecosystems) * 50), "reason": f"{len(ecosystems)} ecosystems detected"},
+            {"dimension": "test_commands", "score": 100 if test_hints else 0, "reason": "test command hints detected" if test_hints else "no test command hints detected"},
+        ],
         "ecosystems": sorted(ecosystems),
         "manifests": manifests,
         "build_command_hints": sorted(set(build_hints)),
         "test_command_hints": sorted(set(test_hints)),
+        "blockers": blockers,
+        "warnings": warnings,
     }
 
 
@@ -76,7 +103,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if result["decision"] != "block" else 1
 
 
 if __name__ == "__main__":

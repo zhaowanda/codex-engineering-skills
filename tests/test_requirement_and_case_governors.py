@@ -83,12 +83,25 @@ def test_delivery_case_capture_summarizes_artifacts() -> None:
         assert result["blockers_observed"]
 
 
+def test_delivery_case_capture_can_emit_anonymized_replay_skeleton() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "spec.json", {"schema": "codex-spec-v1", "decision": "ready_for_design", "blockers": []})
+        result = capture_case.replay_skeleton(root, "CASE-REPLAY")
+        assert result["schema"] == "codex-delivery-replay-skeleton-v1"
+        assert result["anonymized"] is True
+        assert result["artifacts"][0]["artifact"] == "spec.json"
+        rendered = json.dumps(result)
+        assert str(root) not in rendered
+
+
 def run_all() -> None:
     test_requirement_ingestor_normalizes_markdown()
     test_requirement_ingestor_blocks_pdf_without_text()
     test_question_governor_blocks_required_open_questions()
     test_question_governor_passes_closed_required_questions()
     test_delivery_case_capture_summarizes_artifacts()
+    test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
 
 
 if __name__ == "__main__":

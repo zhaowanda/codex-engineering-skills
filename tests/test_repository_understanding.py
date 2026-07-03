@@ -31,6 +31,10 @@ project_understand = load_module("project_understand_new", ROOT / "skills/core/p
 def test_repository_analyzer_detects_structure() -> None:
     result = repository_analyzer.analyze(FIXTURE, "basic-web-service")
     assert result["schema"] == "codex-repository-analysis-v1"
+    assert result["decision"] == "pass"
+    assert result["confidence"] in {"high", "medium"}
+    assert result["confidence_details"]
+    assert not result["blockers"]
     assert result["languages"]["python"] >= 2
     assert "fastapi" in result["framework_hints"]
     assert "pyproject.toml" in result["build_files"]
@@ -41,24 +45,52 @@ def test_repository_analyzer_detects_structure() -> None:
 
 def test_api_config_dependency_and_git_extractors() -> None:
     api = api_surface.extract(FIXTURE, "basic-web-service")
+    assert api["decision"] == "pass"
+    assert api["confidence"] == "high"
+    assert api["confidence_details"]
     routes = {item["route"] for item in api["routes"]}
     assert "/health" in routes
     assert "/orders" in routes
 
     config = config_surface.extract(FIXTURE, "basic-web-service")
+    assert config["decision"] == "pass"
+    assert config["confidence"] == "high"
+    assert config["confidence_details"]
     rendered = json.dumps(config)
     assert "DATABASE_URL" not in rendered
     assert "PAYMENT_PROVIDER" not in rendered
     assert any(item["path"] == "config/application.yml" for item in config["config_items"])
 
     deps = dependency_surface.analyze(FIXTURE, "basic-web-service")
+    assert deps["decision"] == "pass"
+    assert deps["confidence"] == "high"
+    assert deps["confidence_details"]
     assert "python" in deps["ecosystems"]
     assert "pytest" in deps["test_command_hints"]
 
     history = git_history.mine(FIXTURE, "basic-web-service")
     assert history["schema"] == "codex-git-history-mining-v1"
     assert history["decision"] in {"pass", "warn"}
+    assert history["confidence"] in {"high", "low"}
+    assert history["confidence_details"]
     assert not history["blockers"]
+
+
+def test_repository_extractors_share_machine_decision_contract() -> None:
+    missing = FIXTURE / "missing"
+    outputs = [
+        repository_analyzer.analyze(missing, "missing"),
+        api_surface.extract(missing, "missing"),
+        config_surface.extract(missing, "missing"),
+        dependency_surface.analyze(missing, "missing"),
+        git_history.mine(missing, "missing"),
+    ]
+    for output in outputs:
+        assert output["decision"] == "block"
+        assert output["confidence"] == "low"
+        assert output["confidence_details"]
+        assert output["blockers"]
+        assert isinstance(output["warnings"], list)
 
 
 def test_project_understanding_runner_writes_artifacts() -> None:

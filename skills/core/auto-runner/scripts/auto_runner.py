@@ -353,6 +353,90 @@ def profile_selection_confidence(candidates: list[dict[str, Any]]) -> str:
     return "low"
 
 
+def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidence: str = "") -> dict[str, Any]:
+    lane = str(spec.get("lane") or "")
+    impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
+    profile_name = str(profile.get("name") or "")
+    regulated_impacts = {"data", "database", "security", "permission", "performance", "configuration"}
+    reasons: list[str] = []
+    if impacts & regulated_impacts or "data_migration" in profile_name:
+        reasons.extend(sorted(impacts & regulated_impacts) or ["data_migration_profile"])
+        tier = "regulated"
+    elif lane in {"bugfix", "hotfix"} and not impacts:
+        reasons.append("defect lane without declared high-risk impact")
+        tier = "light"
+    elif profile_name == "release_readiness":
+        reasons.append("release readiness uses release-only evidence")
+        tier = "regulated"
+    else:
+        reasons.append("standard design and evidence path")
+        tier = "standard"
+    if confidence == "low" and tier == "light":
+        tier = "standard"
+        reasons.append("low profile confidence raises minimum strictness")
+    required_controls = {
+        "light": ["spec", "technical_design", "test_design", "delivery_plan_review", "git_edit_permit"],
+        "standard": ["spec", "technical_design", "architecture_design", "test_design", "test_data_plan", "design_review", "delivery_plan_review", "docs_quality", "git_edit_permit"],
+        "regulated": ["standard_controls", "security_or_configuration_review", "performance_or_release_evidence", "environment_uat_release_gates"],
+    }[tier]
+    return {
+        "tier": tier,
+        "reasons": reasons,
+        "required_controls": required_controls,
+        "lane": lane,
+        "impacts": sorted(impacts),
+        "profile": profile_name,
+    }
+
+
+def effective_workflow_controls(profile: dict[str, Any], strictness: dict[str, Any]) -> dict[str, Any]:
+    tier = strictness.get("tier", "")
+    gate_artifacts = as_list(profile.get("required_gate_artifacts"))
+    expected_artifacts = as_list(profile.get("expected_artifacts"))
+    gate_overrides: list[str] = []
+    if tier == "light":
+        allowed = {"spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json", "docs_quality.json"}
+        original_gate_count = len(gate_artifacts)
+        gate_artifacts = [item for item in gate_artifacts if isinstance(item, dict) and str(item.get("artifact") or "") in allowed]
+        expected_artifacts = [item for item in expected_artifacts if str(item) in allowed]
+        gate_overrides.append(f"light tier limits effective gates from {original_gate_count} to {len(gate_artifacts)}")
+    return {
+        "tier": tier,
+        "required_controls": strictness.get("required_controls", []),
+        "required_skills": as_list(profile.get("required_skills")),
+        "required_gate_artifacts": gate_artifacts,
+        "expected_artifacts": expected_artifacts,
+        "gate_overrides": gate_overrides,
+    }
+
+
+def effective_profile_for_strictness(profile: dict[str, Any], strictness: dict[str, Any]) -> dict[str, Any]:
+    controls = effective_workflow_controls(profile, strictness)
+    effective = json.loads(json.dumps(profile, ensure_ascii=False))
+    effective["required_gate_artifacts"] = controls["required_gate_artifacts"]
+    effective["expected_artifacts"] = controls["expected_artifacts"]
+    effective["strictness_gate_overrides"] = controls["gate_overrides"]
+    return effective
+
+
+def strictness_gate_gaps(profile: dict[str, Any], strictness: dict[str, Any]) -> list[dict[str, Any]]:
+    tier = strictness.get("tier")
+    if tier != "regulated":
+        return []
+    skills = {str(item) for item in as_list(profile.get("required_skills"))}
+    impacts = {str(item) for item in as_list(strictness.get("impacts"))}
+    gaps: list[dict[str, Any]] = []
+    if "release-evidence-binder" not in skills:
+        gaps.append({"source": "workflow_strictness", "message": "regulated workflow requires release-evidence-binder"})
+    if impacts & {"data", "database", "security"} and "data-security-governor" not in skills:
+        gaps.append({"source": "workflow_strictness", "message": "regulated data/security workflow requires data-security-governor"})
+    if "configuration" in impacts and "configuration-governor" not in skills:
+        gaps.append({"source": "workflow_strictness", "message": "regulated configuration workflow requires configuration-governor"})
+    if "performance" in impacts and "performance-governor" not in skills:
+        gaps.append({"source": "workflow_strictness", "message": "regulated performance workflow requires performance-governor"})
+    return gaps
+
+
 def unique_extend(target: list[Any], values: list[Any]) -> None:
     seen = {json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, dict) else str(item) for item in target}
     for value in values:
@@ -788,11 +872,15 @@ def run(
         docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
         if docs_sync.get("decision") == "pass":
             docs_status = docs_readiness(effective_docs_root, doc_id)
+        strictness = workflow_strictness({}, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+        effective_profile = effective_profile_for_strictness(selected_profile, strictness)
         blockers = collect_blockers(steps, inspect_status)
         if docs_sync.get("decision") == "block":
             blockers.extend(docs_sync.get("blockers", []))
-        missing_profile = missing_profile_artifacts(selected_profile, out)
-        gate_gaps = profile_gate_gaps(selected_profile, out)
+        strictness_gaps = strictness_gate_gaps(selected_profile, strictness)
+        blockers.extend(strictness_gaps)
+        missing_profile = missing_profile_artifacts(effective_profile, out)
+        gate_gaps = profile_gate_gaps(effective_profile, out)
         summary = {
             "schema": SCHEMA,
             "decision": "block" if blockers else "pass",
@@ -808,6 +896,9 @@ def run(
             "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
             "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
             "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
+            "workflow_strictness": strictness,
+            "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
+            "strictness_gate_gaps": strictness_gaps,
             "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
             "required_gates": selected_profile.get("required_skills", []),
             "docs_readiness": docs_status,
@@ -1071,6 +1162,9 @@ def run(
         except Exception:
             inspect_status = {}
 
+    strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+    effective_profile = effective_profile_for_strictness(selected_profile, strictness)
+    strictness_gaps = strictness_gate_gaps(selected_profile, strictness)
     blockers = collect_blockers(steps, inspect_status, include_inspect=False)
     readiness_blockers = [item for item in inspect_status.get("blockers", []) or [] if isinstance(item, dict)]
     if docs_sync.get("decision") == "block":
@@ -1079,8 +1173,9 @@ def run(
         blockers.extend(docs_status.get("blockers", []))
     if docs_quality.get("decision") == "block":
         blockers.extend(docs_quality.get("blockers", []))
-    missing_profile = missing_profile_artifacts(selected_profile, out)
-    gate_gaps = profile_gate_gaps(selected_profile, out)
+    blockers.extend(strictness_gaps)
+    missing_profile = missing_profile_artifacts(effective_profile, out)
+    gate_gaps = profile_gate_gaps(effective_profile, out)
     summary = {
         "schema": SCHEMA,
         "decision": "block" if blockers else "pass",
@@ -1096,6 +1191,9 @@ def run(
         "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
         "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
         "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
+        "workflow_strictness": strictness,
+        "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
+        "strictness_gate_gaps": strictness_gaps,
         "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
         "required_gates": selected_profile.get("required_skills", []),
         "docs_readiness": docs_status,

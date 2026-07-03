@@ -36,6 +36,7 @@ def load_module(name: str, path: Path):
 
 project_onboard = load_module("project_onboard", skill_script("project-onboard", "project_onboard.py"))
 code_index = load_module("code_index", skill_script("code-index-builder", "build_index.py"))
+baseline_reverser = load_module("baseline_reverser", skill_script("project-baseline-reverser", "reverse_baseline.py"))
 overlay_health = load_module("overlay_health", skill_script("overlay-health", "overlay_health.py"))
 
 
@@ -49,6 +50,13 @@ def build_canonical_index(repo: Path, project: str, overlay_root: Path) -> Path:
     index_path = overlay_root / "indexes" / f"{project}.code_index.json"
     write_json(index_path, index)
     return index_path
+
+
+def build_canonical_baseline(repo: Path, project: str, overlay_root: Path) -> Path:
+    baseline = baseline_reverser.reverse(repo, project)
+    baseline_path = overlay_root / "baseline" / f"{project}.baseline.json"
+    write_json(baseline_path, baseline)
+    return baseline_path
 
 
 def summarize(
@@ -112,6 +120,7 @@ def run_new(
         dependencies=dependencies,
     )
     index_path = build_canonical_index(repo, project, overlay_root)
+    build_canonical_baseline(repo, project, overlay_root)
     return summarize("new", project, overlay_root, onboard_result, index_path)
 
 

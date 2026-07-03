@@ -18,6 +18,7 @@ def test_template_contains_page_specific_fields() -> None:
     assert result["page_type"] == "form"
     assert "form_checks" in result
     assert "console_errors" in result
+    assert result["browser_evidence"]["tested_route"] == "http://localhost:3000/orders/new"
 
 
 def test_validate_passes_list_evidence_with_clean_browser_state() -> None:
@@ -83,6 +84,39 @@ def test_validate_blocks_export_without_output() -> None:
     assert any("export output" in item["message"] for item in result["blockers"])
 
 
+def test_validate_blocks_required_or_empty_screenshot_evidence() -> None:
+    evidence = frontend_acceptance.template("detail", "http://localhost:3000/orders/1")
+    evidence.update({"page_load": {"loaded": True}, "dom_evidence": [{"selector": "#order"}], "screenshot_required": True})
+    missing = frontend_acceptance.validate_evidence(evidence)
+    assert missing["decision"] == "block"
+    assert any(item["message"] == "screenshot evidence is required" for item in missing["blockers"])
+
+    evidence["screenshot_evidence"] = [{}]
+    empty = frontend_acceptance.validate_evidence(evidence)
+    assert empty["decision"] == "block"
+    assert any("path, selector, or description" in item["message"] for item in empty["blockers"])
+
+
+def test_validate_blocks_browser_evidence_console_and_network_failures() -> None:
+    evidence = frontend_acceptance.template("detail", "http://localhost:3000/orders/1")
+    evidence.update({"page_load": {"loaded": True}, "dom_evidence": [{"selector": "#order"}]})
+    evidence["browser_evidence"].update(
+        {
+            "tested_route": "http://localhost:3000/orders/1",
+            "viewport": "1280x720",
+            "screenshots": [{"description": "detail page"}],
+            "console_errors": ["ReferenceError"],
+            "network_failures": [{"url": "/api/orders/1", "status": 503}],
+        }
+    )
+    result = frontend_acceptance.validate_evidence(evidence)
+    assert result["decision"] == "block"
+    assert result["evidence_summary"]["browser_screenshot_count"] == 1
+    messages = " ".join(item["message"] for item in result["blockers"])
+    assert "console errors" in messages
+    assert "failed network requests" in messages
+
+
 def test_cli_template_writes_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp)
@@ -98,6 +132,8 @@ def run_all() -> None:
     test_validate_blocks_console_and_failed_requests()
     test_validate_blocks_thin_form_evidence()
     test_validate_blocks_export_without_output()
+    test_validate_blocks_required_or_empty_screenshot_evidence()
+    test_validate_blocks_browser_evidence_console_and_network_failures()
     test_cli_template_writes_file()
 
 

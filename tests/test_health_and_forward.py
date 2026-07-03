@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import datetime, timedelta, timezone
 import json
 import subprocess
 import sys
@@ -267,6 +268,68 @@ def test_overlay_health_blocks_missing_registry() -> None:
         result = overlay_health.check(Path(tmp))
         assert result["decision"] == "block"
         assert result["blockers"]
+
+
+def test_overlay_health_blocks_missing_declared_assets_and_warns_stale_assets() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills/web-app").mkdir(parents=True)
+        (root / "skills/web-app/SKILL.md").write_text(
+            "# Web App\n\nOwner boundary: frontend module.\nCommands: npm run build.\nTest command: npm test.\nCode-index: indexes/web-app.code_index.json.\n",
+            encoding="utf-8",
+        )
+        (root / "projects.yaml").write_text(
+            "projects:\n"
+            "  - name: web-app\n"
+            "    assets:\n"
+            "      index: indexes/web-app.code_index.json\n"
+            "      baseline: baseline/web-app.baseline.json\n",
+            encoding="utf-8",
+        )
+        missing = overlay_health.check(root)
+        assert missing["decision"] == "block"
+        messages = " ".join(item["message"] for item in missing["blockers"])
+        assert "project index missing" in messages
+        assert "baseline docs missing" in messages
+
+        (root / "indexes").mkdir()
+        (root / "baseline").mkdir()
+        old = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+        (root / "indexes/web-app.code_index.json").write_text(json.dumps({"generated_at": old}), encoding="utf-8")
+        (root / "baseline/web-app.baseline.json").write_text(json.dumps({"source_revision": "abc123"}), encoding="utf-8")
+        stale = overlay_health.check(root, freshness_days=30)
+        assert stale["decision"] == "warn"
+        assert any("days old" in item["message"] for item in stale["warnings"])
+
+
+def test_overlay_health_reviews_project_skill_guidance_quality() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills/web-app").mkdir(parents=True)
+        (root / "skills/web-app/SKILL.md").write_text("---\nname: web-app\ndescription: x\n---\n# Web App\n", encoding="utf-8")
+        (root / "projects.yaml").write_text(
+            "projects:\n"
+            "  - name: web-app\n"
+            "    assets:\n"
+            "      index: indexes/web-app.code_index.json\n"
+            "      baseline: baseline/web-app.baseline.json\n",
+            encoding="utf-8",
+        )
+        (root / "indexes").mkdir()
+        (root / "baseline").mkdir()
+        now = datetime.now(timezone.utc).isoformat()
+        (root / "indexes/web-app.code_index.json").write_text(json.dumps({"generated_at": now}), encoding="utf-8")
+        (root / "baseline/web-app.baseline.json").write_text(json.dumps({"generated_at": now}), encoding="utf-8")
+        weak = overlay_health.check(root)
+        assert weak["decision"] == "block"
+        assert any("ownership and code index" in item["message"] for item in weak["blockers"])
+
+        (root / "skills/web-app/SKILL.md").write_text(
+            "# Web App\n\nOwner boundary: frontend module.\nCommands: npm run build.\nTest command: npm test.\nCode-index: indexes/web-app.code_index.json.\n",
+            encoding="utf-8",
+        )
+        strong = overlay_health.check(root)
+        assert strong["decision"] == "pass"
 
 
 def test_human_doc_review_detects_local_path() -> None:
@@ -815,7 +878,9 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["implement_dry_run_available"] is True
     assert metrics["human_output_available"] is True
     assert metrics["profile_scoring_available"] is True
+    assert metrics["scenario_count"] >= 8
     assert metrics["scenario_catalog_count"] >= 8
+    assert metrics["scenario_count"] == metrics["scenario_catalog_count"]
     assert metrics["scenario_matrix_count"] == metrics["scenario_catalog_count"]
     assert metrics["scenario_matrix_gate_coverage_count"] == metrics["scenario_catalog_count"]
     assert metrics["documented_scenario_count"] == metrics["scenario_catalog_count"]
@@ -839,6 +904,8 @@ def run_all() -> None:
     test_final_target_skill_docs_have_operational_guidance()
     test_skill_quality_distribution_is_all_a_level()
     test_overlay_health_blocks_missing_registry()
+    test_overlay_health_blocks_missing_declared_assets_and_warns_stale_assets()
+    test_overlay_health_reviews_project_skill_guidance_quality()
     test_human_doc_review_detects_local_path()
     test_human_doc_review_warns_thin_doc()
     test_human_doc_review_strict_blocks_warnings()

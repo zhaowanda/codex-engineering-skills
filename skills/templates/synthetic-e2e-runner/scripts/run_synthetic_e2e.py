@@ -48,9 +48,9 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def write_release_governance_examples(out_dir: Path) -> None:
-    write_json(out_dir / "environment_promotion.json", {"decision": "pass", "blockers": []})
+    write_json(out_dir / "environment_promotion.json", {"decision": "pass", "blockers": [], "environments": [{"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke"], "approver": "release-owner", "rollback_ready": True}, {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke"], "approver": "release-owner", "rollback_ready": True}]})
     write_json(out_dir / "uat_acceptance.json", {"decision": "pass", "blockers": []})
-    write_json(out_dir / "release_change.json", {"decision": "pass", "blockers": [], "rollback_plan": ["rollback synthetic app"], "post_release_checks": ["check synthetic metric"]})
+    write_json(out_dir / "release_change.json", {"decision": "pass", "blockers": [], "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"}, "approvers": ["release-owner"], "rollback_plan": ["rollback synthetic app"], "rollback_owner": "release-owner", "post_release_checks": ["check synthetic metric"]})
 
 
 def write_frontend_happy_evidence(out_dir: Path) -> None:
@@ -106,9 +106,9 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "code_review_gate.json", {"decision": "approve", "active_blockers": [], "active_concerns": []})
     write_json(out_dir / "test_evidence_gate.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(out_dir / "ci_execution_evidence.json", {"failed_commands": [], "unknown_commands": [], "executed_commands": [{"command": "pytest", "status": "passed"}]})
-    write_json(out_dir / "environment_promotion.json", {"decision": "pass", "blockers": []})
+    write_json(out_dir / "environment_promotion.json", {"decision": "pass", "blockers": [], "environments": [{"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke"], "approver": "release-owner", "rollback_ready": True}, {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke"], "approver": "release-owner", "rollback_ready": True}]})
     write_json(out_dir / "uat_acceptance.json", {"decision": "pass", "blockers": []})
-    write_json(out_dir / "release_change.json", {"decision": "pass", "blockers": [], "rollback_plan": ["rollback synthetic"], "post_release_checks": ["check synthetic metric"]})
+    write_json(out_dir / "release_change.json", {"decision": "pass", "blockers": [], "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"}, "approvers": ["release-owner"], "rollback_plan": ["rollback synthetic"], "rollback_owner": "release-owner", "post_release_checks": ["check synthetic metric"]})
 
 
 def write_docs_manifest(out_dir: Path, doc_id: str) -> Path:

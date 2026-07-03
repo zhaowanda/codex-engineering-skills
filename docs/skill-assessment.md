@@ -13,8 +13,8 @@ The main remaining risk is not basic correctness. It is real-project calibration
 ## Verified Baseline
 
 - `skill_health`: pass, 75 skills, 75 expert-level scores.
-- `benchmark`: pass, 75 skills, 77 scripts, 113 schemas, 6 prompts, 8 documented and forward-tested scenarios.
-- `pytest`: pass, 229 tests.
+- `benchmark`: pass, 75 skills, 77 scripts, 114 schemas, 6 prompts, 8 documented and forward-tested scenarios.
+- `pytest`: pass, 239 tests.
 - `compileall`: pass for `scripts`, `skills`, and `tests`.
 - `privacy_scan`: pass, no hits.
 - `forward_test`: pass for one-line request, long PRD, bugfix, frontend change, cross-repo API, data migration, release readiness, and code review.
@@ -25,6 +25,7 @@ The default orchestration is reasonable:
 
 - `auto-runner` is the right entrypoint for requirement intake because it creates artifacts and reports the next safe action without editing business code.
 - `workflow-profiles.example.yaml` covers the main delivery lanes and uses required gate artifacts instead of relying on prose-only instructions.
+- Auto summaries now expose `workflow_strictness`, effective controls, light-tier gate overrides, and strictness gate gaps, so tiny bugfixes can be reduced while `regulated` paths block when required control skills are missing.
 - Profile composition is useful for mixed-impact work, such as bugfix plus UI/API/data impact.
 - `delivery-runner` and `implement_dry_run.py` provide a practical stop point before edits.
 
@@ -35,13 +36,13 @@ The orchestration can become heavy for very small fixes. That is acceptable for 
 | Area | Level | Notes |
 | --- | --- | --- |
 | Requirements | A | Strong intake, normalization, and ambiguity gating. |
-| Project understanding | A- | Good generic analyzers; real value depends on private overlay quality. |
+| Project understanding | A | Generic analyzers now share `decision`, `blockers`, `warnings`, `confidence`, and `confidence_details`; real value still depends on private overlay quality. |
 | Design | A | Strong technical/architecture design and design review gates. |
 | Delivery planning | A | Good plan rendering, review, state, and next-action inspection. |
 | Git/edit readiness | A | Strong controls for branch readiness, edit permits, and write audits. |
 | Post-implementation review | A- | Good diff impact, design quality, risk, evidence, and review aggregation. |
-| Testing/frontend acceptance | A | Test design, test data planning, execution evidence, and browser evidence are now linked; browser evidence still depends on real project integration. |
-| Release | A- | Broad release evidence coverage; production policy must be supplied by teams. |
+| Testing/frontend acceptance | A | Test design, test data planning, execution evidence, browser evidence, screenshot proof, console errors, network failures, route, and viewport/device evidence are linked; real project runs still need actual browser artifacts. |
+| Release | A | Broad release evidence coverage with environment policy, release window, approver, rollback owner, and post-release checks enforced by release evidence binding. |
 | Documentation | A- | Good docs separation and quality checks; needs discipline in delivery docs repos. |
 | Meta/open-source governance | A | Strong health, privacy, schema, compatibility, release, prompt, and roadmap checks. |
 
@@ -63,21 +64,21 @@ Recommended actions:
 | One-line request | Strong | Keep default path lightweight. |
 | Long PRD | Strong | Ensure open questions block design when material. |
 | Bugfix | Strong | Avoid adding release-only gates unless risk requires them. |
-| Frontend change | Strong | Bind generated acceptance templates to real browser evidence. |
-| Cross-repo API | Good | Requires project registry and baseline docs in private overlay. |
-| Data migration | Good | Needs real rollback, data security, and environment evidence. |
-| Release readiness | Good | Needs team-specific approval and production policy. |
+| Frontend change | Strong | Browser evidence now supports screenshot, route, viewport/device, console, and network proof; real project runs still need actual browser artifacts. |
+| Cross-repo API | Strong | Requires fresh project registry, index, and baseline docs in private overlay. |
+| Data migration | Good | Needs real-project rollback, data security, and performance evidence calibration. |
+| Release readiness | Strong | Built-in release policy covers core controls; team-specific policy overlays can tighten environment aliases, approval roles, tickets, and observation metrics. |
 | Code review | Strong | Best after write guard, diff impact, tests, and CI evidence exist. |
 
 ## Optimization Backlog
 
 1. Keep command documentation dual-mode: installed skill commands use `python3 scripts/...`; repository-root examples should use `python3 scripts/codex_eng.py ...`.
 2. Keep test data plans linked to execution evidence: `test_design.json` declares data refs, `test_data_plan.json` defines synthetic/anonymized data, and `test_execution_evidence.json` records dataset usage.
-3. Add real-project replay cases for backend API, frontend UI, data/config-sensitive change, and release readiness.
-4. Add profile strictness tiers, such as `light`, `standard`, and `regulated`, so tiny changes are not over-gated.
-5. Add more assertions around profile composition for mixed-impact changes.
-6. Expand frontend acceptance examples with real browser artifacts where possible.
-7. Add private overlay quality gates for project skills, generated indexes, and baseline docs before real delivery.
+3. Expand anonymized replay skeleton fixtures into captured real-project replay cases after private data review.
+4. Tune private overlay freshness and project-skill content thresholds per team once generated indexes and baseline docs are in regular use.
+5. Validate light-tier gate reduction against several real bugfix deliveries before making it the default for all defect work.
+6. Expand frontend acceptance examples with captured browser artifacts from real applications.
+7. Add team-specific release-policy overlays for approvers, release windows, environment names, tickets, and observation metrics.
 
 ## Operating Guidance
 

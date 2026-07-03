@@ -26,6 +26,20 @@ def iter_files(repo: Path):
 
 
 def extract(repo: Path, project: str) -> dict[str, Any]:
+    if not repo.exists() or not repo.is_dir():
+        return {
+            "schema": SCHEMA,
+            "project": project,
+            "decision": "block",
+            "confidence": "low",
+            "confidence_details": [{"dimension": "repo", "score": 0, "reason": "repo path is missing or not a directory"}],
+            "route_count": 0,
+            "routes": [],
+            "blockers": [{"source": "repo", "message": "repo path is missing or not a directory"}],
+            "warnings": [],
+        }
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     routes: list[dict[str, Any]] = []
     for path in iter_files(repo):
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -35,7 +49,22 @@ def extract(repo: Path, project: str) -> dict[str, Any]:
                 route = match.group(2) if kind in {"fastapi", "express"} else match.group(1) if kind == "frontend-route" else match.group(0)
                 method = match.group(1).upper() if kind in {"fastapi", "express"} else ""
                 routes.append({"kind": kind, "method": method, "route": route[:180], "file": rel})
-    return {"schema": SCHEMA, "project": project, "route_count": len(routes), "routes": routes[:500]}
+    if not routes:
+        warnings.append({"source": "api_surface", "message": "no route hints detected"})
+    return {
+        "schema": SCHEMA,
+        "project": project,
+        "decision": "block" if blockers else "warn" if warnings else "pass",
+        "confidence": "high" if routes else "low",
+        "confidence_details": [
+            {"dimension": "routes", "score": min(100, len(routes) * 20), "reason": f"{len(routes)} route hints detected"},
+            {"dimension": "framework_patterns", "score": 100 if routes else 0, "reason": "known route patterns matched" if routes else "no known route patterns matched"},
+        ],
+        "route_count": len(routes),
+        "routes": routes[:500],
+        "blockers": blockers,
+        "warnings": warnings,
+    }
 
 
 def main() -> int:
@@ -49,7 +78,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if result["decision"] != "block" else 1
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+schema: codex-release-policy-v1
+required_environments:
+  - pre
+  - prod
+environment_aliases:
+  pre:
+    - preprod
+    - staging
+  prod:
+    - production
+environment_required_fields:
+  - entry_criteria
+  - exit_criteria
+  - validation_evidence
+  - approver
+require_prod_rollback_ready: true
+release_change_required_fields:
+  - release_window
+  - approvers
+  - rollback_owner
+required_approver_roles:
+  - release_owner
+required_ticket_fields:
+  - id
+  - url
+required_observation_metrics:
+  - error_rate
+  - latency_p95

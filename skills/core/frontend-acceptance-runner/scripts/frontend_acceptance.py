@@ -45,6 +45,14 @@ def template(page_type: str, target_url: str) -> dict[str, Any]:
         "pass": False,
         "environment": "",
         "browser": "",
+        "browser_evidence": {
+            "tested_route": target_url,
+            "device": "",
+            "viewport": "",
+            "screenshots": [],
+            "console_errors": [],
+            "network_failures": [],
+        },
         "viewport_evidence": [],
         "page_load": {
             "loaded": False,
@@ -55,6 +63,7 @@ def template(page_type: str, target_url: str) -> dict[str, Any]:
         "dom_evidence": [],
         "interaction_evidence": [],
         "screenshot_evidence": [],
+        "screenshot_required": False,
         "network_requests": [],
         "failed_requests": [],
         "console_errors": [],
@@ -140,14 +149,28 @@ def validate_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     page_load = evidence.get("page_load") if isinstance(evidence.get("page_load"), dict) else {}
     if not boolish(page_load.get("loaded")):
         blockers.append({"source": "page_load", "message": "page load evidence is missing or not loaded"})
+    browser = evidence.get("browser_evidence") if isinstance(evidence.get("browser_evidence"), dict) else {}
+    if browser:
+        if not browser.get("tested_route"):
+            blockers.append({"source": "browser_evidence", "message": "tested_route is required"})
+        if not browser.get("viewport") and not browser.get("device"):
+            warnings.append({"source": "browser_evidence", "message": "viewport or device evidence is recommended"})
     if not has_visual_or_dom_proof(evidence):
         blockers.append({"source": "evidence", "message": "DOM, interaction, or screenshot proof is required"})
+    screenshots = as_list(evidence.get("screenshot_evidence")) + as_list(browser.get("screenshots"))
+    if boolish(evidence.get("screenshot_required")) and not screenshots:
+        blockers.append({"source": "screenshot", "message": "screenshot evidence is required"})
+    for idx, item in enumerate(screenshots):
+        if isinstance(item, dict) and not (item.get("path") or item.get("description") or item.get("selector")):
+            blockers.append({"source": "screenshot", "message": "screenshot evidence requires path, selector, or description", "index": idx})
+        elif not isinstance(item, (dict, str)):
+            blockers.append({"source": "screenshot", "message": "screenshot evidence entries must be strings or objects", "index": idx})
 
-    console_errors = as_list(evidence.get("console_errors"))
+    console_errors = as_list(evidence.get("console_errors")) + as_list(browser.get("console_errors"))
     if console_errors:
         blockers.append({"source": "console", "message": "console errors exist", "count": len(console_errors)})
 
-    failed_requests = as_list(evidence.get("failed_requests"))
+    failed_requests = as_list(evidence.get("failed_requests")) + as_list(browser.get("network_failures"))
     if failed_requests and "failed_requests" not in waivers:
         blockers.append({"source": "network", "message": "failed network requests exist", "count": len(failed_requests)})
     elif failed_requests:
@@ -203,6 +226,7 @@ def validate_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
             "dom_evidence_count": len(as_list(evidence.get("dom_evidence"))),
             "interaction_evidence_count": len(as_list(evidence.get("interaction_evidence"))),
             "screenshot_evidence_count": len(as_list(evidence.get("screenshot_evidence"))),
+            "browser_screenshot_count": len(as_list(browser.get("screenshots"))),
             "failed_request_count": len(failed_requests),
             "console_error_count": len(console_errors),
             "permission_check_count": len(permission_checks),
