@@ -51,17 +51,43 @@ def asset_freshness(path: Path, source: str, freshness_days: int, warnings: list
             warnings.append({"source": source, "message": f"{path.name} is {age_days} days old; refresh recommended", "age_days": age_days, "freshness_days": freshness_days})
 
 
-def check_project_skill_content(skill_path: Path, source: str, blockers: list[dict[str, Any]], warnings: list[dict[str, Any]]) -> None:
+DEFAULT_PROJECT_SKILL_SIGNALS = {
+    "ownership": ["owner", "ownership", "boundary", "module"],
+    "commands": ["command", "build", "run", "启动", "命令"],
+    "test_commands": ["test", "pytest", "npm test", "mvn test", "测试"],
+    "index_reference": ["code-index", "code_index", "indexes/"],
+}
+
+
+def normalize_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
+    policy = policy or {}
+    raw_sections = policy.get("project_skill_required_sections")
+    sections = raw_sections if isinstance(raw_sections, dict) else DEFAULT_PROJECT_SKILL_SIGNALS
+    return {
+        "freshness_days": int(policy.get("freshness_days") or 30),
+        "project_skill_required_sections": {
+            str(name): [str(term).lower() for term in as_list(terms)]
+            for name, terms in sections.items()
+            if as_list(terms)
+        },
+        "block_on_missing_sections": {str(item) for item in as_list(policy.get("block_on_missing_sections"))},
+    }
+
+
+def as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def check_project_skill_content(skill_path: Path, source: str, blockers: list[dict[str, Any]], warnings: list[dict[str, Any]], policy: dict[str, Any]) -> None:
     if not skill_path.exists():
         return
     text = skill_path.read_text(encoding="utf-8", errors="ignore")
     lowered = text.lower()
-    required_signals = {
-        "ownership": ["owner", "ownership", "boundary", "module"],
-        "commands": ["command", "build", "run", "启动", "命令"],
-        "test_commands": ["test", "pytest", "npm test", "mvn test", "测试"],
-        "index_reference": ["code-index", "code_index", "indexes/"],
-    }
+    required_signals = policy["project_skill_required_sections"]
     missing = [
         name
         for name, terms in required_signals.items()
@@ -69,11 +95,16 @@ def check_project_skill_content(skill_path: Path, source: str, blockers: list[di
     ]
     for name in missing:
         warnings.append({"source": source, "message": f"project skill missing {name} guidance"})
-    if {"ownership", "index_reference"}.issubset(set(missing)):
+    policy_blockers = policy["block_on_missing_sections"]
+    if policy_blockers and policy_blockers.intersection(missing):
+        blockers.append({"source": source, "message": f"project skill missing required policy sections: {', '.join(sorted(policy_blockers.intersection(missing)))}"})
+    elif {"ownership", "index_reference"}.issubset(set(missing)):
         blockers.append({"source": source, "message": "project skill lacks ownership and code index guidance"})
 
 
-def check(overlay_root: Path, freshness_days: int = 30) -> dict[str, Any]:
+def check(overlay_root: Path, freshness_days: int = 30, policy: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_policy = normalize_policy(policy)
+    freshness_days = int(normalized_policy.get("freshness_days") or freshness_days)
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     registry_path = overlay_root / "projects.yaml"
@@ -92,7 +123,7 @@ def check(overlay_root: Path, freshness_days: int = 30) -> dict[str, Any]:
         if not skill_path.exists():
             blockers.append({"source": name, "message": "project skill missing"})
         else:
-            check_project_skill_content(skill_path, name, blockers, warnings)
+            check_project_skill_content(skill_path, name, blockers, warnings, normalized_policy)
         assets = project.get("assets") if isinstance(project.get("assets"), dict) else {}
         index_path = overlay_root / str(assets.get("index", f"indexes/{name}.code_index.json"))
         baseline_path = overlay_root / str(assets.get("baseline", f"baseline/{name}.baseline.json"))
@@ -111,6 +142,10 @@ def check(overlay_root: Path, freshness_days: int = 30) -> dict[str, Any]:
         "decision": "block" if blockers else "warn" if warnings else "pass",
         "project_count": len(projects),
         "freshness_days": freshness_days,
+        "policy": {
+            "project_skill_required_sections": sorted(normalized_policy["project_skill_required_sections"]),
+            "block_on_missing_sections": sorted(normalized_policy["block_on_missing_sections"]),
+        },
         "blockers": blockers,
         "warnings": warnings,
     }
@@ -120,8 +155,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Check private overlay health")
     parser.add_argument("--overlay-root", required=True)
     parser.add_argument("--overlay-freshness-days", type=int, default=30)
+    parser.add_argument("--policy", help="Optional overlay health policy YAML/JSON file")
     args = parser.parse_args()
-    result = check(Path(args.overlay_root), freshness_days=args.overlay_freshness_days)
+    policy = load_json(Path(args.policy)) if args.policy and str(args.policy).endswith(".json") else load_yaml_like(Path(args.policy)) if args.policy else None
+    result = check(Path(args.overlay_root), freshness_days=args.overlay_freshness_days, policy=policy)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["decision"] != "block" else 1
 

@@ -363,9 +363,30 @@ def test_auto_runner_routes_bugfix_to_bugfix_profile() -> None:
         assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "bugfix"
         assert result["profile_selection_reason"]["mode"] == "lane"
         assert "git-worktree-governor" in result["required_gates"]
+        assert result["workflow_strictness"]["tier"] in {"light", "standard"}
 
 
-def test_auto_runner_routes_long_prd_to_small_feature_full_design_path() -> None:
+def test_auto_runner_elevates_bugfix_when_permission_impact_exists() -> None:
+    spec = {
+        "lane": "bugfix",
+        "impact_surface": [
+            {"area": "permission"},
+            {"area": "api"},
+        ],
+    }
+    profile, reason = auto_runner.select_workflow_profile_with_reason(spec)
+    strictness = auto_runner.workflow_strictness(spec, profile, "high")
+    assert profile["base_profile"] == "bugfix"
+    assert "data_migration" in profile["overlay_profiles"]
+    assert "cross_repo_api" in profile["overlay_profiles"]
+    assert "data-security-governor" in profile["required_skills"]
+    assert strictness["tier"] == "regulated"
+    assert strictness["elevated"] is True
+    assert "permission" in strictness["elevation_impacts"]
+    assert reason["composition_mode"] == "merged"
+
+
+def test_auto_runner_elevates_long_prd_with_permission_rules() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         req = root / "long-prd.md"
@@ -381,8 +402,10 @@ def test_auto_runner_routes_long_prd_to_small_feature_full_design_path() -> None
         req.write_text("\n".join(lines), encoding="utf-8")
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-LONG", out=out)
-        assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "small_feature"
+        assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "data_migration"
         assert result["profile_selection_reason"]["lane"] == "large_prd"
+        assert result["workflow_strictness"]["tier"] == "regulated"
+        assert "permission" in result["workflow_strictness"]["elevation_impacts"]
         assert "architecture-design-governor" in result["required_gates"]
 
 
@@ -454,10 +477,16 @@ def test_workflow_strictness_classifies_light_standard_and_regulated() -> None:
     assert controls["gate_overrides"]
     standard = auto_runner.workflow_strictness({"lane": "small_change", "impact_surface": [{"area": "ui"}]}, {"name": "frontend_change"}, "medium")
     assert standard["tier"] == "standard"
+    api_bugfix = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "api"}]}, {"name": "bugfix+cross_repo_api"}, "high")
+    assert api_bugfix["tier"] == "standard"
+    assert api_bugfix["elevated"] is True
     regulated = auto_runner.workflow_strictness({"lane": "standard_requirement", "impact_surface": [{"area": "data"}]}, {"name": "data_migration"}, "high")
     assert regulated["tier"] == "regulated"
     profile = {"name": "data_migration", "required_skills": ["release-evidence-binder"]}
     gaps = auto_runner.strictness_gate_gaps(profile, regulated)
+    assert any("data-security-governor" in item["message"] for item in gaps)
+    permission = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "permission"}]}, {"name": "bugfix+data_migration"}, "high")
+    gaps = auto_runner.strictness_gate_gaps({"name": "bugfix+data_migration", "required_skills": ["release-evidence-binder"]}, permission)
     assert any("data-security-governor" in item["message"] for item in gaps)
 
 
@@ -535,7 +564,8 @@ def run_all() -> None:
     test_auto_runner_infers_frontend_profile_from_requirement()
     test_auto_runner_routes_one_line_request_to_small_feature()
     test_auto_runner_routes_bugfix_to_bugfix_profile()
-    test_auto_runner_routes_long_prd_to_small_feature_full_design_path()
+    test_auto_runner_elevates_bugfix_when_permission_impact_exists()
+    test_auto_runner_elevates_long_prd_with_permission_rules()
     test_auto_runner_routes_complex_multi_impact_to_high_risk_profile()
     test_workflow_strictness_classifies_light_standard_and_regulated()
     test_auto_runner_release_profile_only_checks_release_artifacts()

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 from pathlib import Path
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py"
+ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("frontend_acceptance", SCRIPT)
 frontend_acceptance = importlib.util.module_from_spec(spec)
 assert spec.loader
@@ -126,6 +128,16 @@ def test_cli_template_writes_file() -> None:
         assert loaded["page_type"] == "dashboard"
 
 
+def test_clean_browser_evidence_fixture_passes_validation() -> None:
+    fixture = ROOT / "examples/frontend-acceptance/clean-browser-evidence.json"
+    evidence = json.loads(fixture.read_text(encoding="utf-8"))
+    result = frontend_acceptance.validate_evidence(evidence)
+    assert result["decision"] == "pass"
+    assert result["evidence_summary"]["browser_screenshot_count"] == 1
+    assert result["evidence_summary"]["console_error_count"] == 0
+    assert result["evidence_summary"]["failed_request_count"] == 0
+
+
 def run_all() -> None:
     test_template_contains_page_specific_fields()
     test_validate_passes_list_evidence_with_clean_browser_state()
@@ -135,6 +147,7 @@ def run_all() -> None:
     test_validate_blocks_required_or_empty_screenshot_evidence()
     test_validate_blocks_browser_evidence_console_and_network_failures()
     test_cli_template_writes_file()
+    test_clean_browser_evidence_fixture_passes_validation()
 
 
 if __name__ == "__main__":

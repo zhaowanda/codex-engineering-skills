@@ -179,6 +179,27 @@ def test_bind_go_when_optional_release_policy_is_satisfied() -> None:
         assert result["decision"] == "go"
 
 
+def test_bind_regulated_policy_requires_all_environments_and_roles() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        policy = {
+            "required_environments": ["sit", "uat", "pre", "prod"],
+            "environment_required_fields": ["entry_criteria", "exit_criteria", "validation_evidence", "approver", "change_ticket"],
+            "release_change_required_fields": ["release_window", "approvers", "rollback_owner", "release_manager"],
+            "required_approver_roles": ["release_owner", "qa_owner", "business_owner"],
+            "required_ticket_fields": ["id", "url", "risk_level"],
+            "required_observation_metrics": ["error_rate", "latency_p95", "business_success_rate"],
+        }
+        result = bind_release.bind(root, policy=policy)
+        assert result["decision"] == "no_go"
+        messages = " ".join(item["message"] for item in result["blockers"])
+        assert "sit environment policy is required" in messages
+        assert "required approver role missing: qa_owner" in messages
+        assert "ticket.risk_level is required" in messages
+        assert "observation metric required: business_success_rate" in messages
+
+
 def test_docs_change_uses_light_required_evidence() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -199,6 +220,7 @@ def run_all() -> None:
     test_bind_no_go_when_release_policy_is_template_only()
     test_bind_applies_optional_release_policy_overlay()
     test_bind_go_when_optional_release_policy_is_satisfied()
+    test_bind_regulated_policy_requires_all_environments_and_roles()
     test_docs_change_uses_light_required_evidence()
 
 

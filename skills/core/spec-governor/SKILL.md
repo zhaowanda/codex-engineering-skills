@@ -34,8 +34,11 @@ python3 scripts/spec_governor.py \
 
 - Block design if requirement summary, acceptance criteria, scope, or actors are missing.
 - Block implementation if open questions are not closed.
+- Block design when extracted business rules conflict.
 - Keep extracted facts separate from assumptions.
 - For long PRDs, preserve business rules and source evidence references.
+- Extract business objects, operations, data fields, state transitions, impact surface, implicit constraints, and negative acceptance needs.
+- Treat fully inferred acceptance criteria as usable but not expert-ready until confirmed.
 
 ## Output
 

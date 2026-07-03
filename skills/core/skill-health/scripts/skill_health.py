@@ -131,15 +131,25 @@ def as_list(value: Any) -> list[Any]:
 
 def skill_expert_score(skill_text: str, script_text: str, script_count: int, test_refs: int) -> dict[str, Any]:
     combined = f"{skill_text}\n{script_text}".lower()
+    bash_examples = len(re.findall(r"```bash", skill_text))
+    schema_mentions = len(set(re.findall(r"codex-[a-z0-9-]+-v\d+", combined)))
     dimensions = {
         "instruction_structure": all(section in skill_text for section in ["## Rules", "## Output"]),
         "execution_surface": script_count > 0,
-        "schema_contract": bool(re.search(r"codex-[a-z0-9-]+-v\d+", combined)),
+        "schema_contract": schema_mentions > 0,
         "decision_contract": "decision" in combined and ("blockers" in combined or "warnings" in combined),
         "test_coverage_signal": test_refs > 0,
         "evidence_orientation": any(term in combined for term in ["evidence", "traceability", "readiness", "rollback", "gate"]),
         "failure_path": any(term in combined for term in ["block", "blocked", "no_go", "needs_revision", "missing"]),
     }
+    content_quality = {
+        "command_example": bash_examples > 0,
+        "specific_schema_names": schema_mentions > 0,
+        "explicit_failure_mode": dimensions["failure_path"],
+        "artifact_or_evidence_boundary": any(term in combined for term in ["artifact", "evidence", "summary", "review", "gate"]),
+        "concise_instruction_body": len(re.findall(r"\w+", skill_text)) <= 700,
+    }
+    quality_score = sum(20 for passed in content_quality.values() if passed)
     score = 50
     score += 10 if dimensions["instruction_structure"] else 0
     score += 10 if dimensions["execution_surface"] else 0
@@ -149,7 +159,16 @@ def skill_expert_score(skill_text: str, script_text: str, script_count: int, tes
     score += 7 if dimensions["evidence_orientation"] else 0
     score += 7 if dimensions["failure_path"] else 0
     level = "expert" if score >= 90 else "advanced" if score >= 82 else "standard" if score >= 72 else "basic"
-    return {"score": min(score, 100), "level": level, "dimensions": dimensions}
+    return {
+        "score": min(score, 100),
+        "level": level,
+        "dimensions": dimensions,
+        "content_quality": {
+            "score": quality_score,
+            "level": "expert" if quality_score >= 80 else "advanced" if quality_score >= 60 else "basic",
+            "dimensions": content_quality,
+        },
+    }
 
 
 def check(root: Path) -> dict[str, Any]:
@@ -310,12 +329,16 @@ def check(root: Path) -> dict[str, Any]:
             seen_artifacts.add(artifact_name)
     expert_level_count = sum(1 for item in expert_scores if item["level"] == "expert")
     advanced_or_better_count = sum(1 for item in expert_scores if item["level"] in {"expert", "advanced"})
+    content_quality_scores = [int(item.get("content_quality", {}).get("score") or 0) for item in expert_scores]
+    content_quality_average = round(sum(content_quality_scores) / len(content_quality_scores), 2) if content_quality_scores else 0
     return {
         "schema": "codex-skill-health-v1",
         "decision": "block" if blockers else "warn" if warnings else "pass",
         "skill_count": len(skills),
         "expert_level_count": expert_level_count,
         "advanced_or_better_count": advanced_or_better_count,
+        "content_quality_average": content_quality_average,
+        "content_quality_expert_count": sum(1 for score in content_quality_scores if score >= 80),
         "expert_readiness": "expert" if expert_level_count == len(skills) else "advanced" if advanced_or_better_count == len(skills) else "mixed",
         "skill_scores": expert_scores,
         "blockers": blockers,

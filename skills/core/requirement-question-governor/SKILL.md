@@ -33,6 +33,8 @@ python3 scripts/question_governor.py \
 - Block design/implementation while required questions are open.
 - Ask focused questions only; do not ask for information already present in the spec.
 - Track owner, required flag, answer, and status.
+- Generate expert clarification questions from impact surface and implicit constraints, including permission, data/export, API, performance, security, and configuration questions.
+- Treat required questions as closed only when they include an answer.
 
 ## Output
 

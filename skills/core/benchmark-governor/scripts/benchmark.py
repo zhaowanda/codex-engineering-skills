@@ -62,6 +62,7 @@ def report(root: Path) -> dict[str, Any]:
     privacy = run_json(root, ["python3", "scripts/privacy_scan.py", "--root", ".", "--patterns", "config/private-patterns.example.yaml"])
     health = run_json(root, ["python3", "skills/core/skill-health/scripts/skill_health.py", "--root", "."])
     forward = run_json(root, ["python3", "skills/core/forward-test-runner/scripts/forward_test.py", "--root", "."])
+    replay = run_json(root, ["python3", "skills/core/delivery-case-capture/scripts/capture_case.py", "--validate-replay-dir", "examples/replay-cases"])
     forward_scenario_results = {}
     forward_cases = forward["json"].get("cases", []) if isinstance(forward["json"].get("cases"), list) else []
     if forward_cases and isinstance(forward_cases[0], dict):
@@ -77,6 +78,8 @@ def report(root: Path) -> dict[str, Any]:
         blockers.append({"source": "scenario_matrix", "message": "not all scenarios have required skills and gate coverage"})
     if forward["returncode"] != 0:
         blockers.append({"source": "forward_test", "message": "forward test failed"})
+    if replay["returncode"] != 0:
+        blockers.append({"source": "replay_cases", "message": "replay case validation failed"})
     return {
         "schema": SCHEMA,
         "decision": "block" if blockers else "pass",
@@ -103,7 +106,12 @@ def report(root: Path) -> dict[str, Any]:
             "skill_expert_level_count": health["json"].get("expert_level_count", 0),
             "skill_advanced_or_better_count": health["json"].get("advanced_or_better_count", 0),
             "skill_expert_readiness": health["json"].get("expert_readiness", ""),
+            "skill_content_quality_average": health["json"].get("content_quality_average", 0),
+            "skill_content_quality_expert_count": health["json"].get("content_quality_expert_count", 0),
             "forward_test_decision": forward["json"].get("decision"),
+            "replay_case_count": replay["json"].get("case_count", 0),
+            "replay_scenario_count": replay["json"].get("scenario_count", 0),
+            "replay_validation_decision": replay["json"].get("decision"),
         },
         "blockers": blockers,
     }

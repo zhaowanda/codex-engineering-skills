@@ -357,11 +357,15 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
     lane = str(spec.get("lane") or "")
     impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
     profile_name = str(profile.get("name") or "")
-    regulated_impacts = {"data", "database", "security", "permission", "performance", "configuration"}
+    regulated_impacts = {"data", "database", "security", "permission", "performance", "configuration", "release"}
+    standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo"}
     reasons: list[str] = []
     if impacts & regulated_impacts or "data_migration" in profile_name:
         reasons.extend(sorted(impacts & regulated_impacts) or ["data_migration_profile"])
         tier = "regulated"
+    elif lane in {"bugfix", "hotfix"} and impacts & standard_upgrade_impacts:
+        reasons.extend(f"{item} impact raises defect fix above light tier" for item in sorted(impacts & standard_upgrade_impacts))
+        tier = "standard"
     elif lane in {"bugfix", "hotfix"} and not impacts:
         reasons.append("defect lane without declared high-risk impact")
         tier = "light"
@@ -382,6 +386,8 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
     return {
         "tier": tier,
         "reasons": reasons,
+        "elevated": tier != "light" if lane in {"bugfix", "hotfix"} else tier == "regulated",
+        "elevation_impacts": sorted(impacts & (regulated_impacts | standard_upgrade_impacts)),
         "required_controls": required_controls,
         "lane": lane,
         "impacts": sorted(impacts),
@@ -428,7 +434,7 @@ def strictness_gate_gaps(profile: dict[str, Any], strictness: dict[str, Any]) ->
     gaps: list[dict[str, Any]] = []
     if "release-evidence-binder" not in skills:
         gaps.append({"source": "workflow_strictness", "message": "regulated workflow requires release-evidence-binder"})
-    if impacts & {"data", "database", "security"} and "data-security-governor" not in skills:
+    if impacts & {"data", "database", "security", "permission"} and "data-security-governor" not in skills:
         gaps.append({"source": "workflow_strictness", "message": "regulated data/security workflow requires data-security-governor"})
     if "configuration" in impacts and "configuration-governor" not in skills:
         gaps.append({"source": "workflow_strictness", "message": "regulated configuration workflow requires configuration-governor"})
@@ -476,11 +482,11 @@ def merge_workflow_profiles(base: dict[str, Any], overlays: list[dict[str, Any]]
 
 def impact_overlay_profile_names(impacts: set[str], has_repo: bool) -> list[str]:
     names: list[str] = []
-    if has_repo or "api" in impacts:
+    if has_repo or impacts & {"api", "cross_repo"}:
         names.append("cross_repo_api")
-    if "ui" in impacts:
+    if impacts & {"ui", "frontend"}:
         names.append("frontend_change")
-    if {"data", "security", "database", "configuration", "performance"} & impacts:
+    if {"data", "security", "database", "configuration", "performance", "permission", "release"} & impacts:
         names.append("data_migration")
     return names
 
@@ -531,9 +537,15 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
     else:
         priority = [
             ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
+            ("database", "data_migration", "Database changes require migration, rollback, performance, and release evidence gates."),
             ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
+            ("permission", "data_migration", "Permission changes require security, test, and release evidence gates."),
+            ("configuration", "data_migration", "Configuration changes require configuration, rollback, and release evidence gates."),
+            ("performance", "data_migration", "Performance-sensitive changes require performance and release evidence gates."),
+            ("release", "data_migration", "Release-sensitive changes require production readiness gates."),
             ("api", "cross_repo_api", "API changes require contract and traceability gates."),
             ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
+            ("frontend", "frontend_change", "Frontend changes require browser acceptance evidence."),
         ]
         base_profile = {}
         for impact, profile_name, item_reason in priority:

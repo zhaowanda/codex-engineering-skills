@@ -19,6 +19,33 @@ IMPACT_AREAS = {
     "security": ("security", "pii", "secret", "payment", "安全", "隐私", "密钥", "支付"),
 }
 SHALLOW_TERMS = {"user", "existing source", "test evidence", "expected behavior", "preserve existing", "待确认", "unknown", "tbd"}
+BUSINESS_OBJECT_TERMS = {
+    "order": ("order", "orders", "订单"),
+    "payment": ("payment", "payments", "支付"),
+    "invoice": ("invoice", "invoices", "发票"),
+    "customer": ("customer", "customers", "客户"),
+    "report": ("report", "reports", "报表"),
+    "export_file": ("export", "file", "csv", "excel", "导出", "文件"),
+    "dashboard": ("dashboard", "page", "screen", "页面", "看板"),
+}
+FIELD_TERMS = {
+    "id": (" id", "order id", "payment id", "编号", "id"),
+    "status": ("status", "状态"),
+    "retry_count": ("retry count", "retry_count", "重试次数"),
+    "failure_reason": ("failure reason", "失败原因"),
+    "amount": ("amount", "金额"),
+    "email": ("email", "邮箱"),
+    "phone": ("phone", "手机号", "电话"),
+}
+OPERATION_TERMS = {
+    "export": ("export", "download", "导出", "下载"),
+    "view": ("view", "see", "show", "open", "查看", "展示", "打开"),
+    "create": ("create", "add", "新增", "创建"),
+    "update": ("update", "edit", "change", "修改", "编辑"),
+    "delete": ("delete", "remove", "删除"),
+    "retry": ("retry", "重试"),
+}
+HIGH_RISK_IMPACTS = {"data", "permission", "security", "performance", "api", "config"}
 
 
 def as_list(value: Any) -> list[Any]:
@@ -91,7 +118,7 @@ def extract_rules(lines: list[str]) -> list[dict[str, str]]:
     rules: list[dict[str, str]] = []
     for line in lines:
         lower = line.lower()
-        if any(term in lower for term in ["must", "should", "rule", "when", "if ", "only", "不能", "必须", "规则", "如果", "当"]):
+        if any(term in lower for term in ["must", "should", "rule", "when", "if ", "only", "can", "allow", "不能", "必须", "规则", "如果", "当", "允许", "可以"]):
             rules.append({"id": f"BR-{len(rules) + 1}", "rule": line, "source_evidence": "input"})
     return rules
 
@@ -102,6 +129,128 @@ def extract_open_questions(lines: list[str]) -> list[dict[str, str]]:
         if "?" in line or "？" in line or any(term in line.lower() for term in ["tbd", "todo", "待确认", "不确定"]):
             questions.append({"id": f"Q-{len(questions) + 1}", "question": line, "owner": "product/engineering", "status": "open"})
     return questions
+
+
+def matched_terms(text: str, vocabulary: dict[str, tuple[str, ...]]) -> dict[str, list[str]]:
+    lower = text.lower()
+    result: dict[str, list[str]] = {}
+    for name, terms in vocabulary.items():
+        hits = sorted({term for term in terms if term in lower or term in text})
+        if hits:
+            result[name] = hits
+    return result
+
+
+def extract_business_objects(text: str) -> list[dict[str, Any]]:
+    objects = []
+    for name, hits in matched_terms(text, BUSINESS_OBJECT_TERMS).items():
+        objects.append({"name": name, "signals": hits, "source_evidence": "input"})
+    return objects
+
+
+def extract_data_fields(text: str, lines: list[str]) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    for name, hits in matched_terms(text, FIELD_TERMS).items():
+        fields.append({"name": name, "signals": ", ".join(hits), "source_evidence": "input"})
+    for line in lines:
+        match = re.match(r"^(field|字段)[:：\s-]*(.+)$", line, flags=re.I)
+        if match:
+            field = match.group(2).strip()
+            if field and field not in {item["name"] for item in fields}:
+                fields.append({"name": field, "signals": "explicit field line", "source_evidence": "input"})
+    return fields
+
+
+def extract_operations(text: str) -> list[dict[str, Any]]:
+    return [{"name": name, "signals": hits, "source_evidence": "input"} for name, hits in matched_terms(text, OPERATION_TERMS).items()]
+
+
+def extract_state_transitions(lines: list[str]) -> list[dict[str, str]]:
+    transitions: list[dict[str, str]] = []
+    patterns = [
+        re.compile(r"from\s+(.+?)\s+to\s+(.+)", re.I),
+        re.compile(r"状态\s*从\s*(.+?)\s*(?:到|变为)\s*(.+)"),
+    ]
+    for line in lines:
+        for pattern in patterns:
+            match = pattern.search(line)
+            if match:
+                transitions.append({"from": match.group(1).strip(), "to": match.group(2).strip(), "source_evidence": line})
+                break
+    return transitions
+
+
+def rule_action(rule: str) -> str:
+    lower = rule.lower()
+    for operation, terms in OPERATION_TERMS.items():
+        if any(term in lower or term in rule for term in terms):
+            return operation
+    return ""
+
+
+def rule_roles(rule: str) -> set[str]:
+    lower = rule.lower()
+    roles = set()
+    if "non-admin" in lower or "非管理员" in rule:
+        roles.add("non-admin")
+    for role in ["admin", "operator", "customer", "user", "buyer", "管理员", "运营", "客户", "用户"]:
+        if role in lower or role in rule:
+            roles.add(role)
+    if "non-admin" in roles and "admin" in roles:
+        roles.remove("admin")
+    return roles
+
+
+def is_allow_rule(rule: str) -> bool:
+    lower = rule.lower()
+    if any(term in lower for term in ["cannot", "must not", "should not", "unauthorized", "deny", "forbid"]) or any(term in rule for term in ["不能", "不得", "禁止", "无权限"]):
+        return False
+    return bool(re.search(r"\b(can|allow|allows|allowed)\b", lower)) or any(term in rule for term in ["允许", "可以"])
+
+
+def detect_rule_conflicts(rules: list[dict[str, str]]) -> list[dict[str, Any]]:
+    conflicts: list[dict[str, Any]] = []
+    normalized = [{"id": item.get("id", ""), "rule": item.get("rule", ""), "action": rule_action(item.get("rule", "")), "roles": rule_roles(item.get("rule", ""))} for item in rules]
+    for first in normalized:
+        lower = first["rule"].lower()
+        if "only admin" not in lower and "仅管理员" not in first["rule"] and "只有管理员" not in first["rule"]:
+            continue
+        for second in normalized:
+            if first is second or not first["action"] or first["action"] != second["action"]:
+                continue
+            if second["roles"] - {"admin", "管理员"} and is_allow_rule(second["rule"]):
+                conflicts.append({
+                    "id": f"CONFLICT-{len(conflicts) + 1}",
+                    "type": "permission_rule_conflict",
+                    "rules": [first["id"], second["id"]],
+                    "message": f"{first['rule']} conflicts with {second['rule']}",
+                    "severity": "blocker",
+                })
+    return conflicts
+
+
+def infer_implicit_constraints(impacts: list[dict[str, Any]], objects: list[dict[str, Any]], fields: list[dict[str, str]]) -> list[dict[str, str]]:
+    areas = {str(item.get("area")) for item in impacts if isinstance(item, dict)}
+    object_names = {str(item.get("name")) for item in objects if isinstance(item, dict)}
+    field_names = {str(item.get("name")) for item in fields if isinstance(item, dict)}
+    constraints: list[dict[str, str]] = []
+
+    def add(area: str, constraint: str, question: str, required: bool = True) -> None:
+        constraints.append({"area": area, "constraint": constraint, "question": question, "status": "requires_confirmation" if required else "advisory"})
+
+    if "permission" in areas:
+        add("permission", "Role/data-scope boundary must be explicit", "Which roles can perform the operation, and which negative permission cases must pass?")
+    if "data" in areas or "export_file" in object_names:
+        add("data", "Data fields and business definitions must be explicit", "Which fields, filters, data definitions, and masking rules are required?")
+    if "security" in areas or {"email", "phone", "amount"} & field_names:
+        add("security", "Sensitive fields need access, masking, and audit requirements", "Which sensitive fields require masking, audit logging, or restricted access?")
+    if "api" in areas:
+        add("api", "API compatibility and error behavior must be explicit", "Which endpoint, request/response fields, error codes, and old-consumer compatibility rules apply?")
+    if "performance" in areas:
+        add("performance", "Performance threshold and data scale must be explicit", "What latency, throughput, export size, and test data volume thresholds must be met?")
+    if "config" in areas:
+        add("config", "Configuration default, rollout, and rollback behavior must be explicit", "What are the default values, rollout scope, and rollback behavior for configuration changes?")
+    return constraints
 
 
 def is_negative(text: str) -> bool:
@@ -196,10 +345,16 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
     if not actors:
         actors = ["user"]
     impact_surface = detect_impact_surface(text)
+    business_objects = extract_business_objects(text)
+    data_fields = extract_data_fields(text, lines)
+    operations = extract_operations(text)
+    state_transitions = extract_state_transitions(lines)
     personas = extract_personas(sorted(set(actors)))
     scenarios = extract_user_scenarios(lines, sorted(set(actors)))
     objectives = extract_business_objectives(lines)
     negative_acceptance = [item for item in acceptance if item.get("type") == "negative"]
+    rule_conflicts = detect_rule_conflicts(rules)
+    implicit_constraints = infer_implicit_constraints(impact_surface, business_objects, data_fields)
     return {
         "schema": SCHEMA,
         "doc_id": doc_id,
@@ -218,6 +373,10 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
         "personas": personas,
         "user_scenarios": scenarios,
         "business_objectives": objectives,
+        "business_objects": business_objects,
+        "operations": operations,
+        "data_fields": data_fields,
+        "state_transitions": state_transitions,
         "impact_surface": impact_surface,
         "data_classification": classify_data(text),
         "permission_scope": {
@@ -227,13 +386,15 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
         },
         "compatibility_constraints": extract_prefixed(lines, ("compatibility", "兼容", "backward compatible", "向后兼容")),
         "business_rules": rules,
+        "rule_conflicts": rule_conflicts,
+        "implicit_constraints": implicit_constraints,
         "acceptance_criteria": acceptance,
         "negative_acceptance_criteria": negative_acceptance,
         "risks": risks,
         "open_questions": questions,
         "source_trace": [{"line": idx, "text": line} for idx, line in enumerate(lines, start=1)],
-        "decision": "blocked" if questions else "ready_for_design",
-        "next_action": "Close open questions before design." if questions else "Proceed to technical and architecture design.",
+        "decision": "blocked" if questions or rule_conflicts else "ready_for_design",
+        "next_action": "Resolve open questions and rule conflicts before design." if questions or rule_conflicts else "Proceed to technical and architecture design.",
     }
 
 
@@ -257,6 +418,9 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
     open_questions = [q for q in as_list(spec.get("open_questions")) if isinstance(q, dict) and q.get("status", "open") != "closed"]
     if open_questions:
         blockers.append({"source": "open_questions", "message": "open questions must be closed before implementation", "count": len(open_questions)})
+    rule_conflicts = [item for item in as_list(spec.get("rule_conflicts")) if isinstance(item, dict)]
+    if rule_conflicts:
+        blockers.append({"source": "rule_conflicts", "message": "rule conflicts must be resolved before design", "count": len(rule_conflicts)})
     if not as_list(spec.get("business_rules")):
         warnings.append({"source": "business_rules", "message": "no explicit business rules were extracted"})
     if not as_list(spec.get("user_scenarios")):
@@ -264,8 +428,11 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
     if not as_list(spec.get("business_objectives")):
         warnings.append({"source": "business_objectives", "message": "no business objective was captured"})
     impact_surface = [item for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)]
+    impact_areas = {str(item.get("area")) for item in impact_surface}
     if not impact_surface:
         warnings.append({"source": "impact_surface", "message": "no API/UI/data/permission/config/performance/security impact was detected or declared"})
+    if impact_areas & HIGH_RISK_IMPACTS and not as_list(spec.get("implicit_constraints")):
+        warnings.append({"source": "implicit_constraints", "message": "high-risk impacts should produce implicit constraints and clarifying questions"})
     permission_scope = spec.get("permission_scope") if isinstance(spec.get("permission_scope"), dict) else {}
     if permission_scope.get("negative_cases_required") and not as_list(spec.get("negative_acceptance_criteria")):
         blockers.append({"source": "negative_acceptance_criteria", "message": "permission-sensitive requirements need negative acceptance criteria"})
@@ -278,6 +445,9 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
         shallow_hits.extend(sorted(term for term in SHALLOW_TERMS if term in text))
     if shallow_hits:
         warnings.append({"source": "quality", "message": "spec contains shallow or placeholder language", "terms": sorted(set(shallow_hits))})
+    acceptance = [item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
+    if acceptance and all(str(item.get("source_evidence")) != "input" for item in acceptance):
+        warnings.append({"source": "acceptance_criteria", "message": "all acceptance criteria are inferred; confirm testable acceptance before expert-ready design"})
     decision = "block" if blockers else "pass"
     return {
         "schema": "codex-spec-validation-v1",

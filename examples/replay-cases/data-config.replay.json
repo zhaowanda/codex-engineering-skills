@@ -1,0 +1,16 @@
+{
+  "schema": "codex-delivery-replay-skeleton-v1",
+  "case_id": "REPLAY-DATA-CONFIG-001",
+  "anonymized": true,
+  "scenario": "data_config",
+  "source": "artifact_summaries_only",
+  "artifacts": [
+    {"artifact": "configuration_readiness.json", "schema": "codex-configuration-readiness-v1", "decision": "ready", "blocker_count": 0, "warning_count": 1},
+    {"artifact": "data_security_review.json", "schema": "codex-data-security-review-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0}
+  ],
+  "replay_steps": [
+    {"step": "review_configuration", "expected_artifact": "configuration_readiness.json"},
+    {"step": "review_data_security", "expected_artifact": "data_security_review.json"}
+  ],
+  "privacy_note": "No source text, customer names, repo paths, or local absolute paths are included."
+}

@@ -69,6 +69,9 @@ def test_benchmark_governor_reports_metrics() -> None:
     assert result["metrics"]["skill_count"] >= 50
     assert result["metrics"]["privacy_decision"] == "pass"
     assert result["metrics"]["skill_health_decision"] == "pass"
+    assert result["metrics"]["skill_content_quality_average"] > 0
+    assert result["metrics"]["replay_validation_decision"] == "pass"
+    assert result["metrics"]["replay_case_count"] >= 4
 
 
 def run_all() -> None:

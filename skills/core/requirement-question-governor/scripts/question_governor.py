@@ -28,6 +28,28 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def question_key(question: dict[str, Any]) -> str:
+    return str(question.get("question") or "").strip().lower()
+
+
+def add_question(questions: list[dict[str, Any]], question: str, owner: str, required: bool, source: str) -> None:
+    if question.lower() in {question_key(item) for item in questions}:
+        return
+    questions.append({
+        "id": f"Q-{len(questions) + 1}",
+        "question": question,
+        "owner": owner,
+        "required": required,
+        "answer": "",
+        "status": "open",
+        "source": source,
+    })
+
+
+def impact_areas(spec: dict[str, Any]) -> set[str]:
+    return {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
+
+
 def generate(spec: dict[str, Any]) -> dict[str, Any]:
     questions: list[dict[str, Any]] = []
     for item in as_list(spec.get("open_questions")):
@@ -39,12 +61,34 @@ def generate(spec: dict[str, Any]) -> dict[str, Any]:
                 "required": True,
                 "answer": item.get("answer", ""),
                 "status": item.get("status", "open"),
+                "source": "spec.open_questions",
             })
+    for conflict in as_list(spec.get("rule_conflicts")):
+        if isinstance(conflict, dict):
+            add_question(questions, f"Resolve rule conflict: {conflict.get('message')}", "product/engineering", True, "spec.rule_conflicts")
     if not as_list(spec.get("acceptance_criteria")):
-        questions.append({"id": f"Q-{len(questions) + 1}", "question": "What are the acceptance criteria and evidence required?", "owner": "product", "required": True, "answer": "", "status": "open"})
+        add_question(questions, "What are the acceptance criteria and evidence required?", "product", True, "missing.acceptance_criteria")
+    if as_list(spec.get("acceptance_criteria")) and all(str(item.get("source_evidence")) != "input" for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)):
+        add_question(questions, "Confirm concrete, testable acceptance criteria; current acceptance was inferred from the request.", "product", True, "quality.inferred_acceptance")
     scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
     if not as_list(scope.get("out_of_scope")):
-        questions.append({"id": f"Q-{len(questions) + 1}", "question": "What is explicitly out of scope for this change?", "owner": "product/engineering", "required": False, "answer": "", "status": "open"})
+        add_question(questions, "What is explicitly out of scope for this change?", "product/engineering", False, "missing.out_of_scope")
+    for constraint in as_list(spec.get("implicit_constraints")):
+        if isinstance(constraint, dict) and constraint.get("status") == "requires_confirmation" and constraint.get("question"):
+            add_question(questions, str(constraint["question"]), "product/engineering", True, f"implicit.{constraint.get('area', 'constraint')}")
+    areas = impact_areas(spec)
+    if "permission" in areas and not as_list(spec.get("negative_acceptance_criteria")):
+        add_question(questions, "Which unauthorized roles, tenant/data-scope cases, and negative permission tests must fail?", "product/security", True, "impact.permission")
+    if "data" in areas and not as_list(spec.get("data_fields")):
+        add_question(questions, "Which data fields, definitions, filters, null/default rules, and export ordering are required?", "product/data-owner", True, "impact.data")
+    if "api" in areas:
+        add_question(questions, "Which endpoint, request/response fields, error codes, compatibility rules, and old consumers are in scope?", "engineering", True, "impact.api")
+    if "performance" in areas:
+        add_question(questions, "What latency, throughput, batch size, export volume, and performance evidence thresholds are required?", "product/engineering", True, "impact.performance")
+    if "security" in areas:
+        add_question(questions, "Which sensitive fields require masking, authorization checks, audit logs, retention limits, or privacy review?", "security/product", True, "impact.security")
+    if "config" in areas:
+        add_question(questions, "What are the configuration defaults, environment overrides, rollout scope, and rollback behavior?", "engineering/release", True, "impact.config")
     decision = "block" if any(q["required"] and q["status"] != "closed" for q in questions) else "pass"
     return {"schema": SCHEMA, "doc_id": spec.get("doc_id"), "questions": questions, "decision": decision}
 
@@ -56,6 +100,8 @@ def validate_questions(data: dict[str, Any]) -> dict[str, Any]:
     for question in as_list(data.get("questions")):
         if isinstance(question, dict) and question.get("required") and question.get("status") != "closed":
             blockers.append({"source": question.get("id", "question"), "message": "required question is not closed"})
+        if isinstance(question, dict) and question.get("required") and question.get("status") == "closed" and not str(question.get("answer") or "").strip():
+            blockers.append({"source": question.get("id", "question"), "message": "required closed question must include an answer"})
     return {"schema": "codex-open-questions-validation-v1", "decision": "block" if blockers else "pass", "blockers": blockers}
 
 

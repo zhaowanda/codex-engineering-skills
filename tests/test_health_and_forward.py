@@ -79,6 +79,9 @@ def test_skill_health_runs_on_repo() -> None:
     assert result["expert_readiness"] in {"expert", "advanced", "mixed"}
     assert len(result["skill_scores"]) == result["skill_count"]
     assert {"skill", "score", "level", "dimensions"}.issubset(result["skill_scores"][0])
+    assert "content_quality" in result["skill_scores"][0]
+    assert result["content_quality_average"] > 0
+    assert result["content_quality_expert_count"] > 0
     assert not [item for item in result["warnings"] if item["message"] == "skill is not listed in README"]
 
 
@@ -332,6 +335,33 @@ def test_overlay_health_reviews_project_skill_guidance_quality() -> None:
         assert strong["decision"] == "pass"
 
 
+def test_overlay_health_policy_can_require_team_sections() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills/web-app").mkdir(parents=True)
+        (root / "skills/web-app/SKILL.md").write_text(
+            "# Web App\n\nOwner boundary: frontend module.\nCommands: npm run build.\nTest command: npm test.\nCode-index: indexes/web-app.code_index.json.\n",
+            encoding="utf-8",
+        )
+        (root / "projects.yaml").write_text("projects:\n  - name: web-app\n", encoding="utf-8")
+        (root / "indexes").mkdir()
+        (root / "baseline").mkdir()
+        now = datetime.now(timezone.utc).isoformat()
+        (root / "indexes/web-app.code_index.json").write_text(json.dumps({"generated_at": now}), encoding="utf-8")
+        (root / "baseline/web-app.baseline.json").write_text(json.dumps({"generated_at": now}), encoding="utf-8")
+        policy = {
+            "freshness_days": 14,
+            "project_skill_required_sections": {
+                "ownership": ["owner"],
+                "release_boundary": ["release boundary"],
+            },
+            "block_on_missing_sections": ["release_boundary"],
+        }
+        result = overlay_health.check(root, policy=policy)
+        assert result["decision"] == "block"
+        assert any("release_boundary" in item["message"] for item in result["blockers"])
+
+
 def test_human_doc_review_detects_local_path() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "doc.md"
@@ -528,13 +558,17 @@ def test_scenario_catalog_documents_supported_development_scenarios() -> None:
     for scenario_id in scenario_ids:
         assert matrix_by_id[scenario_id]["required_skills"]
         assert matrix_by_id[scenario_id]["required_gates"]
-    for scenario_id in {"one_line_request", "long_prd", "bugfix", "frontend_change", "cross_repo_api", "data_migration"}:
+    for scenario_id in {"one_line_request", "long_prd", "frontend_change", "cross_repo_api", "data_migration"}:
         gates = set(matrix_by_id[scenario_id]["required_gates"])
         assert {"technical_design.json", "architecture_design.json", "test_design.json", "docs_quality.json", "git_worktree_evidence.json", "edit_permit.json"}.issubset(gates)
         anti_bypass = " ".join(matrix_by_id[scenario_id]["anti_bypass"])
         assert "pull --ff-only" in anti_bypass
+    bugfix_gates = set(matrix_by_id["bugfix"]["required_gates"])
+    assert {"spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json", "docs_quality.json"}.issubset(bugfix_gates)
+    assert "architecture_design.json" not in bugfix_gates
+    assert "test_data_plan.json" not in bugfix_gates
     for item in result["scenarios"]:
-        if item["id"] in {"one_line_request", "long_prd", "bugfix", "frontend_change", "cross_repo_api", "data_migration"}:
+        if item["id"] in {"one_line_request", "long_prd", "frontend_change", "cross_repo_api", "data_migration"}:
             next_step = item["next_step"]
             assert "technical_design.json" in next_step
             assert "architecture_design.json" in next_step
@@ -542,6 +576,9 @@ def test_scenario_catalog_documents_supported_development_scenarios() -> None:
             assert "edit_permit.json" in next_step
             assert "write_guard_snapshot.json" in next_step
             assert "write_guard_audit.json" in next_step
+        if item["id"] == "bugfix":
+            assert "effective_workflow_controls" in item["next_step"]
+            assert "architecture_design.json" not in item["evidence"]
 
 
 def test_codex_eng_scenarios_cli_runs() -> None:
@@ -887,6 +924,11 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["forward_tested_scenario_count"] >= 8
     assert metrics["skill_advanced_or_better_count"] > 0
     assert metrics["skill_expert_readiness"] in {"expert", "advanced", "mixed"}
+    assert metrics["skill_content_quality_average"] > 0
+    assert metrics["skill_content_quality_expert_count"] > 0
+    assert metrics["replay_validation_decision"] == "pass"
+    assert metrics["replay_case_count"] >= 4
+    assert metrics["replay_scenario_count"] >= 4
 
 
 def run_all() -> None:
@@ -906,6 +948,7 @@ def run_all() -> None:
     test_overlay_health_blocks_missing_registry()
     test_overlay_health_blocks_missing_declared_assets_and_warns_stale_assets()
     test_overlay_health_reviews_project_skill_guidance_quality()
+    test_overlay_health_policy_can_require_team_sections()
     test_human_doc_review_detects_local_path()
     test_human_doc_review_warns_thin_doc()
     test_human_doc_review_strict_blocks_warnings()

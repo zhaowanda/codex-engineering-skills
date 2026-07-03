@@ -3,11 +3,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 
 ARTIFACTS = ["spec.json", "technical_design.json", "architecture_design.json", "delivery_plan.json", "design_architecture_review.json", "code_review_gate.json", "test_evidence_gate.json", "release_gate.json"]
+REPLAY_SCHEMA = "codex-delivery-replay-skeleton-v1"
+LOCAL_PATH_RE = re.compile("(" + "/U" + r"sers/|" + "/v" + r"ar/folders/|" + "/p" + r"rivate/var/|[A-Za-z]:\\\\)")
+PRIVATE_CONTENT_RE = re.compile(r"(source_code|customer_name|secret|password|token|api_key)", re.IGNORECASE)
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -62,7 +73,7 @@ def replay_skeleton(artifact_dir: Path, case_id: str) -> dict[str, Any]:
             "warning_count": summary.get("warning_count", 0),
         })
     return {
-        "schema": "codex-delivery-replay-skeleton-v1",
+        "schema": REPLAY_SCHEMA,
         "case_id": case_id,
         "anonymized": True,
         "source": "artifact_summaries_only",
@@ -78,19 +89,124 @@ def replay_skeleton(artifact_dir: Path, case_id: str) -> dict[str, Any]:
     }
 
 
+def validate_replay_case(path: Path) -> dict[str, Any]:
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    raw = read_text(path)
+    try:
+        data = json.loads(raw)
+    except Exception as exc:
+        return {
+            "path": str(path),
+            "valid": False,
+            "blockers": [{"source": "json", "message": f"invalid JSON: {exc}"}],
+            "warnings": [],
+        }
+    if not isinstance(data, dict):
+        blockers.append({"source": "shape", "message": "replay case must be a JSON object"})
+        data = {}
+    required = ["schema", "case_id", "anonymized", "scenario", "source", "artifacts", "replay_steps", "privacy_note"]
+    missing = [name for name in required if name not in data]
+    if missing:
+        blockers.append({"source": "required_fields", "message": f"missing fields: {', '.join(missing)}"})
+    if data.get("schema") != REPLAY_SCHEMA:
+        blockers.append({"source": "schema", "message": f"schema must be {REPLAY_SCHEMA}"})
+    if data.get("anonymized") is not True:
+        blockers.append({"source": "privacy", "message": "anonymized must be true"})
+    if data.get("source") != "artifact_summaries_only":
+        blockers.append({"source": "privacy", "message": "source must be artifact_summaries_only"})
+    if LOCAL_PATH_RE.search(raw):
+        blockers.append({"source": "privacy", "message": "local absolute path detected"})
+    if PRIVATE_CONTENT_RE.search(raw):
+        blockers.append({"source": "privacy", "message": "private content marker detected"})
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        blockers.append({"source": "artifacts", "message": "artifacts must be a non-empty list"})
+        artifacts = []
+    artifact_names = set()
+    for index, artifact in enumerate(artifacts):
+        if not isinstance(artifact, dict):
+            blockers.append({"source": "artifacts", "message": f"artifact {index} must be an object"})
+            continue
+        missing_artifact = [name for name in ["artifact", "schema", "decision", "blocker_count", "warning_count"] if name not in artifact]
+        if missing_artifact:
+            blockers.append({"source": "artifacts", "message": f"artifact {index} missing fields: {', '.join(missing_artifact)}"})
+        name = str(artifact.get("artifact") or "")
+        if name:
+            artifact_names.add(name)
+        for count_name in ["blocker_count", "warning_count"]:
+            if not isinstance(artifact.get(count_name), int) or artifact.get(count_name, -1) < 0:
+                blockers.append({"source": "artifacts", "message": f"{name or index} {count_name} must be a non-negative integer"})
+    steps = data.get("replay_steps")
+    if not isinstance(steps, list) or not steps:
+        blockers.append({"source": "replay_steps", "message": "replay_steps must be a non-empty list"})
+        steps = []
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            blockers.append({"source": "replay_steps", "message": f"step {index} must be an object"})
+            continue
+        if not step.get("step") or not step.get("expected_artifact"):
+            blockers.append({"source": "replay_steps", "message": f"step {index} needs step and expected_artifact"})
+        expected = str(step.get("expected_artifact") or "")
+        if expected and artifact_names and expected not in artifact_names:
+            blockers.append({"source": "replay_steps", "message": f"step {index} references unknown artifact {expected}"})
+    if len(artifacts) < 2:
+        warnings.append({"source": "coverage", "message": "replay case should include at least two artifact summaries"})
+    return {
+        "path": str(path),
+        "case_id": data.get("case_id", ""),
+        "scenario": data.get("scenario", ""),
+        "artifact_count": len(artifacts),
+        "step_count": len(steps),
+        "valid": not blockers,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
+def validate_replay_dir(replay_dir: Path) -> dict[str, Any]:
+    cases = [validate_replay_case(path) for path in sorted(replay_dir.glob("*.replay.json"))]
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    if not cases:
+        blockers.append({"source": "replay_dir", "message": "no *.replay.json cases found"})
+    for case in cases:
+        for blocker in case["blockers"]:
+            blockers.append({"source": case["path"], "message": blocker["message"], "detail": blocker.get("source")})
+        for warning in case["warnings"]:
+            warnings.append({"source": case["path"], "message": warning["message"], "detail": warning.get("source")})
+    scenarios = sorted({str(case.get("scenario") or "") for case in cases if case.get("scenario")})
+    return {
+        "schema": "codex-delivery-replay-validation-v1",
+        "decision": "block" if blockers else "pass",
+        "case_count": len(cases),
+        "scenario_count": len(scenarios),
+        "scenarios": scenarios,
+        "cases": cases,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture delivery case summary")
-    parser.add_argument("--artifact-dir", required=True)
-    parser.add_argument("--case-id", required=True)
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--artifact-dir")
+    parser.add_argument("--case-id")
+    parser.add_argument("--out")
     parser.add_argument("--replay-skeleton", action="store_true")
+    parser.add_argument("--validate-replay-dir")
     args = parser.parse_args()
-    result = replay_skeleton(Path(args.artifact_dir), args.case_id) if args.replay_skeleton else capture(Path(args.artifact_dir), args.case_id)
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.validate_replay_dir:
+        result = validate_replay_dir(Path(args.validate_replay_dir))
+    else:
+        if not args.artifact_dir or not args.case_id or not args.out:
+            parser.error("--artifact-dir, --case-id, and --out are required unless --validate-replay-dir is used")
+        result = replay_skeleton(Path(args.artifact_dir), args.case_id) if args.replay_skeleton else capture(Path(args.artifact_dir), args.case_id)
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if result.get("decision") != "block" else 1
 
 
 if __name__ == "__main__":

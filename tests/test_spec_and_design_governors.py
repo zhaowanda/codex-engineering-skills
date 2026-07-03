@@ -110,6 +110,10 @@ def test_spec_handles_one_line_request_with_inferred_acceptance() -> None:
     assert spec["requirements"][0]["summary"] == "Change checkout button text to Pay now."
     assert spec["acceptance_criteria"][0]["source_evidence"] == "inferred from first line"
     assert spec["source"]["line_count"] == 1
+    validation = spec_governor.validate_spec(spec)
+    assert validation["decision"] == "pass"
+    assert validation["quality_level"] == "usable"
+    assert any(item["source"] == "acceptance_criteria" for item in validation["warnings"])
 
 
 def test_spec_handles_long_prd_without_collapsing_traceability() -> None:
@@ -156,6 +160,10 @@ def test_spec_exposes_complex_multi_impact_requirements() -> None:
     assert spec["data_classification"]["requires_security_review"] is True
     assert spec["permission_scope"]["negative_cases_required"] is True
     assert spec["negative_acceptance_criteria"]
+    assert {"payment", "dashboard"}.issubset({item["name"] for item in spec["business_objects"]})
+    assert {"retry_count", "failure_reason"}.issubset({item["name"] for item in spec["data_fields"]})
+    assert {"view"}.issubset({item["name"] for item in spec["operations"]})
+    assert {item["area"] for item in spec["implicit_constraints"]} >= {"permission", "data", "api", "performance", "security"}
 
 
 def test_spec_blocks_permission_requirement_without_negative_acceptance() -> None:
@@ -168,6 +176,27 @@ def test_spec_blocks_permission_requirement_without_negative_acceptance() -> Non
     validation = spec_governor.validate_spec(spec)
     assert validation["decision"] == "block"
     assert any(item["source"] == "negative_acceptance_criteria" for item in validation["blockers"])
+
+
+def test_spec_blocks_conflicting_permission_rules() -> None:
+    text = """
+    Req: Export order report.
+    Rule: only admin can export order report.
+    Rule: operator can export order report.
+    AC: admin can export order report.
+    """
+    spec = spec_governor.normalize("REQ-CONFLICT", "Order export", text)
+    validation = spec_governor.validate_spec(spec)
+    assert spec["rule_conflicts"]
+    assert validation["decision"] == "block"
+    assert any(item["source"] == "rule_conflicts" for item in validation["blockers"])
+
+
+def test_spec_extracts_state_transitions() -> None:
+    spec = spec_governor.normalize("REQ-STATE", "Refund state", "Req: change refund status from pending to completed.\nAC: status is completed.")
+    assert spec["state_transitions"]
+    assert spec["state_transitions"][0]["from"] == "pending"
+    assert "completed" in spec["state_transitions"][0]["to"]
 
 
 def test_technical_and_architecture_design_render_core_sections() -> None:
@@ -331,6 +360,8 @@ def run_all() -> None:
     test_spec_handles_long_prd_without_collapsing_traceability()
     test_spec_exposes_complex_multi_impact_requirements()
     test_spec_blocks_permission_requirement_without_negative_acceptance()
+    test_spec_blocks_conflicting_permission_rules()
+    test_spec_extracts_state_transitions()
     test_technical_and_architecture_design_render_core_sections()
     test_project_understanding_informs_design_and_architecture()
     test_delivery_runner_reports_next_stage()

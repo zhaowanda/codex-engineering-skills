@@ -1,0 +1,27 @@
+schema: codex-overlay-health-policy-v1
+freshness_days: 21
+project_skill_required_sections:
+  ownership:
+    - owner
+    - ownership
+    - boundary
+  commands:
+    - command
+    - build
+    - run
+  test_commands:
+    - test
+    - pytest
+    - npm test
+    - mvn test
+  index_reference:
+    - code-index
+    - code_index
+    - indexes/
+  release_boundary:
+    - release
+    - deploy
+    - rollback
+block_on_missing_sections:
+  - ownership
+  - index_reference

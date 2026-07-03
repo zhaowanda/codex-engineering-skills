@@ -1,0 +1,26 @@
+{
+  "schema": "codex-replay-case-schema-v1",
+  "required_fields": [
+    "schema",
+    "case_id",
+    "anonymized",
+    "scenario",
+    "source",
+    "artifacts",
+    "replay_steps",
+    "privacy_note"
+  ],
+  "artifact_fields": [
+    "artifact",
+    "schema",
+    "decision",
+    "blocker_count",
+    "warning_count"
+  ],
+  "privacy_rules": [
+    "No local absolute paths",
+    "No customer or project names",
+    "No source code body",
+    "Only artifact summaries and decisions"
+  ]
+}

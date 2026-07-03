@@ -9,6 +9,7 @@ from typing import Any
 
 SCHEMA = "codex-scenario-catalog-v1"
 PRE_EDIT_GATE = "Before editing, require technical_design.json, architecture_design.json, design_architecture_review.json with implementation_allowed=true, delivery_plan_review.json with implementation_allowed=true, Git fetch plus pull --ff-only evidence, and edit_permit.json. For direct edits, create write_guard_snapshot.json after the permit and require write_guard_audit.json before commit or push."
+LIGHT_BUGFIX_GATE = "Light bugfix effective gates are reported in auto_run_summary.effective_workflow_controls and omit architecture/test-data gates unless confidence or impact raises strictness."
 
 SCENARIOS: list[dict[str, Any]] = [
     {
@@ -35,8 +36,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A defect or regression needs a lightweight but gated fix path.",
         "command": "python3 scripts/codex_eng.py auto --input bug.md --profile bugfix --out /tmp/codex-auto",
         "expected_profile": "bugfix",
-        "evidence": ["spec.json", "technical_design.json", "architecture_design.json", "delivery_plan_review.json"],
-        "next_step": "Add reproduction evidence, then follow the pre-edit gate before any fix. " + PRE_EDIT_GATE,
+        "evidence": ["spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json"],
+        "next_step": "Add reproduction evidence, then follow auto_run_summary.effective_workflow_controls before any fix. " + LIGHT_BUGFIX_GATE,
     },
     {
         "id": "frontend_change",
@@ -110,7 +111,7 @@ SCENARIO_MATRIX: dict[str, dict[str, Any]] = {
     },
     "bugfix": {
         "required_skills": ["spec-governor", "technical-design-governor", "test-design-governor", "test-data-governor", "git-worktree-governor", "edit-readiness-governor"],
-        "required_gates": CORE_PRE_EDIT_GATES,
+        "required_gates": ["spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json", "docs_quality.json", "git_worktree_evidence.json", "edit_permit.json"],
     },
     "frontend_change": {
         "required_skills": ["frontend-acceptance-runner", "test-evidence-gate", "human-doc-reviewer"],

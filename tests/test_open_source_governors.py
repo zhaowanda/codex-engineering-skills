@@ -21,6 +21,7 @@ issue_pr = load_module("issue_pr", ROOT / "skills/core/issue-pr-governor/scripts
 version_release = load_module("version_release", ROOT / "skills/core/version-release-governor/scripts/version_release.py")
 dependency_license = load_module("dependency_license", ROOT / "skills/core/dependency-license-governor/scripts/dependency_license.py")
 example_scenario = load_module("example_scenario", ROOT / "skills/core/example-scenario-runner/scripts/example_scenario.py")
+capture_case = load_module("capture_case", ROOT / "skills/core/delivery-case-capture/scripts/capture_case.py")
 
 
 def test_issue_pr_templates_pass() -> None:
@@ -82,6 +83,51 @@ def test_example_scenario_runner_outputs_all_scenarios() -> None:
         assert {"bugfix", "small-feature", "config-change", "frontend-change", "cross-repo-api", "data-migration", "release-readiness", "code-review"}.issubset(kinds)
 
 
+def test_replay_case_fixtures_are_anonymized_and_schema_compatible() -> None:
+    schema = json.loads((ROOT / "examples/replay-cases/replay-case.schema.json").read_text(encoding="utf-8"))
+    required = set(schema["required_fields"])
+    validation = capture_case.validate_replay_dir(ROOT / "examples/replay-cases")
+    assert validation["decision"] == "pass"
+    assert validation["case_count"] == 4
+    assert validation["scenario_count"] == 4
+    for path in sorted((ROOT / "examples/replay-cases").glob("*.replay.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert required.issubset(data)
+        assert data["schema"] == "codex-delivery-replay-skeleton-v1"
+        assert data["anonymized"] is True
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert "/" + "Users/" not in rendered
+        assert "/" + "var/folders/" not in rendered
+        assert "source" + "_code" not in rendered
+        assert data["artifacts"]
+        assert data["replay_steps"]
+
+
+def test_replay_case_validator_blocks_private_paths() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bad.replay.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": "codex-delivery-replay-skeleton-v1",
+                    "case_id": "BAD",
+                    "anonymized": True,
+                    "scenario": "backend_api",
+                    "source": "artifact_summaries_only",
+                    "artifacts": [
+                        {"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "ready", "blocker_count": 0, "warning_count": 0}
+                    ],
+                    "replay_steps": [{"step": "ingest", "expected_artifact": "spec.json"}],
+                    "privacy_note": "/U" + "sers/example/private",
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = capture_case.validate_replay_case(path)
+        assert result["valid"] is False
+        assert any("local absolute path" in item["message"] for item in result["blockers"])
+
+
 def run_all() -> None:
     test_issue_pr_templates_pass()
     test_version_release_passes_current_project_version()
@@ -89,6 +135,8 @@ def run_all() -> None:
     test_dependency_license_passes_repo()
     test_dependency_license_blocks_missing_license()
     test_example_scenario_runner_outputs_all_scenarios()
+    test_replay_case_fixtures_are_anonymized_and_schema_compatible()
+    test_replay_case_validator_blocks_private_paths()
 
 
 if __name__ == "__main__":

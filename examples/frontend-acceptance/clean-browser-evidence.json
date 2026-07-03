@@ -1,0 +1,59 @@
+{
+  "schema": "codex-frontend-acceptance-v1",
+  "target_url": "http://localhost:3000/orders",
+  "page_type": "list",
+  "pass": true,
+  "environment": "local-example",
+  "browser": "chromium",
+  "browser_evidence": {
+    "tested_route": "http://localhost:3000/orders",
+    "device": "desktop",
+    "viewport": "1280x720",
+    "screenshots": [
+      {
+        "path": "artifacts/frontend/orders-list-1280x720.png",
+        "description": "orders list rendered with filter and table visible"
+      }
+    ],
+    "console_errors": [],
+    "network_failures": []
+  },
+  "viewport_evidence": [
+    {"viewport": "1280x720", "pass": true}
+  ],
+  "page_load": {
+    "loaded": true,
+    "final_url": "http://localhost:3000/orders",
+    "title": "Orders",
+    "load_time_ms": 840
+  },
+  "dom_evidence": [
+    {"selector": "table", "text": "Order ID"},
+    {"selector": "[data-testid=status-filter]", "text": "Status"}
+  ],
+  "interaction_evidence": [
+    {"step": "open orders list", "result": "table visible"},
+    {"step": "apply status filter", "result": "filtered rows visible"}
+  ],
+  "screenshot_evidence": [
+    {"path": "artifacts/frontend/orders-list-1280x720.png", "description": "list acceptance screenshot"}
+  ],
+  "screenshot_required": true,
+  "network_requests": [
+    {"url": "/api/orders", "status": 200}
+  ],
+  "failed_requests": [],
+  "console_errors": [],
+  "permission_checks": [],
+  "responsive_checks": [],
+  "custom_checks": [],
+  "waivers": [],
+  "notes": "Synthetic browser evidence fixture for schema validation only.",
+  "list_checks": {
+    "filters_checked": ["status"],
+    "columns_checked": ["Order ID", "Status"],
+    "pagination_checked": true,
+    "empty_state_checked": true,
+    "row_actions_checked": ["view"]
+  }
+}

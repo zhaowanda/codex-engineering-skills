@@ -20,12 +20,21 @@ python3 scripts/capture_case.py \
   --out cases/CASE-001.json
 ```
 
+Validate anonymized replay cases:
+
+```bash
+python3 scripts/capture_case.py \
+  --validate-replay-dir examples/replay-cases
+```
+
 ## Rules
 
 - Capture only artifact summaries, not secrets or local-only paths.
 - Record what worked, what blocked, and which skill/gate should improve.
 - Keep real organization details in a private overlay.
+- Validate replay cases before adding them to examples or CI.
 
 ## Output
 
 The output uses schema `codex-delivery-case-v1`.
+Replay validation uses schema `codex-delivery-replay-validation-v1`.

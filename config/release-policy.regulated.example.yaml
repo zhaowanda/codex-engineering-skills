@@ -1,0 +1,40 @@
+schema: codex-release-policy-v1
+required_environments:
+  - sit
+  - uat
+  - pre
+  - prod
+environment_aliases:
+  sit:
+    - integration
+  uat:
+    - acceptance
+  pre:
+    - preprod
+    - staging
+  prod:
+    - production
+environment_required_fields:
+  - entry_criteria
+  - exit_criteria
+  - validation_evidence
+  - approver
+  - change_ticket
+require_prod_rollback_ready: true
+release_change_required_fields:
+  - release_window
+  - approvers
+  - rollback_owner
+  - release_manager
+required_approver_roles:
+  - release_owner
+  - qa_owner
+  - business_owner
+required_ticket_fields:
+  - id
+  - url
+  - risk_level
+required_observation_metrics:
+  - error_rate
+  - latency_p95
+  - business_success_rate

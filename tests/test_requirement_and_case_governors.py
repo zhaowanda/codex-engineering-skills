@@ -72,6 +72,39 @@ def test_question_governor_passes_closed_required_questions() -> None:
     assert result["decision"] == "pass"
 
 
+def test_question_governor_generates_expert_questions_from_impacts() -> None:
+    spec = {
+        "doc_id": "REQ-HIGH",
+        "acceptance_criteria": [{"id": "AC-1", "criteria": "export succeeds", "source_evidence": "input"}],
+        "scope": {"in_scope": ["payment export"], "out_of_scope": ["retry automation"]},
+        "impact_surface": [{"area": "permission"}, {"area": "data"}, {"area": "api"}, {"area": "performance"}, {"area": "security"}],
+        "implicit_constraints": [
+            {"area": "permission", "question": "Which roles can export?", "status": "requires_confirmation"},
+            {"area": "data", "question": "Which fields are exported?", "status": "requires_confirmation"},
+        ],
+        "negative_acceptance_criteria": [],
+        "data_fields": [],
+    }
+    result = question_governor.generate(spec)
+    questions = [item["question"] for item in result["questions"]]
+    assert result["decision"] == "block"
+    assert any("Which roles can export" in item for item in questions)
+    assert any("Which data fields" in item for item in questions)
+    assert any("endpoint" in item.lower() for item in questions)
+    assert any("latency" in item.lower() for item in questions)
+    assert any("sensitive fields" in item.lower() for item in questions)
+
+
+def test_question_governor_blocks_closed_required_question_without_answer() -> None:
+    data = {
+        "schema": "codex-open-questions-v1",
+        "questions": [{"id": "Q-1", "required": True, "status": "closed", "answer": ""}],
+    }
+    result = question_governor.validate_questions(data)
+    assert result["decision"] == "block"
+    assert any("answer" in item["message"] for item in result["blockers"])
+
+
 def test_delivery_case_capture_summarizes_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -100,6 +133,8 @@ def run_all() -> None:
     test_requirement_ingestor_blocks_pdf_without_text()
     test_question_governor_blocks_required_open_questions()
     test_question_governor_passes_closed_required_questions()
+    test_question_governor_generates_expert_questions_from_impacts()
+    test_question_governor_blocks_closed_required_question_without_answer()
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
 
