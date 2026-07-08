@@ -253,6 +253,51 @@ def infer_implicit_constraints(impacts: list[dict[str, Any]], objects: list[dict
     return constraints
 
 
+def constraint_questions(constraints: list[dict[str, str]], existing_questions: list[dict[str, str]]) -> list[dict[str, str]]:
+    existing = {str(item.get("question") or "").strip() for item in existing_questions if isinstance(item, dict)}
+    questions: list[dict[str, str]] = []
+    for item in constraints:
+        question = str(item.get("question") or "").strip()
+        if not question or question in existing:
+            continue
+        questions.append({
+            "id": f"CQ-{len(questions) + 1}",
+            "area": str(item.get("area") or ""),
+            "question": question,
+            "owner": "product/engineering",
+            "status": "derived",
+            "source": "implicit_constraints",
+        })
+    return questions
+
+
+def expert_readiness_gaps(
+    impact_surface: list[dict[str, Any]],
+    acceptance: list[dict[str, Any]],
+    objectives: list[dict[str, str]],
+    scenarios: list[dict[str, Any]],
+    risks: list[dict[str, str]],
+    compatibility: list[str],
+) -> list[dict[str, str]]:
+    areas = {str(item.get("area")) for item in impact_surface if isinstance(item, dict)}
+    gaps: list[dict[str, str]] = []
+
+    def add(source: str, message: str, severity: str = "medium") -> None:
+        gaps.append({"source": source, "message": message, "severity": severity})
+
+    if not objectives:
+        add("business_objectives", "Business objective is missing; design may optimize the wrong outcome.")
+    if not scenarios:
+        add("user_scenarios", "User scenario is missing; acceptance may not cover the real workflow.")
+    if acceptance and all(str(item.get("source_evidence")) != "input" for item in acceptance):
+        add("acceptance_criteria", "Acceptance is inferred rather than explicitly provided.", "high")
+    if areas & {"api", "data", "permission", "security", "performance", "config"} and not risks:
+        add("risks", "High-impact requirement should declare explicit delivery or product risks.", "high")
+    if "api" in areas and not compatibility:
+        add("compatibility_constraints", "API impact should state backward compatibility or consumer migration constraints.", "high")
+    return gaps
+
+
 def is_negative(text: str) -> bool:
     lower = text.lower()
     return any(token in lower for token in ["cannot", "must not", "should not", "deny", "forbid", "unauthorized", "non-admin", "不能", "不得", "禁止", "无权限", "非管理员"])
@@ -355,6 +400,9 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
     negative_acceptance = [item for item in acceptance if item.get("type") == "negative"]
     rule_conflicts = detect_rule_conflicts(rules)
     implicit_constraints = infer_implicit_constraints(impact_surface, business_objects, data_fields)
+    compatibility_constraints = extract_prefixed(lines, ("compatibility", "兼容", "backward compatible", "向后兼容"))
+    derived_constraint_questions = constraint_questions(implicit_constraints, questions)
+    readiness_gaps = expert_readiness_gaps(impact_surface, acceptance, objectives, scenarios, risks, compatibility_constraints)
     return {
         "schema": SCHEMA,
         "doc_id": doc_id,
@@ -384,10 +432,12 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
             "sensitive": any(item.get("area") == "permission" for item in impact_surface),
             "negative_cases_required": any(item.get("area") == "permission" for item in impact_surface),
         },
-        "compatibility_constraints": extract_prefixed(lines, ("compatibility", "兼容", "backward compatible", "向后兼容")),
+        "compatibility_constraints": compatibility_constraints,
         "business_rules": rules,
         "rule_conflicts": rule_conflicts,
         "implicit_constraints": implicit_constraints,
+        "derived_constraint_questions": derived_constraint_questions,
+        "expert_readiness_gaps": readiness_gaps,
         "acceptance_criteria": acceptance,
         "negative_acceptance_criteria": negative_acceptance,
         "risks": risks,
@@ -433,6 +483,13 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
         warnings.append({"source": "impact_surface", "message": "no API/UI/data/permission/config/performance/security impact was detected or declared"})
     if impact_areas & HIGH_RISK_IMPACTS and not as_list(spec.get("implicit_constraints")):
         warnings.append({"source": "implicit_constraints", "message": "high-risk impacts should produce implicit constraints and clarifying questions"})
+    derived_questions = [item for item in as_list(spec.get("derived_constraint_questions")) if isinstance(item, dict)]
+    if impact_areas & HIGH_RISK_IMPACTS and not derived_questions:
+        warnings.append({"source": "derived_constraint_questions", "message": "high-risk impacts should expose derived clarification questions"})
+    readiness_gaps = [item for item in as_list(spec.get("expert_readiness_gaps")) if isinstance(item, dict)]
+    high_readiness_gaps = [item for item in readiness_gaps if item.get("severity") == "high"]
+    if high_readiness_gaps:
+        warnings.append({"source": "expert_readiness_gaps", "message": "expert readiness gaps remain", "count": len(high_readiness_gaps)})
     permission_scope = spec.get("permission_scope") if isinstance(spec.get("permission_scope"), dict) else {}
     if permission_scope.get("negative_cases_required") and not as_list(spec.get("negative_acceptance_criteria")):
         blockers.append({"source": "negative_acceptance_criteria", "message": "permission-sensitive requirements need negative acceptance criteria"})

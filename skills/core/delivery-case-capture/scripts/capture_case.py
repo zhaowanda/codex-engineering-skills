@@ -176,11 +176,28 @@ def validate_replay_dir(replay_dir: Path) -> dict[str, Any]:
         for warning in case["warnings"]:
             warnings.append({"source": case["path"], "message": warning["message"], "detail": warning.get("source")})
     scenarios = sorted({str(case.get("scenario") or "") for case in cases if case.get("scenario")})
+    complex_cases = [
+        case for case in cases
+        if int(case.get("artifact_count") or 0) >= 4 and int(case.get("step_count") or 0) >= 4
+    ]
+    scenario_families = {
+        "frontend": any("frontend" in scenario for scenario in scenarios),
+        "backend": any("backend" in scenario or "api" in scenario for scenario in scenarios),
+        "data_or_config": any("data" in scenario or "config" in scenario for scenario in scenarios),
+        "cross_repo": any("cross_repo" in scenario for scenario in scenarios),
+        "release": any("release" in scenario for scenario in scenarios),
+        "fullstack": any("fullstack" in scenario for scenario in scenarios),
+    }
+    covered_family_count = sum(1 for covered in scenario_families.values() if covered)
     return {
         "schema": "codex-delivery-replay-validation-v1",
         "decision": "block" if blockers else "pass",
         "case_count": len(cases),
         "scenario_count": len(scenarios),
+        "complex_case_count": len(complex_cases),
+        "scenario_families": scenario_families,
+        "scenario_family_coverage_count": covered_family_count,
+        "behavior_coverage_score": min(100, (len(complex_cases) * 12) + (covered_family_count * 10)),
         "scenarios": scenarios,
         "cases": cases,
         "blockers": blockers,

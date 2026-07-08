@@ -37,10 +37,11 @@ Then run `design-architecture-reviewer` after architecture design exists.
 - Do not present fallback phrases such as `target module to be confirmed` as expert-ready facts; keep them as review-blocking uncertainty.
 - Preserve open questions; do not hide uncertainty.
 - Include at least two solution options and a selected option.
+- Include an option comparison matrix, decision confidence, implementation invariants, and expert review checklist.
 - Include traceability from requirements to acceptance and tests.
 
 ## Output
 
 The output uses schema `codex-technical-design-v1`.
 
-The artifact includes process flow, modules, logical data flow, API/UI behavior, options, selected approach, tests, risks, and traceability.
+The artifact includes process flow, modules, logical data flow, API/UI behavior, options, selected approach, comparison matrix, invariants, tests, risks, and traceability.

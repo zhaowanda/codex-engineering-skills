@@ -38,6 +38,7 @@ python3 scripts/spec_governor.py \
 - Keep extracted facts separate from assumptions.
 - For long PRDs, preserve business rules and source evidence references.
 - Extract business objects, operations, data fields, state transitions, impact surface, implicit constraints, and negative acceptance needs.
+- Convert high-risk implicit constraints into derived clarification questions and expert readiness gaps.
 - Treat fully inferred acceptance criteria as usable but not expert-ready until confirmed.
 
 ## Output

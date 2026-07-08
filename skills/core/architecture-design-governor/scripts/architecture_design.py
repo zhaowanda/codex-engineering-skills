@@ -77,6 +77,9 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         route = ctx["routes"][0]
         route_contract = f"{route.get('method', '')} {route.get('route', '')} ({route.get('file', '')})".strip()
         producer = str(route.get("file") or owner_repo)
+    impact_areas = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
+    readiness_gaps = [item for item in as_list(spec.get("expert_readiness_gaps")) if isinstance(item, dict)]
+    architecture_confidence = "medium" if readiness_gaps or not repo_path else "high"
     return {
         "schema": "codex-architecture-design-v1",
         "doc_id": doc_id,
@@ -92,7 +95,25 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             {"option_id": "A1", "name": "Single owner repository change", "description": "Implement in the current owner repo and preserve external contracts.", "owner_repos": [owner_repo], "confirm_only_repos": [producer] if producer != owner_repo else [], "pros": ["small blast radius", "simple rollback"], "cons": ["requires owner confirmation"], "risk_level": "low", "validation": "repo tests and acceptance evidence", "performance_impact": "minimal", "rollback_strategy": f"revert {owner_repo}"},
             {"option_id": "A2", "name": "Cross-repository contract change", "description": "Change producer and consumer contracts across repositories.", "owner_repos": ["producer-repo", "consumer-repo"], "confirm_only_repos": [owner_repo], "pros": ["explicit contract"], "cons": ["coordination and compatibility risk"], "risk_level": "medium", "validation": "contract, integration, and regression tests", "performance_impact": "depends on new calls", "rollback_strategy": "ordered rollback consumer then producer"},
         ],
+        "architecture_fit_matrix": [
+            {"criterion": "ownership_clarity", "A1": owner_repo, "A2": "producer and consumer", "winner": "A1", "reason": "Start from known owner boundary."},
+            {"criterion": "release_coordination", "A1": "single repo", "A2": "multi-repo ordered release", "winner": "A1", "reason": "Lower coordination unless contract change is required."},
+            {"criterion": "contract_risk", "A1": "preserve existing contract", "A2": "change contract", "winner": "A1", "reason": "Compatibility is safer by default."},
+            {"criterion": "future_extensibility", "A1": "limited", "A2": "stronger", "winner": "A2", "reason": "Only preferred when repeated extension is expected."},
+        ],
         "selected_architecture": {"selected_option_id": "A1", "selection_reason": "Default to smallest owner-boundary change until code inspection requires cross-repo work.", "decision_criteria": ["ownership", "compatibility", "rollback"], "tradeoffs": ["May be revised after repo routing"], "rejected_alternative_reasoning": [{"option_id": "A2", "reason": "Cross-repository contract work adds compatibility and release-order risk unless the existing owner boundary cannot satisfy the requirement."}]},
+        "architecture_decision_confidence": {"level": architecture_confidence, "reason": "Repo routing or requirement gaps remain." if architecture_confidence != "high" else "Repo owner is routed and no spec readiness gaps remain.", "confidence_reducers": readiness_gaps + ([] if repo_path else [{"source": "repo_path", "message": "owner repo path is not routed", "severity": "high"}])},
+        "architecture_invariants": [
+            {"invariant": "One repository owns each write authority.", "verification": "repo_responsibilities and data_ownership agree"},
+            {"invariant": "Cross-repo contract changes require freeze and integration evidence.", "verification": "cross_repo_contracts and integration_sequence are reviewed"},
+            {"invariant": "Rollback order is explicit for every modified repo.", "verification": "rollback_strategy covers repo_responsibilities with role=modify"},
+        ],
+        "expert_review_checklist": [
+            {"item": "Architecture option comparison includes ownership, release, contract, and extensibility tradeoffs.", "status": "ready"},
+            {"item": "High-risk impacts have matching security/data/performance/release boundaries.", "status": "review" if impact_areas & {"data", "security", "performance", "config"} else "ready"},
+            {"item": "Cross-repo dependencies are explicitly represented or waived.", "status": "ready"},
+            {"item": "Repo path is known before delivery planning.", "status": "ready" if repo_path else "review"},
+        ],
         "architecture_traceability_matrix": [
             {"requirement_id": str(item.get("id") or req_id), "component_boundary_refs": [f"{owner_repo} owns change"], "module_topology_refs": [owner_module], "data_flow_refs": [f"{route_contract or 'existing source'}->{owner_repo}"], "integration_sequence_refs": ["load/execute affected behavior"], "contract_refs": [route_contract or "preserve existing contracts"], "selected_architecture_option_id": "A1", "decision_reason": "lowest coordination risk"}
             for item in reqs

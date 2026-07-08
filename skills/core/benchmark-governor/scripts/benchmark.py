@@ -142,6 +142,10 @@ def report(root: Path) -> dict[str, Any]:
         blockers.append({"source": "forward_test", "message": "forward test failed"})
     if replay["returncode"] != 0:
         blockers.append({"source": "replay_cases", "message": "replay case validation failed"})
+    if int(replay["json"].get("complex_case_count") or 0) < 3:
+        blockers.append({"source": "replay_cases", "message": "at least three complex replay cases are required"})
+    if int(replay["json"].get("scenario_family_coverage_count") or 0) < 5:
+        blockers.append({"source": "replay_cases", "message": "replay scenarios must cover at least five behavior families"})
     if cross_repo["returncode"] != 0 or cross_repo_validation["returncode"] != 0:
         blockers.append({"source": "cross_repo_planner", "message": "cross-repo planner example or validation failed"})
     if cross_repo_cycle_validation.get("decision") != "block":
@@ -181,6 +185,9 @@ def report(root: Path) -> dict[str, Any]:
             "forward_test_decision": forward["json"].get("decision"),
             "replay_case_count": replay["json"].get("case_count", 0),
             "replay_scenario_count": replay["json"].get("scenario_count", 0),
+            "replay_complex_case_count": replay["json"].get("complex_case_count", 0),
+            "replay_scenario_family_coverage_count": replay["json"].get("scenario_family_coverage_count", 0),
+            "replay_behavior_coverage_score": replay["json"].get("behavior_coverage_score", 0),
             "replay_validation_decision": replay["json"].get("decision"),
             "cross_repo_planner_available": (root / "skills/core/cross-repo-planner/scripts/cross_repo_plan.py").exists(),
             "cross_repo_example_decision": cross_repo["json"].get("decision"),

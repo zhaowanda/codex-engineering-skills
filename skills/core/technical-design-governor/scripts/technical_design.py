@@ -86,6 +86,9 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     route_refs = [f"{item.get('method', '')} {item.get('route', '')} ({item.get('file', '')})".strip() for item in ctx["routes"][:5]]
     config_refs = [str(item.get("path")) for item in ctx["config_items"][:5]]
     test_evidence = [f"{cmd} evidence" for cmd in ctx["test_hints"][:3]] or ["test evidence"]
+    impact_areas = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
+    expert_readiness_gaps = [item for item in as_list(spec.get("expert_readiness_gaps")) if isinstance(item, dict)]
+    decision_confidence = "medium" if expert_readiness_gaps or spec.get("open_questions") else "high"
     return {
         "schema": "codex-technical-design-v1",
         "doc_id": doc_id,
@@ -139,7 +142,25 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             {"option_id": "T1", "name": "Minimal scoped change", "description": "Implement inside the current owner module using existing contracts.", "pros": ["low coupling", "small blast radius"], "cons": ["depends on existing boundaries"], "risk_level": "low", "validation": "unit/integration/browser evidence as applicable", "performance_impact": "minimal", "rollback_strategy": "revert scoped change"},
             {"option_id": "T2", "name": "New abstraction or contract", "description": "Introduce a new abstraction/API to isolate the behavior.", "pros": ["clear extension point"], "cons": ["larger change and migration risk"], "risk_level": "medium", "validation": "contract and regression tests", "performance_impact": "depends on implementation", "rollback_strategy": "revert contract and consumers"},
         ],
+        "option_comparison_matrix": [
+            {"criterion": "blast_radius", "T1": "low", "T2": "medium", "winner": "T1", "reason": "Scoped owner-module change touches fewer surfaces."},
+            {"criterion": "contract_clarity", "T1": "uses existing contract", "T2": "creates explicit extension point", "winner": "T2", "reason": "New abstraction is clearer only when repeated extension is proven."},
+            {"criterion": "rollback", "T1": "single revert", "T2": "ordered contract and consumer rollback", "winner": "T1", "reason": "Single owner rollback is simpler."},
+            {"criterion": "test_surface", "T1": "focused regression", "T2": "contract plus integration regression", "winner": "T1", "reason": "Smaller test surface unless architecture requires cross-boundary change."},
+        ],
         "selected_solution": {"selected_option_id": "T1", "selection_reason": "Default to smallest safe change until code inspection proves abstraction is needed.", "decision_criteria": ["correctness", "low coupling", "rollback simplicity"], "tradeoffs": ["May need revision after architecture review"], "rejected_alternative_reasoning": [{"option_id": "T2", "reason": "Higher coordination and abstraction cost unless code inspection proves the extension point is required."}]},
+        "decision_confidence": {"level": decision_confidence, "reason": "Open questions or expert readiness gaps lower confidence." if decision_confidence != "high" else "Spec has no open questions and no expert readiness gaps.", "confidence_reducers": expert_readiness_gaps},
+        "implementation_invariants": [
+            {"invariant": "Preserve existing permission and validation behavior unless explicitly changed.", "evidence": "negative permission and regression tests"},
+            {"invariant": "Keep edits inside delivery_plan.allowed_files unless design is revised.", "evidence": "edit permit and write guard audit"},
+            {"invariant": "Do not change API/data contracts without compatibility evidence.", "evidence": "contract or migration test evidence"},
+        ],
+        "expert_review_checklist": [
+            {"item": "All high-risk impacts have explicit evidence paths.", "status": "ready" if impact_areas else "review"},
+            {"item": "Selected option explains rejected alternatives.", "status": "ready"},
+            {"item": "Rollback and compatibility are testable.", "status": "ready"},
+            {"item": "Derived spec gaps are resolved or accepted before implementation.", "status": "review" if expert_readiness_gaps else "ready"},
+        ],
         "design_traceability_matrix": [
             {
                 "requirement_id": str(item.get("id") or req_id),

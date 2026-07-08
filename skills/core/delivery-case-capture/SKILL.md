@@ -33,6 +33,7 @@ python3 scripts/capture_case.py \
 - Record what worked, what blocked, and which skill/gate should improve.
 - Keep real organization details in a private overlay.
 - Validate replay cases before adding them to examples or CI.
+- Replay validation reports complex case count, scenario family coverage, and behavior coverage score.
 
 ## Output
 

@@ -983,6 +983,9 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["replay_validation_decision"] == "pass"
     assert metrics["replay_case_count"] >= 7
     assert metrics["replay_scenario_count"] >= 7
+    assert metrics["replay_complex_case_count"] >= 3
+    assert metrics["replay_scenario_family_coverage_count"] >= 5
+    assert metrics["replay_behavior_coverage_score"] >= 80
     assert metrics["cross_repo_planner_available"] is True
     assert metrics["cross_repo_example_decision"] == "ready"
     assert metrics["cross_repo_graph_validation_decision"] == "pass"

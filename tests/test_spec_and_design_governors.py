@@ -164,6 +164,8 @@ def test_spec_exposes_complex_multi_impact_requirements() -> None:
     assert {"retry_count", "failure_reason"}.issubset({item["name"] for item in spec["data_fields"]})
     assert {"view"}.issubset({item["name"] for item in spec["operations"]})
     assert {item["area"] for item in spec["implicit_constraints"]} >= {"permission", "data", "api", "performance", "security"}
+    assert {item["area"] for item in spec["derived_constraint_questions"]} >= {"permission", "data", "api", "performance", "security"}
+    assert any(item["source"] == "compatibility_constraints" for item in spec["expert_readiness_gaps"])
 
 
 def test_spec_blocks_permission_requirement_without_negative_acceptance() -> None:
@@ -206,9 +208,17 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     assert tech["schema"] == "codex-technical-design-v1"
     assert tech["process_flow"]
     assert len(tech["solution_options"]) == 2
+    assert tech["option_comparison_matrix"]
+    assert tech["implementation_invariants"]
+    assert tech["expert_review_checklist"]
+    assert tech["decision_confidence"]["level"] in {"high", "medium"}
     assert tech["selected_solution"]["rejected_alternative_reasoning"]
     assert arch["schema"] == "codex-architecture-design-v1"
     assert arch["architecture_options"]
+    assert arch["architecture_fit_matrix"]
+    assert arch["architecture_invariants"]
+    assert arch["expert_review_checklist"]
+    assert arch["architecture_decision_confidence"]["level"] in {"high", "medium"}
     assert arch["selected_architecture"]["rejected_alternative_reasoning"]
     assert arch["repo_responsibilities"][0]["role"] == "modify"
 
