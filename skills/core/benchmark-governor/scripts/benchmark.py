@@ -6,6 +6,7 @@ import importlib.util
 import json
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,67 @@ def report(root: Path) -> dict[str, Any]:
     health = run_json(root, ["python3", "skills/core/skill-health/scripts/skill_health.py", "--root", "."])
     forward = run_json(root, ["python3", "skills/core/forward-test-runner/scripts/forward_test.py", "--root", "."])
     replay = run_json(root, ["python3", "skills/core/delivery-case-capture/scripts/capture_case.py", "--validate-replay-dir", "examples/replay-cases"])
+    with tempfile.TemporaryDirectory() as tmp:
+        cross_repo = run_json(root, ["python3", "skills/core/cross-repo-planner/scripts/cross_repo_plan.py", "plan", "--example", "--out-dir", tmp])
+        cross_repo_validation = run_json(root, ["python3", "skills/core/cross-repo-planner/scripts/cross_repo_plan.py", "validate", "--graph", f"{tmp}/cross_repo_execution_graph.json"])
+    cross_repo_cycle_validation = {"decision": ""}
+    cross_repo_profile_artifact_step_available = False
+    cross_repo_auto_runner_generation_available = False
+    try:
+        cross_repo_module = load_module("cross_repo_for_benchmark", root / "skills/core/cross-repo-planner/scripts/cross_repo_plan.py")
+        graph, _readiness, _release = cross_repo_module.render(
+            "REQ-CYCLE",
+            {"doc_id": "REQ-CYCLE", "summary": "provider consumer api cycle"},
+            {
+                "provider": {"name": "provider", "dependencies": ["consumer"]},
+                "consumer": {"name": "consumer", "dependencies": ["provider"]},
+            },
+            {
+                "repo_tasks": [
+                    {"repo": "provider", "role": "modify", "tasks": ["change api"]},
+                    {"repo": "consumer", "role": "modify", "tasks": ["consume api"]},
+                ]
+            },
+        )
+        cross_repo_cycle_validation = cross_repo_module.validate_graph(graph)
+    except Exception:
+        cross_repo_cycle_validation = {"decision": "error"}
+    try:
+        auto_runner = load_module("auto_runner_for_benchmark", root / "skills/core/auto-runner/scripts/auto_runner.py")
+        cross_profile = auto_runner.load_profile_registry().get("cross_repo_api", {})
+        cross_repo_profile_artifact_step_available = any(
+            isinstance(item, dict) and item.get("name") == "cross_repo_plan"
+            for item in cross_profile.get("artifact_steps", [])
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "spec.json").write_text(json.dumps({"doc_id": "REQ-CROSS", "summary": "provider api consumed by frontend"}), encoding="utf-8")
+            (out / "delivery_plan.json").write_text(
+                json.dumps(
+                    {
+                        "doc_id": "REQ-CROSS",
+                        "repo_tasks": [
+                            {"repo": "provider", "role": "modify", "tasks": ["change api"]},
+                            {"repo": "frontend", "role": "modify", "tasks": ["consume api"]},
+                        ],
+                        "cross_repo_order": ["provider", "frontend"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generated: list[str] = []
+            skipped: list[str] = []
+            steps: list[dict[str, Any]] = []
+            auto_runner.run_registry_artifact_steps(cross_profile, out, False, generated, skipped, steps)
+            cross_repo_auto_runner_generation_available = (
+                (out / "cross_repo_execution_graph.json").exists()
+                and (out / "cross_repo_readiness.json").exists()
+                and (out / "cross_repo_release_plan.json").exists()
+                and all(step.get("passed") for step in steps if not step.get("skipped"))
+            )
+    except Exception:
+        cross_repo_profile_artifact_step_available = False
+        cross_repo_auto_runner_generation_available = False
     forward_scenario_results = {}
     forward_cases = forward["json"].get("cases", []) if isinstance(forward["json"].get("cases"), list) else []
     if forward_cases and isinstance(forward_cases[0], dict):
@@ -80,6 +142,14 @@ def report(root: Path) -> dict[str, Any]:
         blockers.append({"source": "forward_test", "message": "forward test failed"})
     if replay["returncode"] != 0:
         blockers.append({"source": "replay_cases", "message": "replay case validation failed"})
+    if cross_repo["returncode"] != 0 or cross_repo_validation["returncode"] != 0:
+        blockers.append({"source": "cross_repo_planner", "message": "cross-repo planner example or validation failed"})
+    if cross_repo_cycle_validation.get("decision") != "block":
+        blockers.append({"source": "cross_repo_planner", "message": "cycle validation did not block"})
+    if not cross_repo_profile_artifact_step_available:
+        blockers.append({"source": "workflow_profile", "message": "cross_repo_api artifact step is missing"})
+    if not cross_repo_auto_runner_generation_available:
+        blockers.append({"source": "auto_runner", "message": "cross-repo artifact step did not generate required artifacts"})
     return {
         "schema": SCHEMA,
         "decision": "block" if blockers else "pass",
@@ -112,6 +182,12 @@ def report(root: Path) -> dict[str, Any]:
             "replay_case_count": replay["json"].get("case_count", 0),
             "replay_scenario_count": replay["json"].get("scenario_count", 0),
             "replay_validation_decision": replay["json"].get("decision"),
+            "cross_repo_planner_available": (root / "skills/core/cross-repo-planner/scripts/cross_repo_plan.py").exists(),
+            "cross_repo_example_decision": cross_repo["json"].get("decision"),
+            "cross_repo_graph_validation_decision": cross_repo_validation["json"].get("decision"),
+            "cross_repo_cycle_block_test_available": cross_repo_cycle_validation.get("decision") == "block",
+            "cross_repo_profile_artifact_step_available": cross_repo_profile_artifact_step_available,
+            "cross_repo_auto_runner_generation_available": cross_repo_auto_runner_generation_available,
         },
         "blockers": blockers,
     }

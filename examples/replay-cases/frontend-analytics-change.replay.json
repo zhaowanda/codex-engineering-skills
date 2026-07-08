@@ -1,0 +1,24 @@
+{
+  "schema": "codex-delivery-replay-skeleton-v1",
+  "case_id": "REPLAY-FRONTEND-ANALYTICS-001",
+  "anonymized": true,
+  "scenario": "frontend_analytics_change",
+  "source": "artifact_summaries_only",
+  "artifacts": [
+    {"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "technical_design.json", "schema": "codex-technical-design-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "delivery_plan.json", "schema": "codex-delivery-plan-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "code_review_gate.json", "schema": "codex-code-review-gate-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "test_evidence_gate.json", "schema": "codex-test-evidence-gate-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "post_change_implementation_report.json", "schema": "codex-post-change-implementation-report-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0}
+  ],
+  "replay_steps": [
+    {"step": "normalize_event_tracking_requirement", "expected_artifact": "spec.json"},
+    {"step": "design_frontend_touchpoints", "expected_artifact": "technical_design.json"},
+    {"step": "plan_low_risk_delivery", "expected_artifact": "delivery_plan.json"},
+    {"step": "review_implementation", "expected_artifact": "code_review_gate.json"},
+    {"step": "verify_test_evidence", "expected_artifact": "test_evidence_gate.json"},
+    {"step": "sync_post_change_evidence", "expected_artifact": "post_change_implementation_report.json"}
+  ],
+  "privacy_note": "No source text, customer names, project names, repo paths, local absolute paths, or private identifiers are included."
+}

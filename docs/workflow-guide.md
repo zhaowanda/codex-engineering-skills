@@ -63,7 +63,7 @@ requirement-document-ingestor
 | `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor` |
 | `small_feature` | Standard design-first profile, then Git/edit readiness gates. |
 | `frontend_change` | Standard design-first profile plus `frontend-acceptance-runner` and `test-evidence-gate`. |
-| `cross_repo_api` | Project understanding, standard design-first profile, `traceability-governor`, and release evidence gates. |
+| `cross_repo_api` | API/cross-repo contract profile with project understanding, cross-repo execution graph/readiness, `traceability-governor`, and release evidence gates. |
 | `data_migration` | Standard design-first profile plus `configuration-governor`, `data-security-governor`, `performance-governor`, and release gates. |
 | `release_readiness` | `implementation-completion-gate -> code-review-gate -> test-evidence-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
 

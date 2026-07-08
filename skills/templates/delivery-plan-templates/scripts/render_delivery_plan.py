@@ -235,6 +235,29 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
             "architecture_design_doc_id": architecture.get("doc_id", ""),
         },
         "repo_tasks": repo_tasks,
+        "parallel_groups": [
+            {
+                "group": 1,
+                "repos": [item["repo"] for item in repo_tasks if item.get("role") == "modify"],
+                "mode": "parallel_safe" if len([item for item in repo_tasks if item.get("role") == "modify"]) <= 1 else "requires_cross_repo_graph",
+                "source": "delivery-plan-templates",
+            }
+        ],
+        "dependency_edges": [
+            {"from": dep, "to": item.get("repo"), "type": "module_dependency"}
+            for item in as_list(architecture.get("module_topology"))
+            if isinstance(item, dict) and item.get("repo")
+            for dep in safe_list(item.get("depends_on"))
+        ],
+        "integration_gates": [
+            {"gate": "contract_freeze", "required_when": "dependency_edges or API/config/schema changes exist"},
+            {"gate": "cross_repo_integration_test", "required_when": "more than one modify repository exists"},
+        ],
+        "contract_freeze_points": [
+            {"repo": item.get("repo"), "module": item.get("module"), "freeze_before": "consumer implementation"}
+            for item in as_list(architecture.get("module_topology"))
+            if isinstance(item, dict) and item.get("repo") and any(term in str(item).lower() for term in ["api", "contract", "schema", "event", "config", "db"])
+        ],
         "cross_repo_order": release_order,
         "validation_plan": {
             "test_strategy": tests,
@@ -293,17 +316,22 @@ def validate(plan: dict[str, Any]) -> tuple[bool, list[str]]:
     repo_tasks = as_list(plan.get("repo_tasks"))
     if not repo_tasks:
         issues.append("repo_tasks is required")
+    repo_names: set[str] = set()
+    modify_repo_count = 0
     for idx, task in enumerate(repo_tasks):
         if not isinstance(task, dict):
             issues.append(f"repo_tasks[{idx}] must be object")
             continue
         role = task.get("role")
         repo = task.get("repo")
+        if repo:
+            repo_names.add(str(repo))
         if role not in ROLES:
             issues.append(f"repo_tasks[{idx}].role invalid")
         if not repo:
             issues.append(f"repo_tasks[{idx}].repo is required")
         if role == "modify":
+            modify_repo_count += 1
             if not task.get("repo_path"):
                 issues.append(f"{repo}: modify repo requires repo_path")
             if not task.get("allowed_files"):
@@ -313,6 +341,25 @@ def validate(plan: dict[str, Any]) -> tuple[bool, list[str]]:
     for key in ["validation_plan", "release_plan", "rollback_plan"]:
         if not isinstance(plan.get(key), dict):
             issues.append(f"{key} is required")
+    for key in ["parallel_groups", "dependency_edges", "integration_gates", "contract_freeze_points"]:
+        if key in plan and not isinstance(plan.get(key), list):
+            issues.append(f"{key} must be a list")
+    for idx, edge in enumerate(as_list(plan.get("dependency_edges"))):
+        if not isinstance(edge, dict):
+            issues.append(f"dependency_edges[{idx}] must be object")
+            continue
+        if edge.get("from") not in repo_names or edge.get("to") not in repo_names:
+            issues.append(f"dependency_edges[{idx}] endpoints must reference repo_tasks")
+    for idx, point in enumerate(as_list(plan.get("contract_freeze_points"))):
+        if not isinstance(point, dict):
+            issues.append(f"contract_freeze_points[{idx}] must be object")
+            continue
+        if point.get("repo") not in repo_names:
+            issues.append(f"contract_freeze_points[{idx}].repo must reference repo_tasks")
+    if modify_repo_count > 1:
+        groups = [item for item in as_list(plan.get("parallel_groups")) if isinstance(item, dict)]
+        if not any(item.get("mode") in {"requires_cross_repo_graph", "gated_parallel", "serial_required"} for item in groups):
+            issues.append("multiple modify repositories require a cross-repo graph or gated/serial parallel group")
     if plan.get("decision") not in {"ready", "needs_completion"}:
         issues.append("decision must be ready/needs_completion")
     return not issues, issues

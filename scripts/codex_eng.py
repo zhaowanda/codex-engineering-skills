@@ -46,6 +46,7 @@ COMMANDS = {
     "baseline-quality": ["python3", "skills/core/baseline-quality-governor/scripts/baseline_quality.py"],
     "project-understand": ["python3", "skills/core/project-understanding-runner/scripts/project_understand.py"],
     "project-runner": ["python3", "skills/core/project-runner/scripts/project_runner.py"],
+    "cross-repo-plan": ["python3", "skills/core/cross-repo-planner/scripts/cross_repo_plan.py"],
     "sync-local-skills": ["python3", "scripts/sync_local_skills.py"],
 }
 

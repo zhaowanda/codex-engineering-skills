@@ -42,6 +42,7 @@ Do not run every skill for every task. Use the workflow profile and change-risk 
 
 ## Delivery Planning
 
+- `skills/core/cross-repo-planner`: cross-repo-planner (deterministic-helper, artifact-generator)
 - `skills/core/delivery-plan-reviewer`: delivery-plan-reviewer (expert-gate, workflow-gate)
 - `skills/templates/delivery-plan-templates`: delivery-plan-templates (template, template-runner)
 - `skills/core/delivery-runner`: delivery-runner (orchestrator, template-runner)

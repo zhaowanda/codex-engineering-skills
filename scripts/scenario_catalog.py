@@ -51,11 +51,11 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "cross_repo_api",
         "label": "API or cross-repo change",
-        "when": "A backend API, route contract, producer/consumer boundary, or existing repository context matters.",
+        "when": "A backend API, route contract, producer/consumer boundary, explicit cross_repo impact, or coordinated multi-repository change is required.",
         "command": "python3 scripts/codex_eng.py auto --input api.md --repo /path/to/repo --project project-name --out /tmp/codex-auto",
         "expected_profile": "cross_repo_api",
-        "evidence": ["project_understanding/baseline_quality.json", "technical_design.json", "architecture_design.json", "delivery_plan_review.json"],
-        "next_step": "Use project understanding and traceability evidence before implementation. " + PRE_EDIT_GATE,
+        "evidence": ["project_understanding/baseline_quality.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json", "delivery_plan_review.json"],
+        "next_step": "Use project understanding, cross-repo graph, readiness, and traceability evidence before implementation. " + PRE_EDIT_GATE,
     },
     {
         "id": "data_migration",
@@ -118,8 +118,8 @@ SCENARIO_MATRIX: dict[str, dict[str, Any]] = {
         "required_gates": CORE_PRE_EDIT_GATES + ["frontend_acceptance.json", "test_evidence_gate.json"],
     },
     "cross_repo_api": {
-        "required_skills": ["project-understanding-runner", "traceability-governor", "api-surface-extractor", "delivery-plan-reviewer"],
-        "required_gates": ["project_understanding/baseline_quality.json"] + CORE_PRE_EDIT_GATES,
+        "required_skills": ["project-understanding-runner", "cross-repo-planner", "traceability-governor", "api-surface-extractor", "delivery-plan-reviewer"],
+        "required_gates": ["project_understanding/baseline_quality.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json"] + CORE_PRE_EDIT_GATES,
     },
     "data_migration": {
         "required_skills": ["configuration-governor", "data-security-governor", "performance-governor", "release-evidence-binder"],

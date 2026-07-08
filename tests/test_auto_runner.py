@@ -461,6 +461,52 @@ def test_auto_runner_merges_repo_context_with_frontend_profile() -> None:
     assert reason["composition_mode"] == "merged"
 
 
+def test_auto_runner_does_not_route_repo_context_alone_to_cross_repo_profile() -> None:
+    spec = {
+        "lane": "standard_requirement",
+        "impact_surface": [
+            {"area": "ui"},
+        ],
+    }
+    profile, reason = auto_runner.select_workflow_profile_with_reason(spec, has_repo=True)
+    assert profile["name"] == "frontend_change"
+    assert "cross_repo_api" not in profile.get("overlay_profiles", [])
+    assert "cross_repo_readiness.json" not in profile["expected_artifacts"]
+    assert reason["mode"] == "impact_surface"
+
+
+def test_cross_repo_profile_artifact_step_generates_graph_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        (out / "spec.json").write_text(
+            json.dumps({"doc_id": "REQ-CROSS", "summary": "provider api consumed by frontend"}),
+            encoding="utf-8",
+        )
+        (out / "delivery_plan.json").write_text(
+            json.dumps(
+                {
+                    "doc_id": "REQ-CROSS",
+                    "repo_tasks": [
+                        {"repo": "provider", "role": "modify", "tasks": ["change api"]},
+                        {"repo": "frontend", "role": "modify", "tasks": ["consume api"]},
+                    ],
+                    "cross_repo_order": ["provider", "frontend"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        profile = auto_runner.load_profile_registry()["cross_repo_api"]
+        generated: list[str] = []
+        skipped: list[str] = []
+        steps: list[dict] = []
+        assert auto_runner.run_registry_artifact_steps(profile, out, False, generated, skipped, steps) is True
+        assert (out / "cross_repo_execution_graph.json").exists()
+        assert (out / "cross_repo_readiness.json").exists()
+        assert (out / "cross_repo_release_plan.json").exists()
+        assert json.loads((out / "cross_repo_readiness.json").read_text(encoding="utf-8"))["decision"] == "ready"
+        assert all(step.get("passed") for step in steps if not step.get("skipped"))
+
+
 def test_workflow_strictness_classifies_light_standard_and_regulated() -> None:
     light = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": []}, {"name": "bugfix"}, "high")
     assert light["tier"] == "light"

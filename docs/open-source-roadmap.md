@@ -95,6 +95,7 @@
 - Roadmap governor. `done`
 - Docs readability governor. `done`
 - Prompt effectiveness governor. `done`
+- Cross-repo planner for multi-repository execution graphs. `done`
 
 ## v1.1
 

@@ -29,6 +29,8 @@ python3 scripts/delivery_state.py \
   init \
   --doc-id REQ-20260623-example \
   --lane standard_requirement \
+  --repo web-app \
+  --repo api-service \
   --artifact-dir /path/to/artifacts
 ```
 
@@ -70,6 +72,8 @@ python3 scripts/delivery_state.py \
 - Every blocker must have a concrete next action.
 - Do not implement unless `validate --target implementation` returns `decision=ready`.
 - Do not release unless `validate --target release` returns `decision=ready`.
+- When repo states declare `requires_git` or `requires_edit_permit`, validation requires matching per-repo evidence before implementation.
+- Release validation blocks incomplete `integration_gates` unless each gate is `passed`, `ready`, `complete`, or `waived`.
 - Let downstream gates advance only the evidence they own.
 - Keep chat output small; point to evidence paths.
 
@@ -85,6 +89,8 @@ python3 scripts/delivery_state.py \
   "required_gates": [],
   "passed_gates": [],
   "evidence": {},
+  "repo_states": [],
+  "integration_gates": [],
   "blockers": [],
   "next_action": "",
   "history": []

@@ -114,7 +114,7 @@ def next_gate(passed: list[str], required: list[str]) -> str:
     return "none"
 
 
-def init_state(doc_id: str, lane: str, artifact_dir: Path) -> dict[str, Any]:
+def init_state(doc_id: str, lane: str, artifact_dir: Path, repos: list[str] | None = None) -> dict[str, Any]:
     if lane not in LANE_GATES:
         raise SystemExit(f"unknown lane: {lane}; valid={', '.join(sorted(LANE_GATES))}")
     gates = LANE_GATES[lane]
@@ -127,6 +127,11 @@ def init_state(doc_id: str, lane: str, artifact_dir: Path) -> dict[str, Any]:
         "required_gates": gates,
         "passed_gates": ["doc_id"],
         "evidence": {"doc_id": doc_id},
+        "repo_states": [
+            {"repo": repo, "status": "planned", "current_stage": "planning", "blockers": [], "evidence": {}}
+            for repo in list(dict.fromkeys(repos or []))
+        ],
+        "integration_gates": [],
         "blockers": [],
         "next_action": f"complete next gate: {next_gate(['doc_id'], gates)}",
         "history": [event("init", doc_id=doc_id, lane=lane)],
@@ -207,6 +212,23 @@ def validate_state(path: Path, target: str) -> dict[str, Any]:
     passed = set(state.get("passed_gates", []))
     missing = [gate for gate in required if gate not in passed]
     blockers = list(state.get("blockers", []))
+    for repo_state in state.get("repo_states", []) if isinstance(state.get("repo_states"), list) else []:
+        if isinstance(repo_state, dict) and repo_state.get("status") == "blocked":
+            blockers.append(f"{repo_state.get('repo', 'unknown')}: repo state is blocked")
+        if isinstance(repo_state, dict) and target == "implementation":
+            evidence = repo_state.get("evidence") if isinstance(repo_state.get("evidence"), dict) else {}
+            if repo_state.get("requires_git") and not evidence.get("git"):
+                blockers.append(f"{repo_state.get('repo', 'unknown')}: git evidence is required before implementation")
+            if repo_state.get("requires_edit_permit") and not evidence.get("edit_permit"):
+                blockers.append(f"{repo_state.get('repo', 'unknown')}: edit permit evidence is required before implementation")
+    if target == "release":
+        for gate in state.get("integration_gates", []) if isinstance(state.get("integration_gates"), list) else []:
+            if not isinstance(gate, dict):
+                blockers.append("integration gate entry must be an object")
+                continue
+            status = str(gate.get("status") or "")
+            if status not in {"passed", "ready", "complete", "waived"}:
+                blockers.append(f"{gate.get('gate', 'unknown')}: integration gate is not complete")
     if state.get("status") == "blocked" and not blockers:
         blockers.append("state is blocked")
     decision = "ready" if not missing and not blockers else "blocked"
@@ -231,6 +253,7 @@ def main() -> int:
     p_init.add_argument("--doc-id", required=True)
     p_init.add_argument("--lane", required=True)
     p_init.add_argument("--artifact-dir", required=True)
+    p_init.add_argument("--repo", action="append", default=[])
     p_inspect = sub.add_parser("inspect")
     p_inspect.add_argument("--state", required=True)
     p_advance = sub.add_parser("advance")
@@ -252,7 +275,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.cmd == "init":
-        result = init_state(args.doc_id, args.lane, Path(args.artifact_dir))
+        result = init_state(args.doc_id, args.lane, Path(args.artifact_dir), args.repo)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if args.cmd == "inspect":

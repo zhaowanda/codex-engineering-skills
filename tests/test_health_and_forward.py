@@ -362,6 +362,60 @@ def test_overlay_health_policy_can_require_team_sections() -> None:
         assert any("release_boundary" in item["message"] for item in result["blockers"])
 
 
+def test_overlay_health_supports_installed_company_layout_and_json_registry() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "registry").mkdir()
+        (root / "web-app").mkdir()
+        (root / "web-app/SKILL.md").write_text(
+            "# Web App\n\nOwner boundary: frontend module.\nCommands: npm run build.\nTest command: npm test.\nCode-index: indexes/web-app.code_index.json.\n",
+            encoding="utf-8",
+        )
+        (root / "registry/projects.json").write_text(
+            json.dumps({
+                "schema": "company-project-registry-v1",
+                "projects": [{
+                    "name": "web-app",
+                    "skill": "web-app",
+                    "analysis": {
+                        "codeIndex": "indexes/web-app.code_index.json",
+                        "baseline": "baseline/web-app.baseline.json",
+                    },
+                }],
+            }),
+            encoding="utf-8",
+        )
+        (root / "indexes").mkdir()
+        (root / "baseline").mkdir()
+        now = datetime.now(timezone.utc).isoformat()
+        metadata = {"generated_at": now, "source_revision": "abc123"}
+        (root / "indexes/web-app.code_index.json").write_text(json.dumps(metadata), encoding="utf-8")
+        (root / "baseline/web-app.baseline.json").write_text(json.dumps(metadata), encoding="utf-8")
+        result = overlay_health.check(root)
+        assert result["decision"] == "pass"
+        assert result["registry_sources"] == ["registry/projects.json"]
+        assert result["project_count"] == 1
+        assert result["project_skill_count"] == 1
+        assert len(result["checked_assets"]) == 2
+
+
+def test_overlay_health_skips_declared_tool_skills() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "projects.yaml").write_text(
+            "projects:\n"
+            "  - name: project-tool\n"
+            "    skill_type: tool\n",
+            encoding="utf-8",
+        )
+        result = overlay_health.check(root)
+        assert result["decision"] == "pass"
+        assert result["project_count"] == 1
+        assert result["project_skill_count"] == 0
+        assert result["skipped_skill_count"] == 1
+        assert result["checked_assets"] == []
+
+
 def test_human_doc_review_detects_local_path() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "doc.md"
@@ -927,8 +981,14 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["skill_content_quality_average"] > 0
     assert metrics["skill_content_quality_expert_count"] > 0
     assert metrics["replay_validation_decision"] == "pass"
-    assert metrics["replay_case_count"] >= 4
-    assert metrics["replay_scenario_count"] >= 4
+    assert metrics["replay_case_count"] >= 7
+    assert metrics["replay_scenario_count"] >= 7
+    assert metrics["cross_repo_planner_available"] is True
+    assert metrics["cross_repo_example_decision"] == "ready"
+    assert metrics["cross_repo_graph_validation_decision"] == "pass"
+    assert metrics["cross_repo_cycle_block_test_available"] is True
+    assert metrics["cross_repo_profile_artifact_step_available"] is True
+    assert metrics["cross_repo_auto_runner_generation_available"] is True
 
 
 def run_all() -> None:
@@ -949,6 +1009,8 @@ def run_all() -> None:
     test_overlay_health_blocks_missing_declared_assets_and_warns_stale_assets()
     test_overlay_health_reviews_project_skill_guidance_quality()
     test_overlay_health_policy_can_require_team_sections()
+    test_overlay_health_supports_installed_company_layout_and_json_registry()
+    test_overlay_health_skips_declared_tool_skills()
     test_human_doc_review_detects_local_path()
     test_human_doc_review_warns_thin_doc()
     test_human_doc_review_strict_blocks_warnings()

@@ -1,0 +1,21 @@
+{
+  "schema": "codex-delivery-replay-skeleton-v1",
+  "case_id": "REPLAY-CROSS-REPO-PARALLEL-001",
+  "anonymized": true,
+  "scenario": "cross_repo_parallel_plan",
+  "source": "artifact_summaries_only",
+  "artifacts": [
+    {"artifact": "cross_repo_execution_graph.json", "schema": "codex-cross-repo-execution-graph-v1", "decision": "ready", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "cross_repo_readiness.json", "schema": "codex-cross-repo-readiness-v1", "decision": "ready", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "cross_repo_release_plan.json", "schema": "codex-cross-repo-release-plan-v1", "decision": "ready", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "delivery_plan.json", "schema": "codex-delivery-plan-v1", "decision": "ready", "blocker_count": 0, "warning_count": 0}
+  ],
+  "replay_steps": [
+    {"step": "identify_involved_repositories", "expected_artifact": "cross_repo_execution_graph.json"},
+    {"step": "group_parallel_safe_work", "expected_artifact": "cross_repo_execution_graph.json"},
+    {"step": "check_cross_repo_readiness", "expected_artifact": "cross_repo_readiness.json"},
+    {"step": "plan_integration_and_release_order", "expected_artifact": "cross_repo_release_plan.json"},
+    {"step": "bind_repo_delivery_tasks", "expected_artifact": "delivery_plan.json"}
+  ],
+  "privacy_note": "No source text, customer names, project names, repo paths, local absolute paths, or private identifiers are included."
+}

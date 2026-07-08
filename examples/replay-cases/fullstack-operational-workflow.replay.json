@@ -1,0 +1,27 @@
+{
+  "schema": "codex-delivery-replay-skeleton-v1",
+  "case_id": "REPLAY-FULLSTACK-WORKFLOW-001",
+  "anonymized": true,
+  "scenario": "fullstack_operational_workflow",
+  "source": "artifact_summaries_only",
+  "artifacts": [
+    {"artifact": "requirement_ingestion.json", "schema": "codex-requirement-ingestion-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "technical_design.json", "schema": "codex-technical-design-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "architecture_design.json", "schema": "codex-architecture-design-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "design_architecture_review.json", "schema": "codex-design-architecture-review-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "delivery_plan.json", "schema": "codex-delivery-plan-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "frontend_acceptance.json", "schema": "codex-frontend-acceptance-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+    {"artifact": "release_gate.json", "schema": "codex-release-evidence-binder-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0}
+  ],
+  "replay_steps": [
+    {"step": "ingest_requirement", "expected_artifact": "requirement_ingestion.json"},
+    {"step": "normalize_scope", "expected_artifact": "spec.json"},
+    {"step": "draft_designs", "expected_artifact": "technical_design.json"},
+    {"step": "review_architecture", "expected_artifact": "design_architecture_review.json"},
+    {"step": "plan_delivery", "expected_artifact": "delivery_plan.json"},
+    {"step": "capture_frontend_evidence", "expected_artifact": "frontend_acceptance.json"},
+    {"step": "bind_release_evidence", "expected_artifact": "release_gate.json"}
+  ],
+  "privacy_note": "No source text, customer names, project names, repo paths, local absolute paths, or private identifiers are included."
+}

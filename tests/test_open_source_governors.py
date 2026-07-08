@@ -88,8 +88,9 @@ def test_replay_case_fixtures_are_anonymized_and_schema_compatible() -> None:
     required = set(schema["required_fields"])
     validation = capture_case.validate_replay_dir(ROOT / "examples/replay-cases")
     assert validation["decision"] == "pass"
-    assert validation["case_count"] == 4
-    assert validation["scenario_count"] == 4
+    assert validation["case_count"] >= 7
+    assert validation["scenario_count"] >= 7
+    assert {"cross_repo_parallel_plan", "frontend_analytics_change", "fullstack_operational_workflow"}.issubset(set(validation["scenarios"]))
     for path in sorted((ROOT / "examples/replay-cases").glob("*.replay.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
         assert required.issubset(data)

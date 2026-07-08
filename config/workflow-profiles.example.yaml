@@ -213,6 +213,7 @@ profiles:
       - spec-governor
       - technical-design-governor
       - architecture-design-governor
+      - cross-repo-planner
       - test-design-governor
       - test-data-governor
       - design-architecture-reviewer
@@ -232,8 +233,24 @@ profiles:
       - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
+      - cross_repo_execution_graph.json
+      - cross_repo_readiness.json
+      - cross_repo_release_plan.json
       - delivery_plan_review.json
       - docs_quality.json
+    artifact_steps:
+      - name: cross_repo_plan
+        artifact: cross_repo_readiness.json
+        command:
+          - python3
+          - skills/core/cross-repo-planner/scripts/cross_repo_plan.py
+          - plan
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --delivery-plan
+          - "{artifact_dir}/delivery_plan.json"
+          - --out-dir
+          - "{artifact_dir}"
     required_gate_artifacts:
       - artifact: project_understanding/baseline_quality.json
         accepted_decisions:
@@ -251,6 +268,10 @@ profiles:
         accepted_decisions:
           - pass
           - ready
+      - artifact: cross_repo_readiness.json
+        accepted_decisions:
+          - ready
+          - pass
       - artifact: design_architecture_review.json
         accepted_decisions:
           - pass

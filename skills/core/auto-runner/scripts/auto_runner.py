@@ -325,8 +325,8 @@ def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_rep
     if matched_impacts:
         score += 35 + (5 * len(matched_impacts))
         signals.extend(f"impact:{item}" for item in matched_impacts)
-    if has_repo and name == "cross_repo_api":
-        score += 50
+    if has_repo and name != "small_feature":
+        score += 5
         signals.append("repo_context")
     if {"data", "security"} & impacts and name == "data_migration":
         score += 45
@@ -482,7 +482,7 @@ def merge_workflow_profiles(base: dict[str, Any], overlays: list[dict[str, Any]]
 
 def impact_overlay_profile_names(impacts: set[str], has_repo: bool) -> list[str]:
     names: list[str] = []
-    if has_repo or impacts & {"api", "cross_repo"}:
+    if impacts & {"api", "cross_repo"}:
         names.append("cross_repo_api")
     if impacts & {"ui", "frontend"}:
         names.append("frontend_change")
@@ -554,10 +554,6 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
                 mode = "impact_surface"
                 reason = item_reason
                 break
-        if not base_profile and has_repo and "cross_repo_api" in profiles:
-            base_profile = profiles["cross_repo_api"]
-            mode = "repo_context"
-            reason = "Project understanding was requested, so cross-repo/API contract gates are required."
         if not base_profile:
             for profile in profiles.values():
                 if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:

@@ -23,6 +23,9 @@ project-onboard / private overlay edits
 
 - Require a project registry for private overlay use.
 - Check that referenced project skills, generated indexes, baseline docs, and delivery docs manifests exist when configured.
+- Accept either `projects.yaml` or `registry/projects.json`; when both exist, merge JSON analysis metadata with YAML project assets.
+- Resolve project skills in both repository layout (`skills/<project>/SKILL.md`) and installed company layout (`<project>/SKILL.md`).
+- Treat skills marked `skill_type: tool`, `kind: tool`, `governor`, or `helper` as non-project skills and skip project index/baseline checks for them.
 - Block missing required overlay structure; warn on optional but incomplete generated artifacts.
 - Do not publish private overlay outputs to the open-core repository.
 - Treat overlay health as environment readiness, not application correctness.
