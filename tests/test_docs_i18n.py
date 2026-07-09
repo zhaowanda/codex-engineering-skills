@@ -105,10 +105,13 @@ def test_sync_inherits_existing_runtime_evidence_before_rendering_human_docs() -
 
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
     rendered = docs_governor.zh_text("npm run build:test evidence; mvn -pl operate-provider -DskipTests compile evidence")
+    readable = docs_governor.render_readable_value(["npm run build:test evidence"], "zh")
 
     assert "npm run build:test" in rendered
     assert "mvn -pl operate-provider -DskipTests compile" in rendered
     assert "npm run build:测试" not in rendered
+    assert "npm run build:test" in readable
+    assert "npm run build:测试" not in readable
 
 
 def test_i18n_renders_nested_design_keys_for_human_docs() -> None:

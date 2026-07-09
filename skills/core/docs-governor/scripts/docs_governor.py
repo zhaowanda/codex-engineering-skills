@@ -190,9 +190,15 @@ def clean_joined_text(value: str, language: str = "en") -> str:
 def render_readable_value(value: Any, language: str = "en") -> str:
     if value in (None, "", [], {}):
         return ""
+    def render_one(item: Any) -> str:
+        if language == "zh":
+            protected, placeholders = protect_code_tokens(text(item, ""))
+            return restore_code_tokens(clean_joined_text(human_value(protected, language, ""), language), placeholders)
+        return clean_joined_text(human_value(item, language, ""), language)
+
     if isinstance(value, list):
         items = [
-            clean_joined_text(human_value(item, language, ""), language)
+            render_one(item)
             for item in value
             if item not in (None, "", [], {})
         ]
@@ -202,7 +208,7 @@ def render_readable_value(value: Any, language: str = "en") -> str:
         if len(items) == 1:
             return items[0]
         return "\n" + "\n".join(f"  - {item}" for item in items)
-    return clean_joined_text(human_value(value, language, ""), language)
+    return render_one(value)
 
 
 ZH_DEFAULT_PHRASES = {
