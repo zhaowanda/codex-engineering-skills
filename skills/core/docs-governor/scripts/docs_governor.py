@@ -1161,6 +1161,7 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
     if downstream and not downstreams:
         downstreams = [downstream]
 
+    runtime_entrypoint = runtime_evidence.get("entrypoint") if isinstance(runtime_evidence.get("entrypoint"), dict) else {}
     frontend_bits = [item for item in [frontend_page, frontend_route, frontend_repo] if item]
     backend_bits = [item for item in [backend_service or backend_controller, backend_repo] if item]
     frontend_label = "<br/>".join(frontend_bits[:3]) or ("浏览器/前端" if language == "zh" else "Browser / frontend")
@@ -1188,9 +1189,29 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
                 downstream_aliases.setdefault(alternate, alias)
         downstream_participants.append((alias, label))
 
+    first_interaction = interactions[0]
+    entrypoint = first_interaction.get("entrypoint") if isinstance(first_interaction.get("entrypoint"), dict) else runtime_entrypoint
+    entry_kind = human_value(entrypoint.get("kind"), language, "")
+    entry_label = runtime_entrypoint_label(entrypoint, frontend_label, backend_label, language)
+    uses_frontend_entry = entry_kind in {"", "frontend_action"} and bool(frontend_bits)
+    uses_mq_entry = entry_kind == "mq_consumer"
+    uses_scheduled_entry = entry_kind == "scheduled_job"
+    uses_direct_backend_entry = entry_kind in {"http_api", "backend_method", "batch_job", "mq_consumer", "scheduled_job"}
+
     lines = ["```mermaid", "sequenceDiagram", "  autonumber"]
     lines.append(f"  actor A as {mermaid_flow_label(actor, language, 32)}")
-    lines.append(f"  participant B as {mermaid_flow_label(frontend_label, language, 96)}")
+    if uses_frontend_entry:
+        lines.append(f"  participant B as {mermaid_flow_label(frontend_label, language, 96)}")
+    elif uses_mq_entry:
+        topic = human_value(entrypoint.get("topic") or entrypoint.get("queue"), language, "")
+        mq_label = ("MQ" if not topic else f"MQ<br/>{topic}")
+        lines.append(f"  participant M as {mermaid_flow_label(mq_label, language, 72)}")
+    elif uses_scheduled_entry:
+        lines.append(f"  participant T as {mermaid_flow_label(entry_label, language, 72)}")
+    elif uses_direct_backend_entry:
+        lines.append(f"  participant E as {mermaid_flow_label(entry_label, language, 72)}")
+    else:
+        lines.append(f"  participant B as {mermaid_flow_label(frontend_label, language, 96)}")
     lines.append(f"  participant C as {mermaid_flow_label(backend_label, language, 96)}")
     if table_names:
         db_label = ("数据库表<br/>" if language == "zh" else "Database tables<br/>") + "<br/>".join(table_names[:4])
@@ -1220,13 +1241,44 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
         ]
         failure = human_value(item.get("failure"), language, "")
 
+        item_entrypoint = item.get("entrypoint") if isinstance(item.get("entrypoint"), dict) else entrypoint
+        item_entry_kind = human_value(item_entrypoint.get("kind"), language, entry_kind)
         trigger_label = " / ".join(part for part in [scenario, trigger] if part)
         api_label = " ".join(part for part in [method, api] if part)
         if request:
             api_label = f"{api_label}，{request}" if api_label else request
         response_label = response or success_note
-        lines.append(f"  A->>B: {mermaid_flow_label(trigger_label, language, 120)}")
-        lines.append(f"  B->>C: {mermaid_flow_label(api_label or ('请求后端接口' if language == 'zh' else 'request backend API'), language, 360)}")
+        if item_entry_kind == "frontend_action" or (not item_entry_kind and uses_frontend_entry):
+            lines.append(f"  A->>B: {mermaid_flow_label(trigger_label, language, 120)}")
+            lines.append(f"  B->>C: {mermaid_flow_label(api_label or ('请求后端接口' if language == 'zh' else 'request backend API'), language, 360)}")
+            response_target = "B"
+            user_feedback = True
+        elif item_entry_kind == "mq_consumer":
+            producer = human_value(item_entrypoint.get("producer") or item_entrypoint.get("upstream"), language, "")
+            publish_label = trigger_label or ("上游发布消息" if language == "zh" else "upstream publishes message")
+            if producer:
+                lines.append(f"  A->>M: {mermaid_flow_label(producer + ' / ' + publish_label, language, 120)}")
+            else:
+                lines.append(f"  A->>M: {mermaid_flow_label(publish_label, language, 120)}")
+            consumer_label = "投递消息并触发 Consumer" if language == "zh" else "deliver message to consumer"
+            if request:
+                consumer_label = f"{consumer_label}，{request}" if language == "zh" else f"{consumer_label}, {request}"
+            lines.append(f"  M->>C: {mermaid_flow_label(consumer_label, language, 160)}")
+            response_target = "M"
+            user_feedback = False
+        elif item_entry_kind == "scheduled_job":
+            lines.append(f"  A->>T: {mermaid_flow_label(trigger_label or ('到达调度时间' if language == 'zh' else 'schedule fires'), language, 120)}")
+            schedule_label = "触发定时任务处理" if language == "zh" else "run scheduled job"
+            if request:
+                schedule_label = f"{schedule_label}，{request}" if language == "zh" else f"{schedule_label}, {request}"
+            lines.append(f"  T->>C: {mermaid_flow_label(schedule_label, language, 160)}")
+            response_target = "T"
+            user_feedback = False
+        else:
+            lines.append(f"  A->>E: {mermaid_flow_label(trigger_label, language, 120)}")
+            lines.append(f"  E->>C: {mermaid_flow_label(api_label or ('调用后端入口' if language == 'zh' else 'call backend entrypoint'), language, 160)}")
+            response_target = "E"
+            user_feedback = False
         if backend_action:
             lines.append(f"  activate C")
             lines.append(f"  Note over C: {mermaid_flow_label(backend_action, language, 140)}")
@@ -1259,14 +1311,16 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
             else:
                 lines.append(f"  C->>DB: {mermaid_flow_label('按数据模型读写相关表' if language == 'zh' else 'read/write mapped tables per data model', language, 80)}")
             lines.append(f"  DB-->>C: {mermaid_flow_label('返回查询/写入结果' if language == 'zh' else 'return query/write result', language, 40)}")
-        lines.append(f"  C-->>B: {mermaid_flow_label(response_label, language, 64)}")
+        lines.append(f"  C-->>{response_target}: {mermaid_flow_label(response_label, language, 64)}")
         if backend_action:
             lines.append(f"  deactivate C")
-        lines.append(f"  B-->>A: {mermaid_flow_label(success_note, language, 46)}")
+        if user_feedback:
+            lines.append(f"  B-->>A: {mermaid_flow_label(success_note, language, 46)}")
         if failure:
             lines.append(f"  opt {failure_label}")
-            lines.append(f"    C--xB: {mermaid_flow_label(failure, language, 64)}")
-            lines.append(f"    B--xA: {mermaid_flow_label('展示校验/错误提示，保留当前输入' if language == 'zh' else 'show error and preserve input', language, 54)}")
+            lines.append(f"    C--x{response_target}: {mermaid_flow_label(failure, language, 64)}")
+            if user_feedback:
+                lines.append(f"    B--xA: {mermaid_flow_label('展示校验/错误提示，保留当前输入' if language == 'zh' else 'show error and preserve input', language, 54)}")
             lines.append("  end")
     if len(interactions) > 8:
         omitted = len(interactions) - 8
@@ -1274,6 +1328,40 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
         lines.append(f"  Note over A,C: {note}")
     lines.append("```")
     return "\n".join(lines)
+
+
+def runtime_entrypoint_label(entrypoint: dict[str, Any], frontend_label: str, backend_label: str, language: str = "en") -> str:
+    kind = human_value(entrypoint.get("kind"), language, "")
+    name = human_value(entrypoint.get("name") or entrypoint.get("source_file") or entrypoint.get("handler"), language, "")
+    repo = human_value(entrypoint.get("repo"), language, "")
+    api = " ".join(
+        part
+        for part in [
+            human_value(entrypoint.get("method"), language, ""),
+            human_value(entrypoint.get("api") or entrypoint.get("path"), language, ""),
+        ]
+        if part
+    )
+    topic = human_value(entrypoint.get("topic") or entrypoint.get("queue"), language, "")
+    cron = human_value(entrypoint.get("cron"), language, "")
+    if kind == "frontend_action":
+        return frontend_label
+    if kind == "mq_consumer":
+        parts = [name or ("MQ Consumer" if language != "zh" else "MQ Consumer"), topic, repo]
+        return "<br/>".join(part for part in parts if part)
+    if kind == "scheduled_job":
+        parts = [name or ("Scheduled job" if language != "zh" else "定时任务"), cron, repo]
+        return "<br/>".join(part for part in parts if part)
+    if kind == "batch_job":
+        parts = [name or ("Batch job" if language != "zh" else "批处理任务"), repo]
+        return "<br/>".join(part for part in parts if part)
+    if kind == "http_api":
+        parts = [api or name or ("HTTP/API caller" if language != "zh" else "HTTP/API 调用方"), repo]
+        return "<br/>".join(part for part in parts if part)
+    if kind == "backend_method":
+        parts = [name or backend_label, repo]
+        return "<br/>".join(part for part in parts if part)
+    return name or frontend_label or backend_label
 
 
 def render_system_sequence_mermaid(
@@ -4231,6 +4319,72 @@ def is_frontend_entrypoint(entrypoint: str) -> bool:
     return lowered.endswith((".vue", ".js", ".jsx", ".ts", ".tsx")) and not lowered.endswith(".d.ts")
 
 
+def extract_annotation_value(source: str, names: list[str]) -> str:
+    for name in names:
+        match = re.search(rf"{name}\s*=\s*[\"']([^\"']+)[\"']", source)
+        if match:
+            return match.group(1)
+    value_match = re.search(r"[\"']([^\"']+)[\"']", source)
+    return value_match.group(1) if value_match else ""
+
+
+def source_runtime_entrypoint_kind(source: str, entrypoint: str, has_http_contract: bool = False) -> str:
+    lowered = entrypoint.lower()
+    if is_frontend_entrypoint(entrypoint):
+        return "frontend_action"
+    if re.search(r"@(KafkaListener|RabbitListener|JmsListener|RocketMQMessageListener)", source):
+        return "mq_consumer"
+    if re.search(r"\b(MessageListener|Consumer<|implements\s+\w*Consumer|onMessage\s*\()", source):
+        return "mq_consumer"
+    if re.search(r"@Scheduled|\bcron\s*=", source, flags=re.I):
+        return "scheduled_job"
+    if "batch" in lowered or "job" in lowered or re.search(r"@(XxlJob|JobHandler)|implements\s+Job", source):
+        return "batch_job"
+    if has_http_contract or re.search(r"@(Get|Post|Put|Delete|Patch|Request)Mapping", source):
+        return "http_api"
+    if is_backend_entrypoint(entrypoint, has_http_contract):
+        return "backend_method"
+    return "backend_method" if entrypoint else ""
+
+
+def runtime_entrypoint_from_source(
+    artifact_dir: Path,
+    project: str,
+    entrypoint: str,
+    method: str = "",
+    api: str = "",
+    summary: str = "",
+) -> dict[str, Any]:
+    source = source_file_text(artifact_dir, entrypoint)
+    kind = source_runtime_entrypoint_kind(source, entrypoint, bool(method or api))
+    symbols = source_symbols_for_entrypoint(artifact_dir, entrypoint, limit=3)
+    name = symbols[0] if symbols else Path(entrypoint).name if entrypoint else summary
+    data: dict[str, Any] = {
+        "kind": kind,
+        "repo": project,
+        "name": name,
+        "source_file": entrypoint,
+    }
+    if kind == "frontend_action":
+        data["action"] = summary
+    if kind == "http_api":
+        data["method"] = method
+        data["api"] = api
+    if kind == "mq_consumer":
+        listener = re.search(r"@(KafkaListener|RabbitListener|JmsListener|RocketMQMessageListener)\s*\(([^)]*)\)", source, flags=re.S)
+        listener_body = listener.group(2) if listener else source
+        topic = extract_annotation_value(listener_body, ["topics", "topic", "value", "queues", "queue", "consumerGroup"])
+        if topic:
+            data["topic"] = topic
+    if kind == "scheduled_job":
+        scheduled = re.search(r"@Scheduled\s*\(([^)]*)\)", source, flags=re.S)
+        if scheduled:
+            cron = extract_annotation_value(scheduled.group(1), ["cron", "fixedDelayString", "fixedRateString"])
+            if cron:
+                data["cron"] = cron
+    return {key: value for key, value in data.items() if value}
+
+
 def route_for_entrypoint(artifact_dir: Path, entrypoint: str) -> str:
     api_surface = read_json(project_understanding_path(artifact_dir, "api_surface.json"))
     routes = [item for item in as_list(api_surface.get("routes")) if isinstance(item, dict)]
@@ -4345,17 +4499,27 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
         if not api and entrypoint:
             api = route_for_entrypoint(artifact_dir, entrypoint)
         symbols = source_symbols_for_entrypoint(artifact_dir, entrypoint)
-        entry_is_backend = is_backend_entrypoint(entrypoint, bool(method))
+        entrypoint_info = runtime_entrypoint_from_source(artifact_dir, project, entrypoint, method, api, summary)
+        entry_kind = text(entrypoint_info.get("kind"), "")
+        entry_is_frontend = entry_kind == "frontend_action"
+        entry_is_backend = entry_kind in {"http_api", "backend_method", "mq_consumer", "scheduled_job", "batch_job"} or is_backend_entrypoint(entrypoint, bool(method))
         trigger = first_text(ui.get("entry_point"), ui.get("user_goal"), summary)
-        if trigger == "existing entry" and entry_is_backend:
+        if trigger == "existing entry" and entry_kind == "mq_consumer":
+            topic = text(entrypoint_info.get("topic"), "")
+            trigger = f"MQ 消息投递{('到 ' + topic) if topic else ''}后触发「{summary}」"
+        elif trigger == "existing entry" and entry_kind == "scheduled_job":
+            cron = text(entrypoint_info.get("cron"), "")
+            trigger = f"定时任务{('(' + cron + ')') if cron else ''}触发「{summary}」"
+        elif trigger == "existing entry" and entry_is_backend:
             trigger = f"调用 {method + ' ' if method else ''}{api or entrypoint}，执行「{summary}」"
         elif trigger == "existing entry":
             trigger = f"打开 {page_or_route or entrypoint} 并执行「{summary}」"
         interaction = {
             "scenario": f"{brk} {summary}".strip(),
+            "entrypoint": entrypoint_info,
             "trigger": trigger,
             "current_gap": text(current.get("process_gap") or current.get("business_problem"), ""),
-            "frontend_functions": symbols if not entry_is_backend else [],
+            "frontend_functions": symbols if entry_is_frontend else [],
             "field_bindings": [text(value, "") for value in as_list(ui.get("field_rules")) if text(value, "")],
             "method": method,
             "api": api,
@@ -4399,6 +4563,7 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
         "source": "docs-governor synthesized from spec, technical design, api surface, and code index",
         "confidence": "medium",
         "actor": actor_from_spec(spec),
+        "entrypoint": next((item.get("entrypoint") for item in interactions if isinstance(item.get("entrypoint"), dict) and item.get("entrypoint")), {}),
         "frontend": {key: value for key, value in frontend.items() if value},
         "backend": {key: value for key, value in backend.items() if value},
         "data_models": data_models,

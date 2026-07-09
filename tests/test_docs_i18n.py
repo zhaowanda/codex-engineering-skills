@@ -323,6 +323,171 @@ def test_sync_synthesizes_backend_runtime_evidence_without_fake_frontend() -> No
         assert "调用方/入口" in design_doc
 
 
+def test_sync_synthesizes_mq_consumer_runtime_entrypoint() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        consumer = repo_root / "operate-provider/src/main/java/com/acme/operate/mq/RenewOrderConsumer.java"
+        consumer.parent.mkdir(parents=True)
+        consumer.write_text(
+            """
+            class RenewOrderConsumer {
+              @KafkaListener(topics = "renewal.order.changed")
+              public void consume(RenewOrderChangedMessage message) {
+                service.rebuildSettlement(message);
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+        doc_id = "REQ-SYNTH-MQ-RUNTIME"
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "续费订单变更后重建结算",
+                "actors": ["上游续费服务"],
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "消费续费订单变更消息后重建结算", "type": "positive"}],
+            },
+        )
+        write_json(
+            artifact_dir / "technical_design.json",
+            {
+                "doc_id": doc_id,
+                "current_state_analysis": {
+                    "business_problem": "续费订单变更后结算数据未自动刷新。",
+                    "code_entrypoints": ["operate-provider/src/main/java/com/acme/operate/mq/RenewOrderConsumer.java"],
+                },
+                "requirement_breakdown": [{"id": "BRK-1", "summary": "消费续费订单变更消息后重建结算"}],
+                "module_decomposition": [
+                    {
+                        "module": "operate-provider/src/main/java/com/acme/operate/mq/RenewOrderConsumer.java",
+                        "responsibility": "消费续费订单变更消息并重建结算数据",
+                        "input": "RenewOrderChangedMessage",
+                        "output": "结算数据刷新完成",
+                        "requirement_breakdown_id": "BRK-1",
+                    }
+                ],
+                "api_contracts": [],
+                "ui_ue_design": [{"entry_point": "existing entry", "user_goal": "续费订单变更后重建结算"}],
+            },
+        )
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+        write_json(
+            artifact_dir / "project_understanding/code_index.json",
+            {
+                "schema": "codex-code-index-v1",
+                "project": "sigreal-operate-platform",
+                "repo_root": str(repo_root),
+                "files": [
+                    {
+                        "path": "operate-provider/src/main/java/com/acme/operate/mq/RenewOrderConsumer.java",
+                        "symbols": ["RenewOrderConsumer", "consume"],
+                    }
+                ],
+            },
+        )
+        write_json(artifact_dir / "project_understanding/api_surface.json", {"schema": "codex-api-surface-v1", "project": "sigreal-operate-platform", "routes": []})
+
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "续费订单变更后重建结算", doc_language="zh")
+
+        runtime = json.loads((artifact_dir / "runtime_sequence_evidence.json").read_text(encoding="utf-8"))
+        design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert runtime["entrypoint"]["kind"] == "mq_consumer"
+        assert runtime["entrypoint"]["topic"] == "renewal.order.changed"
+        assert runtime["interactions"][0]["entrypoint"]["kind"] == "mq_consumer"
+        assert "participant M as MQ<br/>renewal.order.changed" in design_doc
+        assert "M->>C: 投递消息并触发 Consumer" in design_doc
+        assert "浏览器/前端" not in design_doc
+
+
+def test_sync_synthesizes_scheduled_job_runtime_entrypoint() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        job = repo_root / "operate-provider/src/main/java/com/acme/operate/job/RenewalExpiryJob.java"
+        job.parent.mkdir(parents=True)
+        job.write_text(
+            """
+            class RenewalExpiryJob {
+              @Scheduled(cron = "0 0 2 * * ?")
+              public void scanExpiredRenewals() {
+                service.scanExpiredRenewals();
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+        doc_id = "REQ-SYNTH-SCHEDULE-RUNTIME"
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "定时扫描过期续费",
+                "actors": ["系统调度器"],
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "每日扫描过期续费并更新状态", "type": "positive"}],
+            },
+        )
+        write_json(
+            artifact_dir / "technical_design.json",
+            {
+                "doc_id": doc_id,
+                "current_state_analysis": {
+                    "business_problem": "过期续费状态需要每日自动刷新。",
+                    "code_entrypoints": ["operate-provider/src/main/java/com/acme/operate/job/RenewalExpiryJob.java"],
+                },
+                "requirement_breakdown": [{"id": "BRK-1", "summary": "每日扫描过期续费并更新状态"}],
+                "module_decomposition": [
+                    {
+                        "module": "operate-provider/src/main/java/com/acme/operate/job/RenewalExpiryJob.java",
+                        "responsibility": "定时扫描过期续费并更新状态",
+                        "input": "cron trigger",
+                        "output": "过期续费状态已刷新",
+                        "requirement_breakdown_id": "BRK-1",
+                    }
+                ],
+                "api_contracts": [],
+                "ui_ue_design": [{"entry_point": "existing entry", "user_goal": "定时扫描过期续费"}],
+            },
+        )
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+        write_json(
+            artifact_dir / "project_understanding/code_index.json",
+            {
+                "schema": "codex-code-index-v1",
+                "project": "sigreal-operate-platform",
+                "repo_root": str(repo_root),
+                "files": [
+                    {
+                        "path": "operate-provider/src/main/java/com/acme/operate/job/RenewalExpiryJob.java",
+                        "symbols": ["RenewalExpiryJob", "scanExpiredRenewals"],
+                    }
+                ],
+            },
+        )
+        write_json(artifact_dir / "project_understanding/api_surface.json", {"schema": "codex-api-surface-v1", "project": "sigreal-operate-platform", "routes": []})
+
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "定时扫描过期续费", doc_language="zh")
+
+        runtime = json.loads((artifact_dir / "runtime_sequence_evidence.json").read_text(encoding="utf-8"))
+        design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert runtime["entrypoint"]["kind"] == "scheduled_job"
+        assert runtime["entrypoint"]["cron"] == "0 0 2 * * ?"
+        assert "participant T as RenewalExpiryJob<br/>0 0 2 * * ?" in design_doc
+        assert "T->>C: 触发定时任务处理" in design_doc
+        assert "浏览器/前端" not in design_doc
+
+
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
     rendered = docs_governor.zh_text("npm run build:test evidence; mvn -pl operate-provider -DskipTests compile evidence")
     readable = docs_governor.render_readable_value(["npm run build:test evidence"], "zh")

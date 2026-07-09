@@ -28,6 +28,7 @@ delivery docs repository setup
 - `sync` must copy generated delivery artifacts into the docs repository by `doc_id` so docs follow the requirement, not just the workspace.
 - `sync` must inherit existing expert supplemental artifacts from `machine/raw/<doc_id>` before rendering human docs when the current artifact directory lacks them; source-backed runtime evidence must not be lost during `--force` reruns.
 - `sync` must synthesize `runtime_sequence_evidence.json` when it is missing and source-backed evidence exists in `spec.json`, `technical_design.json`, `project_understanding/api_surface.json`, `project_understanding/code_index.json`, and indexed source files. If those inputs are insufficient, report the reason instead of fabricating actor/API/service interactions.
+- Runtime entrypoints are not always frontend pages. Runtime evidence must model the trigger source explicitly, including frontend actions, HTTP/API callers, scheduled jobs, MQ consumers, batch jobs, or backend methods, and sequence diagrams must render the confirmed trigger source instead of defaulting to browser/frontend.
 - Keep private project docs outside the open-core repository.
 - Validate expected folders and manifests before teams rely on the docs repository.
 - Human-readable docs default to English. Pass `--doc-language zh` when the requirement or user explicitly asks for Chinese docs.
