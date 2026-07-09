@@ -117,6 +117,8 @@ def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path) -> l
     if not artifact_dir.exists():
         return sanitized
     for path in sorted(item for item in artifact_dir.rglob("*") if item.is_file() and item.suffix.lower() in suffixes):
+        if any(part == ".git" for part in path.parts):
+            continue
         try:
             original = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
