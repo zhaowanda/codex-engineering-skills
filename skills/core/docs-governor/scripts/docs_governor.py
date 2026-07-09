@@ -531,7 +531,7 @@ def translate_default_zh_phrase(value: str) -> str:
     return rendered
 
 
-def zh_text_preserving_code(value: str, default: str = "待补充") -> str:
+def protect_code_tokens(value: str) -> tuple[str, dict[str, str]]:
     placeholders: dict[str, str] = {}
 
     def replace_code(match: re.Match[str]) -> str:
@@ -539,11 +539,21 @@ def zh_text_preserving_code(value: str, default: str = "待补充") -> str:
         placeholders[key] = match.group(0)
         return key
 
-    protected = re.sub(r"`[^`]+`", replace_code, str(value or ""))
-    rendered = zh_text(protected, default)
+    pattern = r"`[^`]+`|(?:npm|pnpm|yarn)\s+run\s+[A-Za-z0-9:_./-]+|mvn\s+[A-Za-z0-9_./:=\-\s]+?(?=$|[；;,，。])"
+    return re.sub(pattern, replace_code, str(value or "")), placeholders
+
+
+def restore_code_tokens(value: str, placeholders: dict[str, str]) -> str:
+    rendered = value
     for key, original in placeholders.items():
         rendered = rendered.replace(key, original)
     return rendered
+
+
+def zh_text_preserving_code(value: str, default: str = "待补充") -> str:
+    protected, placeholders = protect_code_tokens(str(value or ""))
+    rendered = zh_text(protected, default)
+    return restore_code_tokens(rendered, placeholders)
 
 
 def zh_text(value: Any, default: str = "待补充") -> str:
@@ -552,6 +562,7 @@ def zh_text(value: Any, default: str = "待补充") -> str:
     if isinstance(value, bool):
         return "是" if value else "否"
     rendered = text(value, default)
+    rendered, placeholders = protect_code_tokens(rendered)
     replacements = {
         "unknown": "未知",
         "draft": "草稿",
@@ -612,7 +623,7 @@ def zh_text(value: Any, default: str = "待补充") -> str:
     rendered = translate_default_zh_phrase(rendered)
     for source, target in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
         rendered = rendered.replace(source, target)
-    return DOCS_I18N.translate_text(rendered, "zh")
+    return restore_code_tokens(DOCS_I18N.translate_text(rendered, "zh"), placeholders)
 
 
 def zh_inline_list(value: Any, default: str = "待补充") -> str:
