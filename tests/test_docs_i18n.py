@@ -112,6 +112,14 @@ def test_zh_text_preserves_unquoted_command_tokens() -> None:
     assert "npm run build:测试" not in rendered
     assert "npm run build:test" in readable
     assert "npm run build:测试" not in readable
+    named = docs_governor.render_named_items(
+        [{"summary": "Validate acceptance criteria", "type": "strategy_summary", "evidence": ["npm run build:test evidence"]}],
+        ["summary", "type", "evidence"],
+        "empty",
+        "zh",
+    )
+    assert "npm run build:test" in named
+    assert "npm run build:测试" not in named
 
 
 def test_i18n_renders_nested_design_keys_for_human_docs() -> None:

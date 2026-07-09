@@ -211,6 +211,16 @@ def render_readable_value(value: Any, language: str = "en") -> str:
     return render_one(value)
 
 
+def contains_command_token(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(re.search(r"\b(?:npm|pnpm|yarn)\s+run\b|\bmvn\s+", value))
+    if isinstance(value, list):
+        return any(contains_command_token(item) for item in value)
+    if isinstance(value, dict):
+        return any(contains_command_token(item) for item in value.values())
+    return False
+
+
 ZH_DEFAULT_PHRASES = {
     "target module to be confirmed": "需结合代码核对的责任模块",
     "existing entrypoint to be confirmed": "需结合代码核对的现有入口",
@@ -1664,7 +1674,7 @@ def render_named_items(items: list[Any], fields: list[str], empty: str, language
         if not isinstance(item, dict):
             continue
         values = [
-            f"{DOCS_I18N.label(field, 'zh')}：{human_value(item.get(field), 'zh')}" if language == "zh" else f"{DOCS_I18N.label(field, 'en')}: {human_value(item.get(field), 'en')}"
+            f"{DOCS_I18N.label(field, 'zh')}：{render_readable_value(item.get(field), 'zh') if contains_command_token(item.get(field)) else human_value(item.get(field), 'zh')}" if language == "zh" else f"{DOCS_I18N.label(field, 'en')}: {human_value(item.get(field), 'en')}"
             for field in fields
             if item.get(field) not in (None, "", [], {})
         ]
