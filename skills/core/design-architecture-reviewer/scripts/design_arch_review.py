@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -305,6 +306,78 @@ def review_traceability(req_trace: list[Any], rows: list[Any], area: str, kind: 
                 findings.append(finding(area, "high", "architecture traceability lacks cross-repo contract decision", {"index": idx}, "Reference cross-repo contract or state no cross-repo reason."))
 
 
+def new_service_signal(technical: dict[str, Any], architecture: dict[str, Any]) -> bool:
+    if isinstance(architecture.get("new_service_design"), dict) and architecture.get("new_service_design"):
+        return True
+    blob = text_of({
+        "design_scope": technical.get("design_scope"),
+        "architecture_scope": architecture.get("architecture_scope"),
+        "architecture_options": architecture.get("architecture_options"),
+        "repo_responsibilities": architecture.get("repo_responsibilities"),
+        "module_topology": architecture.get("module_topology"),
+        "decision_records": architecture.get("decision_records"),
+    })
+    if any(token in blob for token in ["new service", "new repo", "new repository", "new project", "新服务", "新工程", "新仓库"]):
+        return True
+    return bool(re.search(r"\b(create|bootstrap|start|add|new)\s+(new\s+)?[a-z0-9_-]+\s+(service|repository|repo|project)\b", blob))
+
+
+def review_new_service_design(new_service: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    required = [
+        "creation_reason",
+        "existing_system_fit_analysis",
+        "responsibility_boundary",
+        "non_responsibilities",
+        "technology_stack",
+        "repository_bootstrap",
+        "module_structure",
+        "api_contracts",
+        "ci_cd_baseline",
+        "configuration_model",
+        "deployment_model",
+        "observability_baseline",
+        "security_baseline",
+        "maintenance_ownership",
+        "rollout_migration",
+        "rollback_strategy",
+    ]
+    if not new_service:
+        findings.append(finding("architecture_boundary_review", "blocker", "new service requirement lacks new_service_design", "new service signal detected", "Explain why a new service/repository is required and define bootstrap, contracts, CI/CD, configuration, deployment, observability, security, ownership, migration, and rollback."))
+        return
+    missing = missing_required(new_service, required)
+    if missing:
+        findings.append(finding("architecture_boundary_review", "blocker", "new_service_design lacks expert-grade fields", {"missing": missing}, "Complete the new-service design before architecture approval."))
+    if lacks_detail(new_service.get("creation_reason"), 24):
+        findings.append(finding("architecture_boundary_review", "high", "new service creation reason is too shallow", new_service.get("creation_reason"), "Compare why existing modules cannot safely own the requirement and why a new service is justified."))
+    fit = new_service.get("existing_system_fit_analysis")
+    if isinstance(fit, dict):
+        fit_missing = missing_required(fit, ["reuse_candidates", "rejected_existing_owners", "decision"])
+        if fit_missing:
+            findings.append(finding("architecture_boundary_review", "high", "existing system fit analysis is incomplete", {"missing": fit_missing}, "List reuse candidates, rejected existing owners, and the final reuse/new-service decision."))
+    elif fit not in (None, "", [], {}):
+        findings.append(finding("architecture_boundary_review", "medium", "existing system fit analysis should be structured", fit, "Use reuse_candidates, rejected_existing_owners, and decision fields."))
+    nested_requirements = [
+        ("repository_bootstrap", "repo_responsibility_review", ["repo_name", "default_branch", "scaffold", "owned_directories", "initial_files"]),
+        ("ci_cd_baseline", "deployment_rollback_review", ["build", "test", "package", "deploy", "quality_gates"]),
+        ("configuration_model", "deployment_rollback_review", ["environments", "config_sources", "secret_handling", "restart_policy"]),
+        ("deployment_model", "deployment_rollback_review", ["artifact", "runtime", "network_entry", "dependency_order", "capacity_baseline"]),
+        ("observability_baseline", "observability_review", ["logs", "metrics", "traces", "alerts", "dashboards"]),
+        ("security_baseline", "security_review", ["authn", "authz", "tenant_scope", "audit", "data_protection"]),
+        ("maintenance_ownership", "repo_responsibility_review", ["owning_team", "oncall", "runbook", "upgrade_policy"]),
+        ("rollout_migration", "deployment_rollback_review", ["strategy", "compatibility_window", "cutover", "validation"]),
+        ("rollback_strategy", "deployment_rollback_review", ["code", "config", "data", "traffic"]),
+    ]
+    for key, area, fields in nested_requirements:
+        value = new_service.get(key)
+        if not isinstance(value, dict):
+            if value not in (None, "", [], {}):
+                findings.append(finding(area, "high", f"{key} should be structured for new-service design", value, f"Use fields: {', '.join(fields)}."))
+            continue
+        nested_missing = missing_required(value, fields)
+        if nested_missing:
+            findings.append(finding(area, "high", f"{key} lacks required new-service fields", {"missing": nested_missing}, f"Complete {key}: {', '.join(fields)}."))
+
+
 def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     current_state = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
@@ -349,6 +422,7 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     architecture_fit_matrix = as_list(architecture.get("architecture_fit_matrix"))
     architecture_score_summary = architecture.get("architecture_score_summary") if isinstance(architecture.get("architecture_score_summary"), dict) else {}
     architecture_traceability = as_list(architecture.get("architecture_traceability_matrix"))
+    new_service_design = architecture.get("new_service_design") if isinstance(architecture.get("new_service_design"), dict) else {}
     boundaries = as_list(architecture.get("component_boundaries"))
     module_topology = as_list(architecture.get("module_topology"))
     repo_responsibilities = as_list(architecture.get("repo_responsibilities"))
@@ -588,6 +662,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     if architecture_winner and selected_architecture.get("selected_option_id") != architecture_winner:
         findings.append(finding("architecture_depth_review", "high", "selected architecture option does not match highest weighted score", {"selected": selected_architecture.get("selected_option_id"), "highest": architecture_winner, "scores": architecture_score_summary}, "Select the highest weighted architecture option or record an explicit exception with evidence."))
     review_traceability(req_trace, architecture_traceability, "architecture_depth_review", "architecture", findings)
+    if new_service_signal(technical, architecture):
+        review_new_service_design(new_service_design, findings)
 
     if not boundaries:
         findings.append(finding("architecture_boundary_review", "blocker", "component boundaries are missing", "component_boundaries empty", "Define repo/component roles and exclusions."))

@@ -10,6 +10,33 @@ def as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
 
 
+FIELD_APPLICABLE = "applicable"
+FIELD_IDEMPOTENCY = "idempotency"
+FIELD_NOT_APPLICABLE_REASON = "not_applicable_reason"
+FIELD_REASON = "reason"
+FIELD_ROLLBACK = "rollback"
+
+
+DATA_MODEL_FIELDS = [FIELD_APPLICABLE, "entities", "field_rules", "ownership", "read_write_rules", "migration_strategy", "rollback_strategy"]
+TABLE_SCHEMA_FIELDS = ["table", "field", "type", "nullable", "default", "migration", FIELD_ROLLBACK]
+SYSTEM_SEQUENCE_FIELDS = [FIELD_APPLICABLE, "participants", "sequence", "timeout_retry", FIELD_IDEMPOTENCY, "consistency"]
+MQ_INTERACTION_FIELDS = [
+    FIELD_APPLICABLE,
+    "producer",
+    "consumer",
+    "topic_or_queue",
+    "trigger",
+    "payload_fields",
+    f"{FIELD_IDEMPOTENCY}_key",
+    "retry_policy",
+    "dead_letter_or_compensation",
+    FIELD_NOT_APPLICABLE_REASON,
+]
+CACHE_STRATEGY_FIELDS = [FIELD_APPLICABLE, "decision", "key_design", "value_shape", "ttl", "invalidation", "consistency_risk", FIELD_REASON]
+TRANSACTION_CONSISTENCY_FIELDS = [FIELD_APPLICABLE, "boundary", FIELD_IDEMPOTENCY, "compensation", FIELD_ROLLBACK, FIELD_NOT_APPLICABLE_REASON]
+OBSERVABILITY_FIELDS = ["logs", "metrics", "traces", "alerts"]
+
+
 def expert_design_sections(technical: dict[str, Any]) -> list[dict[str, Any]]:
     data_model = technical.get("data_model_design") if isinstance(technical.get("data_model_design"), dict) else {}
     sequence = technical.get("system_interaction_sequence") if isinstance(technical.get("system_interaction_sequence"), dict) else {}
@@ -22,12 +49,12 @@ def expert_design_sections(technical: dict[str, Any]) -> list[dict[str, Any]]:
             "groups": [
                 {
                     "items": [data_model],
-                    "fields": ["applicable", "entities", "field_rules", "ownership", "read_write_rules", "migration_strategy", "rollback_strategy"],
+                    "fields": DATA_MODEL_FIELDS,
                     "fallback_key": "data_model_missing",
                 },
                 {
                     "items": as_list(technical.get("table_schema_changes")),
-                    "fields": ["table", "field", "type", "nullable", "default", "migration", "rollback"],
+                    "fields": TABLE_SCHEMA_FIELDS,
                     "fallback_key": "table_schema_missing",
                 },
             ],
@@ -37,7 +64,7 @@ def expert_design_sections(technical: dict[str, Any]) -> list[dict[str, Any]]:
             "groups": [
                 {
                     "items": [sequence],
-                    "fields": ["applicable", "participants", "sequence", "timeout_retry", "idempotency", "consistency"],
+                    "fields": SYSTEM_SEQUENCE_FIELDS,
                     "fallback_key": "system_sequence_missing",
                 }
             ],
@@ -48,7 +75,7 @@ def expert_design_sections(technical: dict[str, Any]) -> list[dict[str, Any]]:
             "groups": [
                 {
                     "items": as_list(technical.get("mq_interactions")),
-                    "fields": ["applicable", "producer", "consumer", "topic_or_queue", "trigger", "payload_fields", "idempotency_key", "retry_policy", "dead_letter_or_compensation", "not_applicable_reason"],
+                    "fields": MQ_INTERACTION_FIELDS,
                     "fallback_key": "mq_missing",
                 }
             ],
@@ -58,7 +85,7 @@ def expert_design_sections(technical: dict[str, Any]) -> list[dict[str, Any]]:
             "groups": [
                 {
                     "items": [cache],
-                    "fields": ["applicable", "decision", "key_design", "value_shape", "ttl", "invalidation", "consistency_risk", "reason"],
+                    "fields": CACHE_STRATEGY_FIELDS,
                     "fallback_key": "cache_missing",
                 }
             ],
@@ -68,7 +95,7 @@ def expert_design_sections(technical: dict[str, Any]) -> list[dict[str, Any]]:
             "groups": [
                 {
                     "items": [tx],
-                    "fields": ["applicable", "boundary", "idempotency", "compensation", "rollback", "not_applicable_reason"],
+                    "fields": TRANSACTION_CONSISTENCY_FIELDS,
                     "fallback_key": "transaction_missing",
                 }
             ],
@@ -78,7 +105,7 @@ def expert_design_sections(technical: dict[str, Any]) -> list[dict[str, Any]]:
             "groups": [
                 {
                     "items": [obs],
-                    "fields": ["logs", "metrics", "traces", "alerts"],
+                    "fields": OBSERVABILITY_FIELDS,
                     "fallback_key": "observability_missing",
                 }
             ],

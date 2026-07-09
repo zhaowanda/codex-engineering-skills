@@ -40,6 +40,15 @@ def test_example_templates_pass_design_reviewer() -> None:
     assert result["readiness_gate"]["implementation_allowed"]
 
 
+def test_new_service_example_templates_pass_design_reviewer() -> None:
+    technical = render_design_templates.new_service_example_technical("REQ-2", "Notification preference service")
+    architecture = render_design_templates.new_service_example_architecture("REQ-2", "Notification preference service")
+    assert architecture["new_service_design"]["repository_bootstrap"]["repo_name"] == "notification-service"
+    result = design_arch_review.review(technical, architecture)
+    assert result["decision"] == "pass"
+    assert result["readiness_gate"]["implementation_allowed"]
+
+
 def test_render_writes_manifest_and_files() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out_dir = Path(tmp)
@@ -48,11 +57,15 @@ def test_render_writes_manifest_and_files() -> None:
         assert (out_dir / "technical_design.json").exists()
         assert (out_dir / "architecture_design.json").exists()
         assert (out_dir / "design_template_manifest.json").exists()
+        new_manifest = render_design_templates.render("REQ-2", "Notification preference service", out_dir / "new-service", new_service_example=True)
+        assert new_manifest["new_service_example"] is True
+        assert (out_dir / "new-service/technical_design.json").exists()
 
 
 def run_all() -> None:
     test_empty_templates_have_required_top_level_sections()
     test_example_templates_pass_design_reviewer()
+    test_new_service_example_templates_pass_design_reviewer()
     test_render_writes_manifest_and_files()
 
 

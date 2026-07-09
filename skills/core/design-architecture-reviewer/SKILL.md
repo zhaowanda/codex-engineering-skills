@@ -38,6 +38,7 @@ spec
 - Require MQ producer, consumer, topic/queue, trigger timing, payload, idempotency key, retry policy, and dead-letter/compensation when asynchronous messaging is signaled.
 - Require cache key, value shape, TTL, invalidation, and consistency-risk decision when cache is chosen.
 - Require transaction boundary, idempotency, compensation, and rollback when consistency or multi-write risk is signaled.
+- Require `new_service_design` when a requirement creates a new service, repository, or project. It must explain why existing systems cannot own the change and define responsibility boundaries, bootstrap, module structure, API contracts, CI/CD, configuration, deployment, observability, security, maintenance ownership, rollout/migration, and rollback.
 - Require security, performance, rollback, observability, and test strategy to be executable, not generic.
 - Treat placeholders such as `TBD`, `unknown`, `todo`, and `confirm later` as findings unless they are inside an explicitly controlled gate.
 
@@ -112,6 +113,7 @@ The reviewer expects these sections when relevant:
 - `monitoring_alerts`
 - `deployment_topology`
 - `deployment_impact`
+- `new_service_design` when creating a new service/repository/project
 - `migration_strategy`
 - `gray_release_strategy`
 - `rollback_strategy`

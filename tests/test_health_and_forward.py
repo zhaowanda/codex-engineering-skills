@@ -82,6 +82,9 @@ def test_skill_health_runs_on_repo() -> None:
     assert "content_quality" in result["skill_scores"][0]
     assert result["content_quality_average"] > 0
     assert result["content_quality_expert_count"] > 0
+    assert result["integrated_quality_gates"]["design_template_regression"]["decision"] == "pass"
+    example_names = {item["name"] for item in result["integrated_quality_gates"]["design_template_regression"]["examples"]}
+    assert "new_service_design_example" in example_names
     assert not [item for item in result["warnings"] if item["message"] == "skill is not listed in README"]
 
 

@@ -276,6 +276,28 @@ def test_data_model_requires_table_schema_details_when_applicable() -> None:
     assert "table schema change lacks implementation-grade fields" in messages
 
 
+def test_new_service_signal_requires_new_service_design() -> None:
+    technical, architecture = complete_design()
+    architecture["architecture_scope"]["in_scope"] = ["create new notification service"]
+    architecture["architecture_options"][0]["name"] = "create notification-service"
+    result = design_arch_review.review(technical, architecture)
+    assert result["decision"] == "block"
+    assert "new service requirement lacks new_service_design" in json_dumps(result)
+
+
+def test_new_service_design_requires_bootstrap_operations_and_ownership() -> None:
+    technical, architecture = complete_design()
+    architecture["new_service_design"] = {
+        "creation_reason": "new service needed",
+        "existing_system_fit_analysis": {"reuse_candidates": ["identity-service"]},
+    }
+    result = design_arch_review.review(technical, architecture)
+    messages = json_dumps(result)
+    assert result["decision"] == "block"
+    assert "new_service_design lacks expert-grade fields" in messages
+    assert "new service creation reason is too shallow" in messages
+
+
 def json_dumps(value: dict) -> str:
     import json
 
@@ -295,6 +317,8 @@ def run_all() -> None:
     test_low_confidence_generic_entrypoint_needs_revision()
     test_complex_breakdown_flattened_to_one_module_needs_revision()
     test_complex_breakdown_with_confident_entrypoint_passes()
+    test_new_service_signal_requires_new_service_design()
+    test_new_service_design_requires_bootstrap_operations_and_ownership()
 
 
 if __name__ == "__main__":

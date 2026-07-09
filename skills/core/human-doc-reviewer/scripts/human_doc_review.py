@@ -151,6 +151,17 @@ ENGLISH_TEMPLATE_TERMS = [
 WEAK_ACCEPTANCE_PATTERNS = [
     r"`AC-1`\s*标准",
     r"预期结果：标准",
+    r"页面展示、接口参数、返回字段和数据落库均满足该验收",
+    r"UI, API params, response fields, and persistence satisfy the AC",
+]
+DESIGN_TEMPLATE_RESIDUE_PATTERNS = [
+    r"至少包括[:：]\s*[。.;；]",
+    r"\bNone\.\s*$",
+    r"Validate acceptance criteria for",
+    r"校准展示、筛选、状态、原因或刷新结果",
+    r"calibrate display, filter, status, reason, or refresh behavior",
+    r"当前链路需要验证[^。\n]+是否能稳定产生",
+    r"现有链路必须证明请求口径",
 ]
 NON_BUSINESS_CONTRACT_PATTERNS = [
     r"生产方[:：]?.*vue\.config\.js",
@@ -248,23 +259,51 @@ def has_any(text: str, lower: str, terms: list[str]) -> bool:
 
 
 def unresolved_review(text: str, lower: str) -> dict:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    unresolved_lines = [
-        line
-        for line in lines
+    raw_lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    lines = [line.strip() for line in raw_lines]
+
+    def has_unresolved_term(line: str) -> bool:
+        lower_line = line.lower()
+        return any(term in line or term.lower() in lower_line for term in UNRESOLVED_TERMS)
+
+    def has_context_term(value: str) -> bool:
+        lower_value = value.lower()
+        return any(term in value or term.lower() in lower_value for term in UNRESOLVED_CONTEXT_TERMS)
+
+    def markdown_list_block(index: int) -> str:
+        start = index
+        while start > 0:
+            previous = raw_lines[start - 1]
+            if previous.lstrip().startswith("#"):
+                break
+            if previous.startswith("- "):
+                start -= 1
+                break
+            start -= 1
+        end = index + 1
+        while end < len(raw_lines):
+            candidate = raw_lines[end]
+            if candidate.lstrip().startswith("#") or candidate.startswith("- "):
+                break
+            end += 1
+        return "\n".join(line.strip() for line in raw_lines[start:end])
+
+    unresolved_indexed_lines = [
+        (index, line)
+        for index, line in enumerate(lines)
         if not line.startswith("#")
         if not any(skip in line.lower() for skip in ["未记录", "无确认项", "no low-confidence", "no unresolved", "not recorded"])
-        if any(term in line or term.lower() in line.lower() for term in UNRESOLVED_TERMS)
+        if has_unresolved_term(line)
     ]
-    if not unresolved_lines:
+    if not unresolved_indexed_lines:
         return {"count": 0, "ratio": 0.0, "missing_context": []}
     missing_context = [
         line[:160]
-        for line in unresolved_lines
-        if not any(term in line or term.lower() in line.lower() for term in UNRESOLVED_CONTEXT_TERMS)
+        for index, line in unresolved_indexed_lines
+        if not has_context_term(markdown_list_block(index))
     ]
-    ratio = len(unresolved_lines) / max(len(lines), 1)
-    return {"count": len(unresolved_lines), "ratio": ratio, "missing_context": missing_context[:5]}
+    ratio = len(unresolved_indexed_lines) / max(len(lines), 1)
+    return {"count": len(unresolved_indexed_lines), "ratio": ratio, "missing_context": missing_context[:5]}
 
 
 def review(path: Path, strict: bool = False) -> dict:
@@ -326,6 +365,11 @@ def review(path: Path, strict: bool = False) -> dict:
         if re.search(pattern, text):
             blockers.append({"source": "weak_acceptance", "message": "weak or placeholder acceptance criteria detected"})
             break
+    if doc_type == "design":
+        for pattern in DESIGN_TEMPLATE_RESIDUE_PATTERNS:
+            if re.search(pattern, text, flags=re.I | re.M):
+                blockers.append({"source": "design_template_residue", "message": "design document still contains template residue or generic implementation phrasing", "pattern": pattern})
+                break
     for pattern in NON_BUSINESS_CONTRACT_PATTERNS:
         if re.search(pattern, text, flags=re.I):
             blockers.append({"source": "non_business_contract", "message": "configuration/build file is presented as a business contract"})
@@ -352,6 +396,28 @@ def review(path: Path, strict: bool = False) -> dict:
         goal_text = extract_section_text(text, "设计目标")
         if problem_text and goal_text and similarity_ratio(problem_text, goal_text) > 0.78:
             warnings.append({"source": "problem_goal_similarity", "message": "current problem and design goal sections appear overly similar"})
+        acceptance_section = extract_section_text(text, "测试策略摘要") or extract_section_text(text, "Test Strategy Summary")
+        if acceptance_section:
+            generic_assertions = len(re.findall(r"页面展示、接口参数、返回字段和数据落库均满足该验收|UI, API params, response fields, and persistence satisfy the AC", acceptance_section, flags=re.I))
+            ac_rows = len(re.findall(r"(?m)^\|\s*`?AC-\d+", acceptance_section))
+            if generic_assertions or (ac_rows >= 2 and len(set(re.findall(r"(?m)^\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|([^|]+)\|", acceptance_section))) <= 1):
+                blockers.append({"source": "acceptance_assertion_depth", "message": "acceptance proof uses repeated or generic assertions instead of concrete pass/fail checks"})
+        brk_sections = len(re.findall(r"(?m)^####\s+BRK-\d+", text))
+        concrete_api_mentions = len(re.findall(r"`(?:GET|POST|PUT|DELETE|PATCH)\s+[^`]+`", text))
+        if brk_sections and concrete_api_mentions < brk_sections:
+            blockers.append({"source": "brk_api_binding", "message": "each BRK section should bind to concrete API contracts"})
+        if brk_sections:
+            frontend_function_hits = len(re.findall(r"涉及函数[:：]|functions:", text, flags=re.I))
+            backend_method_hits = len(re.findall(r"涉及方法[:：]|methods:", text, flags=re.I))
+            if frontend_function_hits < brk_sections:
+                warnings.append({"source": "brk_frontend_function_depth", "message": "BRK sections should bind frontend functions/handlers when source evidence is available"})
+            if backend_method_hits < brk_sections:
+                warnings.append({"source": "brk_backend_method_depth", "message": "BRK sections should bind backend controller/service methods when source evidence is available"})
+        option_detail_count = len(re.findall(r"(?m)^####\s+(方案|Option)\s+`", text))
+        if "方案决策摘要" in text and option_detail_count == 0:
+            blockers.append({"source": "option_depth", "message": "solution section has only a decision summary and no candidate option details"})
+        if "候选方案" in text and option_detail_count < 2:
+            warnings.append({"source": "option_count_depth", "message": "candidate option section has too few detailed options for a review-ready design"})
     mac_user_root = "/" + "Users/"
     if mac_user_root in text or re.search(r"/home/[^/\s]+|[A-Za-z]:\\\\", text):
         blockers.append({"source": "local_path", "message": "local absolute path detected"})

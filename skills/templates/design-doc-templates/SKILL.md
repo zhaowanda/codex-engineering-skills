@@ -54,6 +54,16 @@ python3 scripts/render_design_templates.py \
   --example
 ```
 
+Generate a complete new-service/new-repository example:
+
+```bash
+python3 scripts/render_design_templates.py \
+  --doc-id REQ-NEW-SERVICE \
+  --title "Notification preference service" \
+  --out-dir artifacts/design-new-service \
+  --new-service-example
+```
+
 Review generated artifacts:
 
 ```bash

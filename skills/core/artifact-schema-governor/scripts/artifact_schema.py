@@ -12,6 +12,7 @@ from typing import Any
 SCHEMA = "codex-artifact-schema-inventory-v1"
 SCHEMA_RE = re.compile(r"codex-[a-z0-9-]+-v\d+")
 GATE_TERMS = ["governor", "gate", "review", "runner", "binder", "analyzer"]
+GATE_SCRIPT_TERMS = ["governor", "gate", "review", "runner", "binder", "analyzer"]
 def schema_name(stem: str) -> str:
     return "codex-" + stem + "-v1"
 
@@ -50,6 +51,38 @@ def assigned_schemas(text: str) -> list[str]:
     return sorted(schemas)
 
 
+def skill_frontmatter(script: Path, root: Path) -> dict[str, str]:
+    try:
+        rel_parts = script.relative_to(root).parts
+    except ValueError:
+        return {}
+    if len(rel_parts) < 5 or rel_parts[0] != "skills" or rel_parts[3] != "scripts":
+        return {}
+    skill_md = root.joinpath(*rel_parts[:3], "SKILL.md")
+    if not skill_md.exists():
+        return {}
+    text = read(skill_md)
+    if not text.startswith("---"):
+        return {}
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    frontmatter: dict[str, str] = {}
+    for line in parts[1].splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        frontmatter[key.strip()] = value.strip().strip('"').strip("'")
+    return frontmatter
+
+
+def is_gate_like_script(script: Path, root: Path) -> bool:
+    fm = skill_frontmatter(script, root)
+    if fm.get("gate") == "true" or fm.get("maturity") in {"expert-gate", "advisory-review"}:
+        return True
+    return any(term in script.stem for term in GATE_SCRIPT_TERMS)
+
+
 def inventory(root: Path) -> dict[str, Any]:
     scripts = sorted((root / "skills").glob("**/scripts/*.py"))
     artifacts: list[dict[str, Any]] = []
@@ -60,7 +93,7 @@ def inventory(root: Path) -> dict[str, Any]:
         text = read(script)
         rel = script.relative_to(root).as_posix()
         schemas = sorted(set(literal_schemas(text) + assigned_schemas(text)))
-        gate_like = any(term in rel for term in GATE_TERMS)
+        gate_like = is_gate_like_script(script, root)
         if not schemas and gate_like:
             blockers.append({"source": rel, "message": "gate-like script has no schema literal"})
         elif not schemas:

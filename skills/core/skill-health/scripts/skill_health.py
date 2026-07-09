@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import py_compile
 import re
@@ -35,6 +36,78 @@ VALID_STAGES = {
 GATE_MATURITY = {"expert-gate", "advisory-review"}
 PROFILE_SCHEMA = "codex-workflow-profiles-v1"
 STAGE_SCHEMA = "codex-workflow-stages-v1"
+
+
+def artifact_schema_inventory(root: Path) -> dict[str, Any]:
+    script = root / "skills/core/artifact-schema-governor/scripts/artifact_schema.py"
+    if not script.exists():
+        return {"decision": "missing", "blockers": [{"source": str(script), "message": "artifact schema inventory script is missing"}], "warnings": []}
+    spec = importlib.util.spec_from_file_location("artifact_schema_for_skill_health", script)
+    if spec is None or spec.loader is None:
+        return {"decision": "block", "blockers": [{"source": str(script), "message": "artifact schema inventory script cannot be loaded"}], "warnings": []}
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.inventory(root)
+
+
+def design_template_regression(root: Path) -> dict[str, Any]:
+    template_script = root / "skills/templates/design-doc-templates/scripts/render_design_templates.py"
+    review_script = root / "skills/core/design-architecture-reviewer/scripts/design_arch_review.py"
+    if not template_script.exists() or not review_script.exists():
+        return {
+            "decision": "block",
+            "blockers": [{"source": "design_template_regression", "message": "design template or reviewer script is missing"}],
+            "examples": [],
+        }
+
+    def load_module(name: str, path: Path) -> Any:
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    try:
+        templates = load_module("render_design_templates_for_skill_health", template_script)
+        reviewer = load_module("design_arch_review_for_skill_health", review_script)
+        examples = [
+            (
+                "standard_design_example",
+                templates.example_technical("REQ-EXAMPLE", "Checkout discount display"),
+                templates.example_architecture("REQ-EXAMPLE", "Checkout discount display"),
+            ),
+            (
+                "new_service_design_example",
+                templates.new_service_example_technical("REQ-NEW-SERVICE", "Notification preference service"),
+                templates.new_service_example_architecture("REQ-NEW-SERVICE", "Notification preference service"),
+            ),
+        ]
+    except Exception as exc:
+        return {
+            "decision": "block",
+            "blockers": [{"source": "design_template_regression", "message": f"failed to load design examples: {exc}"}],
+            "examples": [],
+        }
+
+    blockers: list[dict[str, Any]] = []
+    example_results: list[dict[str, Any]] = []
+    for name, technical, architecture in examples:
+        result = reviewer.review(technical, architecture)
+        example_results.append({
+            "name": name,
+            "decision": result.get("decision"),
+            "score": result.get("score"),
+            "level": result.get("level"),
+            "implementation_allowed": result.get("readiness_gate", {}).get("implementation_allowed"),
+        })
+        if result.get("decision") != "pass" or not result.get("readiness_gate", {}).get("implementation_allowed"):
+            blockers.append({"source": name, "message": "design template example does not pass design-architecture-reviewer", "decision": result.get("decision"), "score": result.get("score")})
+    return {
+        "decision": "block" if blockers else "pass",
+        "blockers": blockers,
+        "examples": example_results,
+    }
 
 
 def parse_frontmatter(text: str) -> dict[str, str]:
@@ -237,6 +310,18 @@ def check(root: Path) -> dict[str, Any]:
         warnings.append({"source": "docs/open-source-roadmap.md", "message": "roadmap has no done markers"})
     if not list((root / "tests").glob("test_*.py")):
         blockers.append({"source": "tests", "message": "test files are required"})
+    schema_inventory = artifact_schema_inventory(root)
+    if schema_inventory.get("decision") == "block":
+        for item in as_list(schema_inventory.get("blockers")):
+            source = item.get("source") if isinstance(item, dict) else "artifact_schema"
+            message = item.get("message") if isinstance(item, dict) else str(item)
+            blockers.append({"source": source or "artifact_schema", "message": f"artifact schema inventory blocked: {message}"})
+    design_templates = design_template_regression(root)
+    if design_templates.get("decision") == "block":
+        for item in as_list(design_templates.get("blockers")):
+            source = item.get("source") if isinstance(item, dict) else "design_template_regression"
+            message = item.get("message") if isinstance(item, dict) else str(item)
+            blockers.append({"source": source or "design_template_regression", "message": f"design template regression blocked: {message}"})
     profile_path = root / "config/workflow-profiles.example.yaml"
     if profile_path.exists():
         profiles = load_restricted_yaml(profile_path)
@@ -340,6 +425,19 @@ def check(root: Path) -> dict[str, Any]:
         "content_quality_average": content_quality_average,
         "content_quality_expert_count": sum(1 for score in content_quality_scores if score >= 80),
         "expert_readiness": "expert" if expert_level_count == len(skills) else "advanced" if advanced_or_better_count == len(skills) else "mixed",
+        "integrated_quality_gates": {
+            "artifact_schema_inventory": {
+                "decision": schema_inventory.get("decision"),
+                "blocker_count": len(as_list(schema_inventory.get("blockers"))),
+                "warning_count": len(as_list(schema_inventory.get("warnings"))),
+                "schema_count": schema_inventory.get("schema_count"),
+            },
+            "design_template_regression": {
+                "decision": design_templates.get("decision"),
+                "blocker_count": len(as_list(design_templates.get("blockers"))),
+                "examples": design_templates.get("examples", []),
+            },
+        },
         "skill_scores": expert_scores,
         "blockers": blockers,
         "warnings": warnings,
