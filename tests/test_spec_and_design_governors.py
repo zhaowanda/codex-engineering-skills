@@ -57,6 +57,25 @@ def test_spec_normalize_ready_for_design() -> None:
     assert validation["decision"] == "pass"
 
 
+def test_spec_inferred_acceptance_uses_requirement_language_without_template_prefix() -> None:
+    spec = spec_governor.normalize("REQ-ZH", "菜单点击打点", "菜单点击打点")
+
+    assert spec["acceptance_criteria"][0]["criteria"] == "菜单点击打点"
+    assert "User-visible behavior matches" not in spec["acceptance_criteria"][0]["criteria"]
+
+
+def test_spec_normalizes_empty_include_at_least_clause() -> None:
+    spec = spec_governor.normalize(
+        "REQ-ENUM",
+        "续期池移出原因",
+        "需求：从续期池移出设备必须填写原因；原因选项至少包括：",
+    )
+
+    rendered = json.dumps(spec, ensure_ascii=False)
+    assert "原因选项至少包括待确认的具体选项" in rendered
+    assert "原因选项至少包括：" not in rendered
+
+
 def test_spec_blocks_open_questions() -> None:
     spec = spec_governor.normalize("REQ-2", "Unclear request", "User wants report. Which fields?")
     validation = spec_governor.validate_spec(spec)

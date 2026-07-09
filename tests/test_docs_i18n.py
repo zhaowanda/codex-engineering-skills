@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import tempfile
 from pathlib import Path
 
 
@@ -21,6 +23,11 @@ docs_governor = load_module("docs_governor", ROOT / "skills/core/docs-governor/s
 render_design_templates = load_module("render_design_templates", ROOT / "skills/templates/design-doc-templates/scripts/render_design_templates.py")
 
 
+def write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def test_i18n_renders_status_without_translating_code_identifiers() -> None:
     value = {
         "table": "renewal_order",
@@ -34,6 +41,66 @@ def test_i18n_renders_status_without_translating_code_identifiers() -> None:
     assert "需结合代码和数据库核对" in rendered
     assert "如执行迁移" in rendered
     assert "{\"" not in rendered
+
+
+def test_sync_inherits_existing_runtime_evidence_before_rendering_human_docs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-RUNTIME-INHERIT"
+        write_json(
+            docs_root / "machine/raw" / doc_id / "runtime_sequence_evidence.json",
+            {
+                "actor": "运营人员",
+                "frontend": {
+                    "repo": "operate-platform-fe",
+                    "page": "设备置换结算",
+                    "route": "/device/replacementSettlement",
+                    "entry_menu_or_button": "点击「试算」按钮",
+                },
+                "backend": {
+                    "repo": "sigreal-operate-platform",
+                    "controller": "ReplacementSettlementController",
+                    "service": "ReplacementSettlementService",
+                },
+                "interactions": [
+                    {
+                        "scenario": "BRK-5 续期试算",
+                        "trigger": "点击「试算」按钮",
+                        "method": "POST",
+                        "api": "/operate/api/device/replacementSettlement/renew/paging",
+                        "backend_action": "ReplacementSettlementController.renewPaging -> ReplacementSettlementService.renewPaging",
+                        "response": "返回续期结算明细分页",
+                    }
+                ],
+            },
+        )
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "续期试算",
+                "requirements": [{"id": "REQ-1", "summary": "续期试算明细筛选"}],
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "续期试算明细按筛选条件返回", "type": "positive"}],
+            },
+        )
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id, "module_decomposition": []})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id, "cross_repo_dependency_graph": []})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "续期试算", doc_language="zh")
+
+        assert result["decision"] == "pass"
+        assert result["inherited_supplemental_artifacts"][0]["artifact"] == "runtime_sequence_evidence.json"
+        assert (artifact_dir / "runtime_sequence_evidence.json").exists()
+        design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert "actor A as 运营人员" in design_doc
+        assert "设备置换结算<br/>/device/replacementSettlement<br/>operate-platform-fe" in design_doc
+        assert "ReplacementSettlementService<br/>sigreal-operate-platform" in design_doc
+        assert "POST /operate/api/device/replacementSettlement/renew/paging" in design_doc
 
 
 def test_i18n_renders_nested_design_keys_for_human_docs() -> None:

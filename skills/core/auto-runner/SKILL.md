@@ -29,6 +29,7 @@ user requirement
 - `can_implement=true` requires technical design, architecture design, design review, delivery plan review, Git worktree evidence with fetch plus `pull --ff-only`, and edit permit readiness.
 - If a user asks to implement immediately from a requirement, stop and run this workflow first; do not edit code from requirement intake alone.
 - Skip existing artifacts unless `--force` is provided.
+- `--force` must not downgrade previously captured expert evidence; docs sync is expected to preserve source-backed supplemental artifacts such as runtime sequence evidence from the delivery docs repository.
 - Run project understanding only when both `--repo` and `--project` are provided.
 - Human-readable delivery docs default to automatic language detection: if the requirement asks for Chinese docs, generate Chinese; otherwise generate English.
 - Use `--doc-language en|zh|auto` to force or auto-detect the human doc language.

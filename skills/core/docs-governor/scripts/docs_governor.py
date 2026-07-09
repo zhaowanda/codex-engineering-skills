@@ -19,6 +19,9 @@ MACHINE_ARTIFACTS = {
     "review": ("machine/reviews", ".review.json"),
     "release": ("machine/releases", ".release.json"),
 }
+EXPERT_SUPPLEMENTAL_ARTIFACTS = [
+    "runtime_sequence_evidence.json",
+]
 
 
 def load_docs_config_module() -> Any:
@@ -528,6 +531,21 @@ def translate_default_zh_phrase(value: str) -> str:
     return rendered
 
 
+def zh_text_preserving_code(value: str, default: str = "待补充") -> str:
+    placeholders: dict[str, str] = {}
+
+    def replace_code(match: re.Match[str]) -> str:
+        key = f"__CODE_{len(placeholders)}__"
+        placeholders[key] = match.group(0)
+        return key
+
+    protected = re.sub(r"`[^`]+`", replace_code, str(value or ""))
+    rendered = zh_text(protected, default)
+    for key, original in placeholders.items():
+        rendered = rendered.replace(key, original)
+    return rendered
+
+
 def zh_text(value: Any, default: str = "待补充") -> str:
     if value in (None, "", [], {}):
         return default
@@ -702,7 +720,7 @@ def clean_acceptance_text(value: Any, language: str = "en") -> str:
             rendered = rendered[len(prefix):].strip()
     if language == "zh" and rendered.startswith("需求："):
         rendered = rendered[len("需求："):].strip()
-    return zh_text(rendered) if language == "zh" else rendered
+    return zh_text_preserving_code(rendered) if language == "zh" else rendered
 
 
 def clean_test_title(value: Any, language: str = "en") -> str:
@@ -3556,7 +3574,7 @@ def render_runtime_acceptance_proof(spec: dict[str, Any], runtime_evidence: dict
         lines = ["| 验收项 | 对应子域 | 需要证明什么 | 测试输入/动作 | 断言 |", "|---|---|---|---|---|"]
         for item in acceptance:
             ac_id = human_value(item.get("id"), language, "")
-            criteria = human_value(item.get("criteria"), language, "")
+            criteria = clean_acceptance_text(item.get("criteria"), language)
             brk = ac_to_brk.get(ac_id, "")
             related = runtime_related_for_acceptance(scenario_by_brk.get(brk, []), ac_id, language)
             triggers = "；".join(human_value(flow.get("trigger"), language, "") for flow in related if human_value(flow.get("trigger"), language, "")) or "按验收场景操作"
@@ -3570,7 +3588,7 @@ def render_runtime_acceptance_proof(spec: dict[str, Any], runtime_evidence: dict
     lines = ["| AC | Slice | Proof Target | Input / Action | Assertions |", "|---|---|---|---|---|"]
     for item in acceptance:
         ac_id = human_value(item.get("id"), language, "")
-        criteria = human_value(item.get("criteria"), language, "")
+        criteria = clean_acceptance_text(item.get("criteria"), language)
         brk = ac_to_brk.get(ac_id, "")
         related = runtime_related_for_acceptance(scenario_by_brk.get(brk, []), ac_id, language)
         triggers = "; ".join(human_value(flow.get("trigger"), language, "") for flow in related if human_value(flow.get("trigger"), language, "")) or "run acceptance scenario"
@@ -4037,6 +4055,33 @@ def render_evidence_refs(artifact_dir: Path) -> str:
     return "\n".join(lines) if lines else "- No machine artifacts were synced."
 
 
+def inherit_expert_supplemental_artifacts(docs_root: Path, doc_id: str, artifact_dir: Path) -> list[dict[str, str]]:
+    raw_dir = docs_root / "machine/raw" / doc_id
+    inherited: list[dict[str, str]] = []
+    if not raw_dir.exists():
+        return inherited
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    for filename in EXPERT_SUPPLEMENTAL_ARTIFACTS:
+        source = raw_dir / filename
+        target = artifact_dir / filename
+        if not source.exists() or target.exists():
+            continue
+        try:
+            payload = read_json(source)
+        except Exception:
+            continue
+        if filename == "runtime_sequence_evidence.json" and not as_list(payload.get("interactions")):
+            continue
+        shutil.copy2(source, target)
+        inherited.append({
+            "artifact": filename,
+            "source": str(source),
+            "target": str(target),
+            "reason": "preserve source-backed expert runtime evidence during artifact rerun",
+        })
+    return inherited
+
+
 def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> dict[str, str]:
     requirement = artifact_dir / "requirement.normalized.txt"
     spec = read_json(artifact_dir / "spec.json")
@@ -4461,6 +4506,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     artifact_dir = artifact_dir.expanduser().resolve()
     language = normalize_doc_language(doc_language)
     manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language)
+    inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir)
     human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],
@@ -4509,6 +4555,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     manifest["synced_human_docs"] = [str(path.relative_to(docs_root)) for path in human_targets.values()]
     manifest["synced_machine_artifacts"] = synced_machine
     manifest["raw_artifacts"] = copied_raw
+    manifest["inherited_supplemental_artifacts"] = inherited_supplemental_artifacts
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", manifest)
     return {
         "schema": "codex-docs-governor-sync-v1",
@@ -4521,6 +4568,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         "human_docs": manifest["synced_human_docs"],
         "machine_artifacts": manifest["synced_machine_artifacts"],
         "raw_artifacts": copied_raw,
+        "inherited_supplemental_artifacts": inherited_supplemental_artifacts,
         "blockers": [],
     }
 

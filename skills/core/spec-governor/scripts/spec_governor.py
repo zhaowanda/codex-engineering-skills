@@ -46,6 +46,9 @@ OPERATION_TERMS = {
     "retry": ("retry", "重试"),
 }
 HIGH_RISK_IMPACTS = {"data", "permission", "security", "performance", "api", "config"}
+EMPTY_ENUM_PATTERNS = [
+    re.compile(r"(至少包括|include at least)[:：]\s*$", re.I),
+]
 
 
 def as_list(value: Any) -> list[Any]:
@@ -61,11 +64,22 @@ def read_text(path: Path) -> str:
 
 
 def split_lines(text: str) -> list[str]:
-    return [line.strip(" \t-*#") for line in text.splitlines() if line.strip(" \t-*#")]
+    return [normalize_requirement_text(line.strip(" \t-*#")) for line in text.splitlines() if line.strip(" \t-*#")]
 
 
 def normalize_list_item(line: str) -> str:
     return re.sub(r"^\s*(?:[-*]\s+|\d+[.)、]\s*|[（(]\d+[）)]\s*)", "", line).strip()
+
+
+def normalize_requirement_text(value: str) -> str:
+    text = str(value or "").strip()
+    for pattern in EMPTY_ENUM_PATTERNS:
+        if pattern.search(text):
+            if "至少包括" in text:
+                text = pattern.sub(r"\1待确认的具体选项", text)
+            else:
+                text = pattern.sub(r"\1 concrete options to be confirmed", text)
+    return text
 
 
 def is_section_heading(line: str) -> bool:
@@ -128,6 +142,7 @@ def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, A
             criteria = match.group(2).strip()
             if not criteria or criteria in {"标准", "验收标准", "acceptance", "acceptance criteria"}:
                 continue
+            criteria = normalize_requirement_text(criteria)
             result.append({
                 "id": f"AC-{len(result) + 1}",
                 "criteria": criteria,
@@ -137,6 +152,7 @@ def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, A
             })
     for criteria in collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance")):
         if criteria and criteria not in {str(item.get("criteria")) for item in result}:
+            criteria = normalize_requirement_text(criteria)
             result.append({
                 "id": f"AC-{len(result) + 1}",
                 "criteria": criteria,
@@ -145,7 +161,7 @@ def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, A
                 "source_evidence": "input section: acceptance",
             })
     if not result and lines:
-        result.append({"id": "AC-1", "criteria": f"User-visible behavior matches: {lines[0]}", "type": "positive", "evidence_required": ["test evidence"], "source_evidence": "inferred from first line"})
+        result.append({"id": "AC-1", "criteria": normalize_requirement_text(lines[0]), "type": "positive", "evidence_required": ["test evidence"], "source_evidence": "inferred from first line"})
     return result
 
 
@@ -156,15 +172,15 @@ def extract_requirements(lines: list[str], raw_text: str = "") -> list[dict[str,
     for idx, line in enumerate(lines, start=1):
         match = req_pattern.match(line)
         if match:
-            result.append({"id": f"REQ-{len(result) + 1}", "summary": match.group(2).strip(), "source_evidence": f"input line {idx}"})
+            result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(match.group(2)), "source_evidence": f"input line {idx}"})
     for summary in collect_section_items(raw_text, ("可执行需求", "需求列表", "requirements", "requirement")):
         if summary and summary not in {str(item.get("summary")) for item in result}:
-            result.append({"id": f"REQ-{len(result) + 1}", "summary": summary, "source_evidence": "input section: requirements"})
+            result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(summary), "source_evidence": "input section: requirements"})
     if not result:
         for idx, line in enumerate(lines, start=1):
             if skip_pattern.match(line) or "?" in line or "？" in line:
                 continue
-            result.append({"id": f"REQ-{len(result) + 1}", "summary": line, "source_evidence": f"input line {idx}"})
+            result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(line), "source_evidence": f"input line {idx}"})
             if len(result) >= 3:
                 break
     return result
