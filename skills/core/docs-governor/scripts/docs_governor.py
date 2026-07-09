@@ -3219,7 +3219,7 @@ def runtime_frontend_action(item: dict[str, Any], frontend_file: str, api_text: 
         for value in as_list(item.get("frontend_validation") or item.get("validation_rules"))
         if human_value(value, language, "")
     ]
-    has_frontend_evidence = bool(frontend_file or functions or bindings or validation)
+    has_frontend_evidence = bool(frontend_file or functions)
     if language == "zh":
         if not has_frontend_evidence:
             request_part = f"；请求口径：`{request}`" if request else ""
