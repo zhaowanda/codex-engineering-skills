@@ -114,7 +114,8 @@ def write_release_happy_evidence(out_dir: Path) -> None:
 def write_docs_manifest(out_dir: Path, doc_id: str) -> Path:
     docs_root = out_dir / "delivery-docs"
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", {"schema": "codex-" + "docs-governor-v1", "doc_id": doc_id})
-    if not (docs_root / ".git").exists():
+    git_check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=docs_root, text=True, capture_output=True)
+    if git_check.returncode != 0:
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True)
     return docs_root
 

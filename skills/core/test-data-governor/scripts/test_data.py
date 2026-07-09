@@ -37,23 +37,28 @@ def needs_role(case: dict[str, Any]) -> bool:
 def dataset_for_case(case: dict[str, Any]) -> dict[str, Any]:
     case_id = str(case.get("id") or "TC")
     case_type = str(case.get("type") or "functional")
+    strategy = case.get("data_setup_strategy") if isinstance(case.get("data_setup_strategy"), dict) else {}
     roles = ["authorized-user", "restricted-user"] if needs_role(case) else []
-    accounts = [{"role": role, "source": "synthetic fixture"} for role in roles]
+    strategy_accounts = [item for item in as_list(strategy.get("accounts")) if isinstance(item, dict)]
+    accounts = strategy_accounts or [{"role": role, "source": "synthetic fixture"} for role in roles]
     environment = []
     if case_type in {"frontend", "integration"}:
         environment.append({"name": "test environment", "requirement": "changed service and dependencies are available"})
+    strategy_records = [item for item in as_list(strategy.get("records")) if isinstance(item, dict)]
+    strategy_cleanup = as_list(strategy.get("cleanup"))
+    setup_methods = [str(item) for item in as_list(strategy.get("setup_methods")) if item]
     return {
-        "id": f"TD-{case_id}",
+        "id": str(strategy.get("dataset_ref") or f"TD-{case_id}"),
         "case_ids": [case_id],
         "data_classification": "synthetic",
-        "setup_method": "fixture_or_factory",
-        "records": [{"name": f"{case_id} representative record", "source": "synthetic fixture", "state": "ready before execution"}],
+        "setup_method": "+".join(setup_methods) if setup_methods else "fixture_or_factory",
+        "records": strategy_records or [{"name": f"{case_id} representative record", "source": "synthetic fixture", "state": "ready before execution"}],
         "accounts": accounts,
-        "roles": roles,
+        "roles": roles or [str(item.get("role")) for item in accounts if item.get("role")],
         "tenants": ["synthetic-tenant"] if "tenant" in json.dumps(case, ensure_ascii=False).lower() else [],
         "environment": environment,
-        "cleanup": [{"method": "delete synthetic fixture data", "owner": "test runner"}],
-        "privacy_controls": ["synthetic-only metadata", "no live identifiers", "safe to commit as fixture metadata"],
+        "cleanup": [{"method": str(item), "owner": "test runner"} for item in strategy_cleanup] or [{"method": "delete synthetic fixture data", "owner": "test runner"}],
+        "privacy_controls": as_list(strategy.get("privacy")) or ["synthetic-only metadata", "no live identifiers", "safe to commit as fixture metadata"],
         "notes": [f"Supports {case_id}: {case.get('title', '')}"],
     }
 
@@ -67,7 +72,7 @@ def render(test_design: dict[str, Any]) -> dict[str, Any]:
         "title": test_design.get("title"),
         "test_case_count": len(cases),
         "datasets": datasets,
-        "case_data_matrix": [{"case_id": case.get("id"), "dataset_ids": [f"TD-{case.get('id')}"]} for case in cases],
+        "case_data_matrix": [{"case_id": case.get("id"), "dataset_ids": [dataset.get("id")]} for case, dataset in zip(cases, datasets)],
         "global_rules": {
             "allowed_data": ["synthetic", "anonymized"],
             "forbidden_data": ["production", "real customer data", "secrets", "tokens", "payment card numbers"],

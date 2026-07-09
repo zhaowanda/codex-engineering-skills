@@ -121,6 +121,32 @@ def infer_doc_language(input_text: str, requested: str = "en") -> str:
     return "zh" if any(hint in input_text for hint in zh_hints) else "en"
 
 
+def infer_artifact_doc_language(artifact_dir: Path, requested: str = "auto", current: str = "en") -> str:
+    requested = str(requested or "auto").lower()
+    if requested in {"zh", "en"}:
+        return requested
+    if current == "zh":
+        return "zh"
+    zh_chars = 0
+    for name in [
+        "spec.json",
+        "technical_design.json",
+        "architecture_design.json",
+        "test_design.json",
+        "test_data_plan.json",
+        "delivery_plan.json",
+        "design_architecture_review.json",
+        "delivery_plan_review.json",
+    ]:
+        path = artifact_dir / name
+        if not path.exists():
+            continue
+        zh_chars += len(re.findall(r"[\u4e00-\u9fff]", path.read_text(encoding="utf-8", errors="ignore")))
+        if zh_chars >= 80:
+            return "zh"
+    return current
+
+
 def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifact_dir: Path, doc_language: str = "en") -> dict[str, Any]:
     if not docs_root:
         return {"decision": "skipped", "reason": "docs_root is not configured"}
@@ -877,6 +903,7 @@ def run(
         )
         steps.append(inspect_result)
         inspect_status = read_json(delivery_status)
+        effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
         docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
         if docs_sync.get("decision") == "pass":
             docs_status = docs_readiness(effective_docs_root, doc_id)
@@ -1140,6 +1167,7 @@ def run(
     )
     run_profile_artifact_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
+    effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
     docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
     if docs_sync.get("decision") == "pass":
         docs_status = docs_readiness(effective_docs_root, doc_id)

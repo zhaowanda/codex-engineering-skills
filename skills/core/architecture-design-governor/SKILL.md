@@ -36,11 +36,12 @@ python3 scripts/architecture_design.py \
 - Fallback architecture phrases such as `existing producer` or `target owner` must remain visible as uncertainty and should not pass expert review.
 - Mark repo responsibilities as `modify`, `confirm_only`, `read_only`, or `out_of_scope`.
 - Separate data ownership from data flow.
-- Include architecture fit matrix, decision confidence, architecture invariants, and expert review checklist.
+- For every architecture option, include when to choose it, owner/confirm-only repos, integration impact, deployment impact, rollback complexity, risk controls, validation, and performance impact.
+- Include a weighted architecture fit matrix, score summary, decision confidence, architecture invariants, and expert review checklist.
 - Include deployment, rollback, observability, and risk sections.
 
 ## Output
 
 The output uses schema `codex-architecture-design-v1`.
 
-The artifact contains architecture options, selected option, fit matrix, repository responsibilities, contracts, invariants, data ownership, deployment, rollback, observability, and risks.
+The artifact contains detailed architecture options, selected option, weighted fit matrix, score summary, repository responsibilities, contracts, invariants, data ownership, deployment, rollback, observability, and risks.

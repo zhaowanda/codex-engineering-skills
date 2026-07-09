@@ -30,6 +30,9 @@ delivery docs repository setup
 - Validate expected folders and manifests before teams rely on the docs repository.
 - Human-readable docs default to English. Pass `--doc-language zh` when the requirement or user explicitly asks for Chinese docs.
 - Synced human docs should read as formal review documents, not JSON dumps: include background, goals, clarification log, decisions, diagrams, evidence references, test/rollback/release sections, and explicit missing-input explanations.
+- Human-readable design docs should expose expert review sections for data model/table schema, multi-system sequence, MQ upstream/downstream trigger mechanism, cache strategy, transaction consistency, and observability when those artifacts exist.
+- Prefer language-neutral document models plus i18n rendering for human docs; do not generate English prose first and translate the finished document into Chinese.
+- Keep code identifiers, table names, fields, API routes, and user-provided business text unchanged while translating section titles, field labels, statuses, and fixed review phrases.
 - Before implementation, validate docs root with `--require-git`; a plain local folder is not enough.
 - Do not copy secrets, local absolute paths, or private customer data into shareable docs.
 

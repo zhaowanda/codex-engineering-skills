@@ -29,8 +29,15 @@ spec
 - Do not allow implementation when `readiness_gate.implementation_allowed=false`.
 - A design is not expert-ready unless requirements trace to process flow, modules, data flow, API/UI impact, tests, acceptance evidence, and selected options.
 - Require at least two technical solution options and two architecture options unless a documented waiver exists.
+- Require each technical and architecture option to include applicability, execution outline or integration/deployment impact, risk controls, validation, performance impact, and rollback detail.
+- Require weighted comparison matrices and score summaries so selected and rejected options are visibly comparable.
 - Require explicit selected option, decision criteria, tradeoffs, and rejected alternative reasoning.
 - Require current-state analysis with concrete code entrypoints, interface examples for API changes, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
+- Require data model/table schema detail when data changes are signaled.
+- Require multi-system sequence, timeout/retry, idempotency, and consistency handling when API/cross-system interaction is signaled.
+- Require MQ producer, consumer, topic/queue, trigger timing, payload, idempotency key, retry policy, and dead-letter/compensation when asynchronous messaging is signaled.
+- Require cache key, value shape, TTL, invalidation, and consistency-risk decision when cache is chosen.
+- Require transaction boundary, idempotency, compensation, and rollback when consistency or multi-write risk is signaled.
 - Require security, performance, rollback, observability, and test strategy to be executable, not generic.
 - Treat placeholders such as `TBD`, `unknown`, `todo`, and `confirm later` as findings unless they are inside an explicitly controlled gate.
 
@@ -67,6 +74,13 @@ The reviewer expects these sections when relevant:
 - `target_behavior`
 - `api_contracts`
 - `data_design`
+- `data_model_design`
+- `table_schema_changes`
+- `system_interaction_sequence`
+- `mq_interactions`
+- `cache_strategy`
+- `transaction_consistency`
+- `observability_design`
 - `permission_model`
 - `compatibility_strategy`
 - `exception_and_edge_cases`

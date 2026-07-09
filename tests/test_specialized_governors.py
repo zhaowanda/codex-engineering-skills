@@ -59,6 +59,15 @@ def test_test_design_maps_acceptance_and_special_scopes() -> None:
     assert result["test_data_plan_ref"] == "test_data_plan.json"
     assert all(case.get("test_data_refs") for case in result["test_cases"])
     assert all(case.get("cleanup_expectations") for case in result["test_cases"])
+    assert all(case.get("execution_path") for case in result["test_cases"] if case.get("acceptance_id"))
+    assert all(case.get("assertion_points") for case in result["test_cases"] if case.get("acceptance_id"))
+    assert all(isinstance(case.get("data_setup_strategy"), dict) for case in result["test_cases"] if case.get("test_data_refs"))
+    first_case = next(case for case in result["test_cases"] if case["id"] == "TC-1")
+    assert "/reports" in " ".join(first_case["execution_path"])
+    assert "export API" in " ".join(first_case["steps"] + first_case["assertion_points"])
+    assert "admin" in " ".join(first_case["assertion_points"])
+    assert first_case["semantic_refs"]["ui_refs"] == ["/reports"]
+    assert "export API" in first_case["semantic_refs"]["api_refs"][0]
     assert any(case["type"] == "regression" for case in result["test_cases"])
     assert result["permission_scope"]
     assert result["integration_scope"]
@@ -89,6 +98,109 @@ def test_test_design_blocks_generic_steps() -> None:
     assert any(item["source"] == "test_cases[0].steps" for item in validation["blockers"])
 
 
+def test_test_design_blocks_placeholder_acceptance() -> None:
+    data = {
+        "schema": "codex-test-design-v1",
+        "acceptance_count": 1,
+        "test_cases": [
+            {
+                "id": "TC-1",
+                "acceptance_id": "AC-1",
+                "type": "functional",
+                "title": "验证：标准",
+                "steps": ["准备能触发该验收场景的代表性数据，并记录数据标识：标准"],
+                "execution_path": ["BUSINESS: 准备代表性数据 -> 执行业务入口 -> 核对验收结果"],
+                "assertion_points": ["验收描述可被直接观察或用证据复现：标准"],
+                "data_setup_strategy": {"dataset_ref": "TD-TC-1"},
+                "expected_result": "满足验收：标准",
+                "evidence_required": ["功能测试"],
+            },
+            {
+                "id": "TC-1-REG",
+                "acceptance_id": "AC-1",
+                "type": "regression",
+                "title": "回归验证：标准 不破坏既有行为",
+                "steps": ["执行与「标准」相邻的既有流程"],
+                "execution_path": ["BUSINESS: 准备代表性数据 -> 执行业务入口 -> 核对验收结果"],
+                "assertion_points": ["验收描述可被直接观察或用证据复现：标准"],
+                "data_setup_strategy": {"dataset_ref": "TD-TC-1-REG"},
+                "expected_result": "既有行为保持兼容，且本次验收仍通过",
+                "evidence_required": ["回归测试证据"],
+            },
+        ],
+        "regression_scope": [{"area": "changed behavior"}],
+    }
+    validation = test_design.validate_design(data)
+    assert validation["decision"] == "block"
+    assert any(item["source"] == "test_cases[0].acceptance" for item in validation["blockers"])
+
+
+def test_test_design_blocks_acceptance_cases_without_execution_details() -> None:
+    data = {
+        "schema": "codex-test-design-v1",
+        "acceptance_count": 1,
+        "test_cases": [
+            {
+                "id": "TC-1",
+                "acceptance_id": "AC-1",
+                "type": "functional",
+                "title": "验证：订单列表展示续期月份",
+                "steps": ["打开订单列表并核对续期月份"],
+                "expected_result": "满足验收：订单列表展示续期月份",
+                "evidence_required": ["功能测试"],
+                "test_data_refs": ["TD-TC-1"],
+                "cleanup_expectations": ["清理 TD-TC-1"],
+            },
+            {
+                "id": "TC-1-REG",
+                "acceptance_id": "AC-1",
+                "type": "regression",
+                "title": "回归验证：订单列表展示续期月份 不破坏既有行为",
+                "steps": ["执行相邻既有流程"],
+                "expected_result": "既有行为保持兼容",
+                "evidence_required": ["回归测试证据"],
+            },
+        ],
+        "regression_scope": [{"area": "changed behavior"}],
+    }
+    validation = test_design.validate_design(data)
+    assert validation["decision"] == "block"
+    sources = {item["source"] for item in validation["blockers"]}
+    assert "test_cases[0].assertion_points" in sources
+    assert "test_cases[0].execution_path" in sources
+    assert "test_cases[0].data_setup_strategy" in sources
+
+
+def test_test_design_scopes_semantic_refs_per_acceptance() -> None:
+    spec = {
+        "doc_id": "REQ-SEM",
+        "title": "Renewal optimization",
+        "requirements": [{"id": "REQ-1", "summary": "Renewal list changes"}],
+        "acceptance_criteria": [
+            {"id": "AC-1", "criteria": "结算订单列表展示 `续期月份`。"},
+            {"id": "AC-2", "criteria": "未授权角色不能移出续期池。"},
+        ],
+    }
+    technical = {
+        "ui_ue_design": [{"page_or_route": "/device/orderPivot"}],
+        "api_contracts": [{"contract": "/device/orderPivot"}],
+        "data_design": [
+            {"slice": "BRK-1", "read_rule": "read through src/views/device/device.vue"},
+            {"slice": "BRK-2", "read_rule": "read through src/views/device/pool.vue"},
+        ],
+        "permission_model": [{"role": "operator", "rule": "preserve existing permission boundary", "negative_case": "unauthorized user cannot access changed behavior"}],
+    }
+    result = test_design.render(spec, technical, {"repo_responsibilities": [{"repo": "operate-fe"}]})
+    ac1 = next(case for case in result["test_cases"] if case["id"] == "TC-1")
+    ac2 = next(case for case in result["test_cases"] if case["id"] == "TC-2")
+    assert ac1["semantic_refs"]["permission_refs"] == []
+    assert "BRK-1" in " ".join(ac1["semantic_refs"]["data_refs"])
+    assert "BRK-2" in " ".join(ac2["semantic_refs"]["data_refs"])
+    assert ac2["semantic_refs"]["permission_refs"]
+    assert not any("PERMISSION:" in item for item in ac1["execution_path"])
+    assert any("PERMISSION:" in item for item in ac2["execution_path"])
+
+
 def test_test_data_governor_renders_plan_from_design() -> None:
     spec, technical, architecture = sample_docs()
     design = test_design.render(spec, technical, architecture)
@@ -100,6 +212,42 @@ def test_test_data_governor_renders_plan_from_design() -> None:
     planned_ids = {item["id"] for item in result["datasets"]}
     required_ids = {ref for case in design["test_cases"] for ref in case["test_data_refs"]}
     assert required_ids.issubset(planned_ids)
+    first_dataset = result["datasets"][0]
+    assert first_dataset["setup_method"]
+    assert first_dataset["records"][0]["source"] == "synthetic fixture"
+    assert first_dataset["cleanup"][0]["owner"] == "test runner"
+
+
+def test_test_data_governor_uses_case_data_setup_strategy() -> None:
+    design = {
+        "schema": "codex-test-design-v1",
+        "doc_id": "REQ-1",
+        "title": "Renewal list",
+        "test_cases": [
+            {
+                "id": "TC-1",
+                "title": "验证：续期月份字段展示",
+                "type": "functional",
+                "test_data_refs": ["TD-CUSTOM"],
+                "data_setup_strategy": {
+                    "dataset_ref": "TD-CUSTOM",
+                    "setup_methods": ["fixture_or_factory", "sql_seed"],
+                    "records": [{"name": "续期订单", "state": "已结算", "source": "synthetic fixture"}],
+                    "accounts": [{"role": "operator", "purpose": "验证列表展示"}],
+                    "cleanup": ["删除续期订单合成记录"],
+                    "privacy": ["只使用 synthetic/anonymized 数据"],
+                },
+            }
+        ],
+    }
+    result = test_data.render(design)
+    assert result["decision"] == "pass"
+    dataset = result["datasets"][0]
+    assert dataset["id"] == "TD-CUSTOM"
+    assert dataset["setup_method"] == "fixture_or_factory+sql_seed"
+    assert dataset["records"][0]["name"] == "续期订单"
+    assert dataset["accounts"][0]["role"] == "operator"
+    assert dataset["cleanup"][0]["method"] == "删除续期订单合成记录"
 
 
 def test_test_data_governor_blocks_sensitive_or_incomplete_data() -> None:
@@ -159,7 +307,11 @@ def test_data_security_detects_sensitive_signals() -> None:
 def run_all() -> None:
     test_test_design_maps_acceptance_and_special_scopes()
     test_test_design_blocks_generic_steps()
+    test_test_design_blocks_placeholder_acceptance()
+    test_test_design_blocks_acceptance_cases_without_execution_details()
+    test_test_design_scopes_semantic_refs_per_acceptance()
     test_test_data_governor_renders_plan_from_design()
+    test_test_data_governor_uses_case_data_setup_strategy()
     test_test_data_governor_blocks_sensitive_or_incomplete_data()
     test_configuration_detects_payment_email_database_and_blocks_missing_owners()
     test_performance_requires_evidence_for_api_database_export_ui()

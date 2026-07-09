@@ -19,6 +19,35 @@ GENERIC_PHRASES = (
     "target owner",
     "existing entrypoint to be confirmed",
 )
+TEMPLATE_DECISION_PHRASES = (
+    "default to smallest safe change",
+    "default to smallest owner-boundary change",
+    "lowest initial risk",
+    "single owner rollback is simpler",
+    "preserving existing contracts is safer by default",
+    "higher coordination, contract, and rollback cost",
+)
+TEMPLATE_OPTION_NAMES = {
+    "minimal scoped change",
+    "new abstraction or contract",
+    "single owner repository change",
+    "cross-repository contract change",
+}
+GENERIC_ENTRYPOINT_NAMES = {
+    "application.java",
+    "main.java",
+    "index.js",
+    "index.ts",
+    "index.tsx",
+    "index.jsx",
+    "package.json",
+    "package-lock.json",
+    "vue.config.js",
+    "babel.config.js",
+    "readme.md",
+    "docker-compose.yml",
+}
+GENERIC_ENTRYPOINT_PARTS = {"assets", "icons", "plugins", "config", "node_modules"}
 REVIEW_AREAS = [
     "requirement_coverage",
     "technical_design_quality",
@@ -78,6 +107,23 @@ def looks_like_path(value: str) -> bool:
     return "/" in path or "." in Path(path).name
 
 
+def is_generic_entrypoint(value: str) -> bool:
+    path = value.strip().lower()
+    if not path:
+        return False
+    parts = set(Path(path).parts)
+    return Path(path).name in GENERIC_ENTRYPOINT_NAMES or bool(parts & GENERIC_ENTRYPOINT_PARTS)
+
+
+def executable_command_hint(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    if looks_like_path(stripped) and not any(stripped.startswith(prefix) for prefix in ("npm ", "pnpm ", "yarn ", "pytest", "python", "mvn ", "gradle", "go test", "cargo ", "make ")):
+        return False
+    return bool(stripped.split())
+
+
 def missing_required(item: dict[str, Any], keys: list[str]) -> list[str]:
     return [key for key in keys if key not in item or item.get(key) in (None, "", [])]
 
@@ -94,8 +140,21 @@ def lacks_detail(value: Any, min_chars: int = 12) -> bool:
     return len(meaningful_text(value)) < min_chars
 
 
+def is_applicable(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("applicable") is True
+
+
+def has_signal(blob: str, terms: tuple[str, ...]) -> bool:
+    return any(term in blob for term in terms)
+
+
 def finding(area: str, severity: str, message: str, evidence: Any, suggestion: str) -> dict[str, Any]:
     return {"area": area, "severity": severity, "message": message, "evidence": evidence, "suggestion": suggestion}
+
+
+def highest_scored_option(score_summary: dict[str, Any]) -> str:
+    numeric = {str(key): value for key, value in score_summary.items() if key != "scoring_rule" and isinstance(value, int | float)}
+    return max(numeric, key=numeric.get) if numeric else ""
 
 
 def score_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
@@ -158,11 +217,17 @@ def review_options(options: list[Any], selected: dict[str, Any], area: str, labe
             continue
         option_ids.add(option.get("option_id"))
         required = ["option_id", "name", "description", "pros", "cons", "risk_level", "validation", "performance_impact", "rollback_strategy"]
+        required.extend(["when_to_choose", "risk_controls"])
+        if label == "technical":
+            required.extend(["implementation_outline", "test_evidence", "rollout_impact"])
         if label == "architecture":
-            required.extend(["owner_repos", "confirm_only_repos"])
+            required.extend(["owner_repos", "confirm_only_repos", "integration_impact", "deployment_impact", "rollback_complexity"])
         missing = missing_required(option, required)
         if missing:
             findings.append(finding(area, "high", f"{label} option lacks required fields", {"index": idx, "missing": missing}, "Complete option comparison before selecting a solution."))
+        for detail_key in ["when_to_choose", "pros", "cons", "risk_controls"]:
+            if detail_key in option and len(as_list(option.get(detail_key))) < 2:
+                findings.append(finding(area, "medium", f"{label} option {option.get('option_id') or idx} has thin {detail_key}", option.get(detail_key), f"Give at least two concrete {detail_key} entries for each option."))
     selected_id = selected.get("selected_option_id")
     if not selected_id:
         findings.append(finding(area, "high", f"selected {label} option is missing", selected or "selected option empty", "Declare selected_option_id, selection_reason, decision_criteria, and tradeoffs."))
@@ -174,6 +239,39 @@ def review_options(options: list[Any], selected: dict[str, Any], area: str, labe
         findings.append(finding(area, "medium", f"selected {label} lacks explicit tradeoffs", selected, "Record accepted costs and rejected alternatives."))
     if selected and not selected.get("rejected_alternative_reasoning"):
         findings.append(finding(area, "high", f"selected {label} lacks rejected alternative reasoning", selected, "Record why each non-selected option was rejected before implementation."))
+
+
+def review_comparison_matrix(matrix: list[Any], score_summary: dict[str, Any], options: list[Any], area: str, label: str, findings: list[dict[str, Any]]) -> None:
+    option_ids = {str(item.get("option_id")) for item in options if isinstance(item, dict) and item.get("option_id")}
+    if not matrix:
+        findings.append(finding(area, "high", f"{label} comparison matrix is missing", f"{label}_comparison empty", "Compare every option across weighted criteria with scores, winner, and reason."))
+        return
+    compared_options: set[str] = set()
+    winners: set[str] = set()
+    for idx, row in enumerate(matrix):
+        if not isinstance(row, dict):
+            findings.append(finding(area, "high", f"{label} comparison row must be an object", {"index": idx}, "Use structured comparison rows."))
+            continue
+        missing = missing_required(row, ["criterion", "weight", "scores", "winner", "reason"])
+        if missing:
+            findings.append(finding(area, "high", f"{label} comparison row lacks required fields", {"index": idx, "missing": missing}, "Each row needs criterion, weight, per-option scores, winner, and reason."))
+        scores = row.get("scores") if isinstance(row.get("scores"), dict) else {}
+        compared_options.update(str(option_id) for option_id in scores)
+        winner = str(row.get("winner") or "")
+        if winner and winner != "tie":
+            winners.add(winner)
+        if scores and option_ids and set(scores) != option_ids:
+            findings.append(finding(area, "medium", f"{label} comparison row does not score every option", {"index": idx, "expected": sorted(option_ids), "actual": sorted(scores)}, "Score every option in every comparison row."))
+        if isinstance(row.get("weight"), int | float) and row.get("weight", 0) <= 0:
+            findings.append(finding(area, "medium", f"{label} comparison row has non-positive weight", {"index": idx, "weight": row.get("weight")}, "Use positive weights so criteria importance is explicit."))
+    if option_ids and compared_options != option_ids:
+        findings.append(finding(area, "high", f"{label} comparison matrix does not cover all options", {"expected": sorted(option_ids), "actual": sorted(compared_options)}, "Every option must appear in the comparison matrix."))
+    if len(matrix) < 4:
+        findings.append(finding(area, "medium", f"{label} comparison matrix is too shallow", {"criteria_count": len(matrix)}, "Use at least four comparison criteria covering correctness, risk, testability, rollout, and rollback."))
+    if not score_summary:
+        findings.append(finding(area, "medium", f"{label} score summary is missing", f"{label}_score_summary empty", "Summarize weighted scores so the preferred option is visually obvious."))
+    elif option_ids and not option_ids.issubset({str(key) for key in score_summary if key != "scoring_rule"}):
+        findings.append(finding(area, "medium", f"{label} score summary does not include every option", score_summary, "Include each option_id in the score summary."))
 
 
 def review_traceability(req_trace: list[Any], rows: list[Any], area: str, kind: str, findings: list[dict[str, Any]]) -> None:
@@ -210,6 +308,9 @@ def review_traceability(req_trace: list[Any], rows: list[Any], area: str, kind: 
 def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     current_state = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
+    problem_analysis = technical.get("problem_analysis") if isinstance(technical.get("problem_analysis"), dict) else {}
+    requirement_breakdown = [item for item in as_list(technical.get("requirement_breakdown")) if isinstance(item, dict)]
+    entrypoint_confidence = technical.get("code_entrypoint_confidence") if isinstance(technical.get("code_entrypoint_confidence"), dict) else {}
     req_trace = as_list(technical.get("requirement_trace"))
     target_behavior = as_list(technical.get("target_behavior"))
     business_rules = as_list(technical.get("business_rule_mapping"))
@@ -218,22 +319,35 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     logical_data_flow = as_list(technical.get("logical_data_flow"))
     api_contracts = as_list(technical.get("api_contracts"))
     data_design = as_list(technical.get("data_design"))
+    data_model_design = technical.get("data_model_design") if isinstance(technical.get("data_model_design"), dict) else {}
+    table_schema_changes = as_list(technical.get("table_schema_changes"))
+    system_interaction_sequence = technical.get("system_interaction_sequence") if isinstance(technical.get("system_interaction_sequence"), dict) else {}
+    mq_interactions = as_list(technical.get("mq_interactions"))
+    cache_strategy = technical.get("cache_strategy") if isinstance(technical.get("cache_strategy"), dict) else {}
+    transaction_consistency = technical.get("transaction_consistency") if isinstance(technical.get("transaction_consistency"), dict) else {}
+    observability_design = technical.get("observability_design") if isinstance(technical.get("observability_design"), dict) else {}
     permission_model = as_list(technical.get("permission_model"))
     compatibility = as_list(technical.get("compatibility_strategy"))
     edge_cases = as_list(technical.get("exception_and_edge_cases"))
     nfrs = as_list(technical.get("non_functional_requirements"))
     technical_options = as_list(technical.get("solution_options"))
     selected_solution = technical.get("selected_solution") if isinstance(technical.get("selected_solution"), dict) else {}
+    option_comparison = as_list(technical.get("option_comparison_matrix"))
+    option_score_summary = technical.get("option_score_summary") if isinstance(technical.get("option_score_summary"), dict) else {}
     design_traceability = as_list(technical.get("design_traceability_matrix"))
     acceptance_mapping = as_list(technical.get("acceptance_mapping"))
     ui_ue_design = as_list(technical.get("ui_ue_design"))
     test_strategy = as_list(technical.get("test_strategy"))
     interface_examples = as_list(technical.get("interface_examples"))
     compatibility_matrix = as_list(technical.get("compatibility_matrix"))
+    project_context = technical.get("project_context") if isinstance(technical.get("project_context"), dict) else {}
 
     current_architecture = architecture.get("current_architecture") if isinstance(architecture.get("current_architecture"), dict) else {}
+    arch_entrypoint_confidence = architecture.get("code_entrypoint_confidence") if isinstance(architecture.get("code_entrypoint_confidence"), dict) else {}
     architecture_options = as_list(architecture.get("architecture_options"))
     selected_architecture = architecture.get("selected_architecture") if isinstance(architecture.get("selected_architecture"), dict) else {}
+    architecture_fit_matrix = as_list(architecture.get("architecture_fit_matrix"))
+    architecture_score_summary = architecture.get("architecture_score_summary") if isinstance(architecture.get("architecture_score_summary"), dict) else {}
     architecture_traceability = as_list(architecture.get("architecture_traceability_matrix"))
     boundaries = as_list(architecture.get("component_boundaries"))
     module_topology = as_list(architecture.get("module_topology"))
@@ -253,6 +367,12 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     gray_release = as_list(architecture.get("gray_release_strategy"))
     rollback = as_list(architecture.get("rollback_strategy"))
     decision_records = as_list(architecture.get("decision_records"))
+    design_blob = text_of({"technical": technical, "architecture": architecture})
+    data_signal = has_signal(design_blob, ("database", "table", "field", "schema", "migration", "数据", "字段", "表", "迁移"))
+    system_signal = has_signal(design_blob, ("api", "endpoint", "service", "repo", "system", "consumer", "provider", "接口", "服务", "系统", "跨仓", "上下游"))
+    mq_signal = has_signal(design_blob, ("mq", "topic", "queue", "producer", "consumer", "message", "event", "kafka", "rocketmq", "rabbitmq", "消息", "队列", "生产者", "消费者"))
+    cache_signal = has_signal(design_blob, ("cache", "redis", "ttl", "缓存", "高频", "热点"))
+    consistency_signal = has_signal(design_blob, ("transaction", "consistency", "idempot", "rollback", "compensation", "事务", "一致性", "幂等", "补偿", "回滚"))
 
     if not isinstance(technical.get("design_scope"), dict) or not technical.get("design_scope", {}).get("in_scope"):
         findings.append(finding("technical_design_quality", "high", "technical design lacks explicit design_scope", technical.get("design_scope"), "Define in_scope, out_of_scope, assumptions, and non_goals."))
@@ -260,10 +380,39 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
         findings.append(finding("technical_design_quality", "high", "current state analysis is incomplete", current_state, "Describe existing behavior, code entrypoints, constraints, and reuse points before proposing changes."))
     elif lacks_detail(current_state.get("existing_behavior"), 24):
         findings.append(finding("technical_design_quality", "medium", "current state analysis is too shallow", current_state.get("existing_behavior"), "Use concrete repository and behavior facts, not a short generic phrase."))
+    if not problem_analysis:
+        findings.append(finding("technical_design_quality", "high", "problem_analysis is missing", "problem_analysis empty", "State current behavior, business problem, process gap, constraints, goals, non-goals, and success criteria before options."))
+    else:
+        missing_problem = missing_required(problem_analysis, ["current_behavior", "business_problem", "process_gap", "code_entrypoints", "constraints", "design_goals", "success_criteria"])
+        if missing_problem:
+            findings.append(finding("technical_design_quality", "high", "problem_analysis lacks required fields", {"missing": missing_problem}, "Complete problem-specific current-state analysis before option comparison."))
+        problem_blob = text_of(problem_analysis)
+        if "likely handles the affected behavior" in problem_blob and not problem_analysis.get("business_problem"):
+            findings.append(finding("technical_design_quality", "medium", "problem analysis is still template-like", problem_analysis, "Explain the concrete business problem and existing process gap for this requirement."))
     if not req_trace:
         findings.append(finding("requirement_coverage", "blocker", "technical design has no requirement trace", "requirement_trace empty", "Map every requirement to design evidence."))
     if req_trace and len(target_behavior) < len(req_trace):
         findings.append(finding("requirement_coverage", "high", "some requirements lack target behavior", {"requirements": len(req_trace), "target_behavior": len(target_behavior)}, "Add target behavior for each requirement."))
+    complexity_signals = len(req_trace) + len(business_rules) + len(requirement_breakdown)
+    if complexity_signals >= 5 and len(requirement_breakdown) < 3:
+        findings.append(finding("requirement_coverage", "high", "complex requirement lacks business sub-requirement breakdown", {"requirements": len(req_trace), "business_rules": len(business_rules), "breakdown": len(requirement_breakdown)}, "Generate requirement_breakdown from source trace/business rules and map each slice to design sections."))
+    if requirement_breakdown:
+        for idx, item in enumerate(requirement_breakdown):
+            missing = missing_required(item, ["id", "summary", "behavior_change", "impact_areas", "field_impact", "api_impact", "permission_impact"])
+            if missing:
+                findings.append(finding("requirement_coverage", "high", "requirement breakdown row lacks design-impact fields", {"index": idx, "missing": missing}, "Each sub-requirement needs behavior, field/API/permission impact, and traceability."))
+    if requirement_breakdown and len(requirement_breakdown) >= 3 and len(modules) <= 1:
+        findings.append(finding("underdesign_risks", "high", "complex requirement is flattened into one module row", {"breakdown_count": len(requirement_breakdown), "module_count": len(modules)}, "Map each major business slice to module responsibility or explicitly justify shared owner-module handling."))
+    confidence_level = str(entrypoint_confidence.get("level") or arch_entrypoint_confidence.get("level") or "").lower()
+    selected_entrypoint = str(entrypoint_confidence.get("selected_entrypoint") or arch_entrypoint_confidence.get("selected_entrypoint") or "")
+    if confidence_level == "low":
+        findings.append(finding("technical_design_quality", "high", "primary code entrypoint confidence is low", entrypoint_confidence or arch_entrypoint_confidence, "Inspect project understanding/code index and revise owner module before implementation."))
+    elif confidence_level == "medium":
+        findings.append(finding("technical_design_quality", "medium", "primary code entrypoint confidence is only medium", entrypoint_confidence or arch_entrypoint_confidence, "Confirm matched entrypoint with adjacent feature code before implementation."))
+    if selected_entrypoint and is_generic_entrypoint(selected_entrypoint):
+        evidence_text = text_of(entrypoint_confidence.get("evidence") or [])
+        if not any(token in evidence_text for token in ["semantic", "route_file", "domain", "feature"]):
+            findings.append(finding("technical_design_quality", "high", "generic bootstrap/config/asset file is selected as primary owner entrypoint", selected_entrypoint, "Use feature/service/page/module file as the primary owner or mark the design blocked pending code inspection."))
     if has_placeholder(technical) or has_placeholder(architecture):
         findings.append(finding("technical_design_quality", "medium", "design still contains placeholders", "placeholder detected", "Replace placeholders with concrete decisions."))
     if has_generic_phrase(technical) or has_generic_phrase(architecture):
@@ -307,6 +456,69 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
             if missing:
                 findings.append(finding("data_model_review", "high", "data design lacks required semantics", {"index": idx, "missing": missing}, "Add read_rule, write_rule, null/default rule, and migration."))
 
+    if data_signal:
+        if not data_model_design:
+            findings.append(finding("data_model_review", "high", "data-impact design lacks data_model_design", "data signal detected", "Describe affected business entities, fields, ownership, read/write rules, and migration stance."))
+        elif data_model_design.get("applicable") is not True and lacks_detail(data_model_design.get("not_applicable_reason"), 18):
+            findings.append(finding("data_model_review", "high", "data_model_design is marked not applicable without a concrete reason", data_model_design, "State why no entity/table/field impact exists despite data signals."))
+        elif is_applicable(data_model_design):
+            missing_model = missing_required(data_model_design, ["entities", "field_rules", "ownership", "read_write_rules", "migration_strategy", "rollback_strategy"])
+            if missing_model:
+                findings.append(finding("data_model_review", "high", "data_model_design lacks required details", {"missing": missing_model}, "Complete entity, field, owner, read/write, migration, and rollback details."))
+            if not table_schema_changes:
+                findings.append(finding("data_model_review", "high", "data-impact design lacks table_schema_changes", "table_schema_changes empty", "List table/field/type/null/default/index/migration/rollback or explicitly state no physical schema change."))
+    for idx, item in enumerate(table_schema_changes):
+        if isinstance(item, dict):
+            missing = missing_required(item, ["table", "field", "type", "nullable", "default", "migration", "rollback"])
+            if missing:
+                findings.append(finding("data_model_review", "high", "table schema change lacks implementation-grade fields", {"index": idx, "missing": missing}, "Each schema row needs table, field, type, nullability, default, migration, and rollback."))
+
+    if system_signal:
+        if not system_interaction_sequence:
+            findings.append(finding("cross_repo_contract_review", "high", "system interaction sequence is missing", "system/API signal detected", "Describe participants, ordered calls/events, timeout/retry, idempotency, and consistency boundary."))
+        elif system_interaction_sequence.get("applicable") is not True and lacks_detail(system_interaction_sequence.get("not_applicable_reason"), 18):
+            findings.append(finding("cross_repo_contract_review", "high", "system interaction sequence has no concrete not-applicable reason", system_interaction_sequence, "Explain why this requirement has no multi-module/system interaction."))
+        elif is_applicable(system_interaction_sequence):
+            missing = missing_required(system_interaction_sequence, ["participants", "sequence", "timeout_retry", "idempotency", "consistency"])
+            if missing:
+                findings.append(finding("cross_repo_contract_review", "high", "system interaction sequence lacks required fields", {"missing": missing}, "Add participants, ordered sequence, timeout/retry, idempotency, and consistency handling."))
+
+    if mq_signal:
+        applicable_mq = [item for item in mq_interactions if isinstance(item, dict) and item.get("applicable") is True]
+        if not mq_interactions:
+            findings.append(finding("cross_repo_contract_review", "blocker", "MQ/event requirement lacks mq_interactions", "MQ signal detected", "Define producer, consumer, topic/queue, trigger timing, payload, idempotency, retry, and dead-letter/compensation."))
+        elif not applicable_mq and not all(isinstance(item, dict) and item.get("applicable") is False and not lacks_detail(item.get("not_applicable_reason") or item.get("reason"), 18) for item in mq_interactions):
+            findings.append(finding("cross_repo_contract_review", "high", "MQ/event signal is not backed by an applicable MQ interaction", mq_interactions, "If MQ is only mentioned as non-impact, provide a concrete no-MQ reason; otherwise make one interaction applicable."))
+        for idx, item in enumerate(applicable_mq):
+            missing = missing_required(item, ["producer", "consumer", "topic_or_queue", "trigger", "payload_fields", "idempotency_key", "retry_policy", "dead_letter_or_compensation"])
+            if missing:
+                findings.append(finding("cross_repo_contract_review", "blocker", "MQ interaction lacks production-grade fields", {"index": idx, "missing": missing}, "Complete producer/consumer/topic/trigger/payload/idempotency/retry/dead-letter details."))
+
+    if cache_strategy:
+        if cache_strategy.get("decision") == "use_cache":
+            missing = missing_required(cache_strategy, ["key_design", "value_shape", "ttl", "invalidation", "consistency_risk"])
+            if missing:
+                findings.append(finding("performance_review", "high", "cache strategy chooses cache without required safeguards", {"missing": missing}, "Define cache key, value shape, TTL, invalidation trigger, and consistency risk."))
+    elif cache_signal:
+        findings.append(finding("performance_review", "high", "cache-related requirement lacks cache_strategy", "cache signal detected", "State use_cache/no_cache and explain key, TTL, invalidation, and consistency tradeoff."))
+
+    if consistency_signal:
+        if not transaction_consistency:
+            findings.append(finding("data_model_review", "high", "consistency-sensitive design lacks transaction_consistency", "consistency signal detected", "Define transaction boundary, idempotency, compensation, rollback, and partial failure handling."))
+        elif transaction_consistency.get("applicable") is not True and lacks_detail(transaction_consistency.get("not_applicable_reason"), 18):
+            findings.append(finding("data_model_review", "high", "transaction consistency is marked not applicable without reason", transaction_consistency, "Explain why no transaction or consistency handling is needed."))
+        elif is_applicable(transaction_consistency):
+            missing = missing_required(transaction_consistency, ["boundary", "idempotency", "compensation", "rollback"])
+            if missing:
+                findings.append(finding("data_model_review", "high", "transaction consistency design lacks required fields", {"missing": missing}, "Add boundary, idempotency, compensation, rollback, and partial failure semantics."))
+
+    if not observability_design:
+        findings.append(finding("observability_review", "medium", "technical observability design is missing", "observability_design empty", "Define logs, metrics, traces, and alerts for the changed behavior or explicitly waive each one."))
+    else:
+        missing = missing_required(observability_design, ["logs", "metrics", "traces", "alerts"])
+        if missing:
+            findings.append(finding("observability_review", "medium", "technical observability design lacks required signals", {"missing": missing}, "Add logs, metrics, traces, and alerts or explicit no-impact reasons."))
+
     permission_signal = text_of({"requirement_trace": req_trace, "target_behavior": target_behavior, "api_contracts": api_contracts, "design_goal": technical.get("design_goal", "")})
     if any(token in permission_signal for token in ["permission", "tenant", "role", "权限", "租户", "角色", "data scope"]) and not permission_model:
         findings.append(finding("permission_model_review", "blocker", "permission-sensitive design lacks permission_model", "permission terms detected", "Add backend-authoritative permission/data-scope model."))
@@ -327,6 +539,15 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
         findings.append(finding("security_review", "medium", "security and permission architecture is missing", "security_and_permission empty", "Define control points or explicitly waive no security impact."))
 
     review_options(technical_options, selected_solution, "design_depth_review", "technical", findings)
+    review_comparison_matrix(option_comparison, option_score_summary, technical_options, "design_depth_review", "technical", findings)
+    if any(str(option.get("name", "")).lower() in TEMPLATE_OPTION_NAMES for option in technical_options if isinstance(option, dict)):
+        findings.append(finding("design_depth_review", "high", "technical options still use template option names", [option.get("name") for option in technical_options if isinstance(option, dict)], "Generate requirement-specific option names tied to impact area and owner entrypoint."))
+    technical_decision_text = text_of({"selected": selected_solution, "options": technical_options, "matrix": option_comparison})
+    if any(phrase in technical_decision_text for phrase in TEMPLATE_DECISION_PHRASES):
+        findings.append(finding("design_depth_review", "high", "technical option decision uses template rationale", selected_solution, "Decision must follow comparison results and cite requirement-specific evidence."))
+    technical_winner = highest_scored_option(option_score_summary)
+    if technical_winner and selected_solution.get("selected_option_id") != technical_winner:
+        findings.append(finding("design_depth_review", "high", "selected technical option does not match highest weighted score", {"selected": selected_solution.get("selected_option_id"), "highest": technical_winner, "scores": option_score_summary}, "Select the highest weighted option or record an explicit exception with evidence."))
     review_traceability(req_trace, design_traceability, "design_depth_review", "design", findings)
 
     if not acceptance_mapping:
@@ -346,6 +567,9 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     if not test_strategy:
         findings.append(finding("testability_review", "blocker", "test strategy is missing", "test_strategy empty", "Add unit/API/UI/permission/export/regression evidence strategy."))
+    for idx, hint in enumerate(as_list(project_context.get("test_command_hints"))):
+        if isinstance(hint, str) and not executable_command_hint(hint):
+            findings.append(finding("testability_review", "medium", "test command hint is not executable", {"index": idx, "hint": hint}, "Use executable commands such as npm test, pytest, mvn test, or document why only manual evidence is available."))
 
     if not isinstance(architecture.get("architecture_scope"), dict) or not architecture.get("architecture_scope", {}).get("in_scope"):
         findings.append(finding("architecture_boundary_review", "high", "architecture scope is missing", architecture.get("architecture_scope"), "Define architecture in_scope, out_of_scope, assumptions, and decision drivers."))
@@ -354,6 +578,15 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     elif not any(looks_like_path(str(item)) for item in as_list(current_architecture.get("repo_entrypoints"))):
         findings.append(finding("architecture_boundary_review", "medium", "current architecture lacks concrete repo entrypoint paths", current_architecture.get("repo_entrypoints"), "Use real file, route, or config paths from project understanding."))
     review_options(architecture_options, selected_architecture, "architecture_depth_review", "architecture", findings)
+    review_comparison_matrix(architecture_fit_matrix, architecture_score_summary, architecture_options, "architecture_depth_review", "architecture", findings)
+    if any(str(option.get("name", "")).lower() in TEMPLATE_OPTION_NAMES for option in architecture_options if isinstance(option, dict)):
+        findings.append(finding("architecture_depth_review", "high", "architecture options still use template option names", [option.get("name") for option in architecture_options if isinstance(option, dict)], "Generate architecture options tied to actual owner repo, contract, and data/release risk."))
+    architecture_decision_text = text_of({"selected": selected_architecture, "options": architecture_options, "matrix": architecture_fit_matrix})
+    if any(phrase in architecture_decision_text for phrase in TEMPLATE_DECISION_PHRASES):
+        findings.append(finding("architecture_depth_review", "high", "architecture option decision uses template rationale", selected_architecture, "Architecture decision must follow comparison results and cite owner/contract/data evidence."))
+    architecture_winner = highest_scored_option(architecture_score_summary)
+    if architecture_winner and selected_architecture.get("selected_option_id") != architecture_winner:
+        findings.append(finding("architecture_depth_review", "high", "selected architecture option does not match highest weighted score", {"selected": selected_architecture.get("selected_option_id"), "highest": architecture_winner, "scores": architecture_score_summary}, "Select the highest weighted architecture option or record an explicit exception with evidence."))
     review_traceability(req_trace, architecture_traceability, "architecture_depth_review", "architecture", findings)
 
     if not boundaries:
@@ -413,7 +646,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     if not decision_records:
         findings.append(finding("architecture_boundary_review", "medium", "architecture decision records are missing", "decision_records empty", "Record decision, alternatives, and reason."))
 
-    modify_count = sum(1 for item in repo_responsibilities if isinstance(item, dict) and item.get("role") == "modify")
+    modify_repos = {str(item.get("repo") or f"row-{idx}") for idx, item in enumerate(repo_responsibilities) if isinstance(item, dict) and item.get("role") == "modify"}
+    modify_count = len(modify_repos)
     if modify_count > 4:
         findings.append(finding("overengineering_risks", "medium", "many repositories are marked modify", modify_count, "Confirm each modify repo has owner task; downgrade related repos to confirm_only/read_only."))
 
@@ -441,8 +675,8 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
         **grouped,
         "open_questions": as_list(technical.get("open_questions")) + as_list(architecture.get("architecture_risks")),
         "solution_tradeoff_review": {
-            "technical": {"options": technical_options, "selected": selected_solution},
-            "architecture": {"options": architecture_options, "selected": selected_architecture},
+            "technical": {"options": technical_options, "comparison_matrix": option_comparison, "score_summary": option_score_summary, "selected": selected_solution},
+            "architecture": {"options": architecture_options, "comparison_matrix": architecture_fit_matrix, "score_summary": architecture_score_summary, "selected": selected_architecture},
         },
         "blockers": blockers,
         "decision": decision,

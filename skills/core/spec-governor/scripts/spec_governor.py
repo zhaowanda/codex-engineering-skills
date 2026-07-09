@@ -64,6 +64,48 @@ def split_lines(text: str) -> list[str]:
     return [line.strip(" \t-*#") for line in text.splitlines() if line.strip(" \t-*#")]
 
 
+def normalize_list_item(line: str) -> str:
+    return re.sub(r"^\s*(?:[-*]\s+|\d+[.)、]\s*|[（(]\d+[）)]\s*)", "", line).strip()
+
+
+def is_section_heading(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if re.match(r"^#{1,6}\s+", stripped):
+        return True
+    compact = stripped.strip("# \t")
+    return bool(re.match(r"^(范围|可执行需求|需求|验收标准|非范围|非目标|业务规则|背景|说明|acceptance criteria|acceptance|requirements?|scope|out of scope|business rules?)$", compact, re.I))
+
+
+def section_title(line: str) -> str:
+    return re.sub(r"^#{1,6}\s*", "", line).strip().strip("#").strip()
+
+
+def collect_section_items(raw_text: str, headings: tuple[str, ...]) -> list[str]:
+    items: list[str] = []
+    in_section = False
+    for raw_line in raw_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        title = section_title(stripped)
+        if is_section_heading(stripped):
+            normalized_title = title.lower().strip()
+            in_section = any(normalized_title == heading.lower() or title == heading for heading in headings)
+            continue
+        if not in_section:
+            continue
+        if re.match(r"^\s*(?:[-*]\s+|\d+[.)、]\s*|[（(]\d+[）)]\s*)", raw_line):
+            item = normalize_list_item(raw_line)
+            if item:
+                items.append(item)
+            continue
+        if items and raw_line.startswith((" ", "\t")):
+            items[-1] = f"{items[-1]}；{stripped}"
+    return items
+
+
 def classify_lane(text: str) -> str:
     lower = text.lower()
     if any(term in lower for term in ["hotfix", "production down", "p0", "urgent"]):
@@ -77,13 +119,15 @@ def classify_lane(text: str) -> str:
     return "standard_requirement"
 
 
-def extract_acceptance(lines: list[str]) -> list[dict[str, Any]]:
+def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    ac_pattern = re.compile(r"^(ac|acceptance|验收|验收标准|标准)[:：\s-]*(.+)$", re.I)
+    ac_pattern = re.compile(r"^(ac|acceptance|acceptance criteria|验收|验收标准|标准)[:：\s-]*(.+)$", re.I)
     for line in lines:
         match = ac_pattern.match(line)
         if match:
             criteria = match.group(2).strip()
+            if not criteria or criteria in {"标准", "验收标准", "acceptance", "acceptance criteria"}:
+                continue
             result.append({
                 "id": f"AC-{len(result) + 1}",
                 "criteria": criteria,
@@ -91,12 +135,21 @@ def extract_acceptance(lines: list[str]) -> list[dict[str, Any]]:
                 "evidence_required": evidence_for_text(criteria),
                 "source_evidence": "input",
             })
+    for criteria in collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance")):
+        if criteria and criteria not in {str(item.get("criteria")) for item in result}:
+            result.append({
+                "id": f"AC-{len(result) + 1}",
+                "criteria": criteria,
+                "type": "negative" if is_negative(criteria) else "positive",
+                "evidence_required": evidence_for_text(criteria),
+                "source_evidence": "input section: acceptance",
+            })
     if not result and lines:
         result.append({"id": "AC-1", "criteria": f"User-visible behavior matches: {lines[0]}", "type": "positive", "evidence_required": ["test evidence"], "source_evidence": "inferred from first line"})
     return result
 
 
-def extract_requirements(lines: list[str]) -> list[dict[str, str]]:
+def extract_requirements(lines: list[str], raw_text: str = "") -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     req_pattern = re.compile(r"^(req|requirement|需求|功能)[:：\s-]*(.+)$", re.I)
     skip_pattern = re.compile(r"^(ac|acceptance|验收|验收标准|标准|rule|规则|out of scope|非目标|assumption|假设|risk|风险)[:：\s-]*", re.I)
@@ -104,6 +157,9 @@ def extract_requirements(lines: list[str]) -> list[dict[str, str]]:
         match = req_pattern.match(line)
         if match:
             result.append({"id": f"REQ-{len(result) + 1}", "summary": match.group(2).strip(), "source_evidence": f"input line {idx}"})
+    for summary in collect_section_items(raw_text, ("可执行需求", "需求列表", "requirements", "requirement")):
+        if summary and summary not in {str(item.get("summary")) for item in result}:
+            result.append({"id": f"REQ-{len(result) + 1}", "summary": summary, "source_evidence": "input section: requirements"})
     if not result:
         for idx, line in enumerate(lines, start=1):
             if skip_pattern.match(line) or "?" in line or "？" in line:
@@ -289,7 +345,7 @@ def expert_readiness_gaps(
         add("business_objectives", "Business objective is missing; design may optimize the wrong outcome.")
     if not scenarios:
         add("user_scenarios", "User scenario is missing; acceptance may not cover the real workflow.")
-    if acceptance and all(str(item.get("source_evidence")) != "input" for item in acceptance):
+    if acceptance and all(not str(item.get("source_evidence")).startswith("input") for item in acceptance):
         add("acceptance_criteria", "Acceptance is inferred rather than explicitly provided.", "high")
     if areas & {"api", "data", "permission", "security", "performance", "config"} and not risks:
         add("risks", "High-impact requirement should declare explicit delivery or product risks.", "high")
@@ -374,10 +430,10 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
     lines = split_lines(text)
     summary = lines[0] if lines else title
     lane = classify_lane(text)
-    acceptance = extract_acceptance(lines)
+    acceptance = extract_acceptance(lines, text)
     rules = extract_rules(lines)
     questions = extract_open_questions(lines)
-    requirements = extract_requirements(lines)
+    requirements = extract_requirements(lines, text)
     out_of_scope = extract_prefixed(lines, ("out of scope", "非目标", "不包含"))
     assumptions = extract_prefixed(lines, ("assumption", "假设"))
     risks = [{"id": f"RISK-{idx + 1}", "risk": item, "source_evidence": "input"} for idx, item in enumerate(extract_prefixed(lines, ("risk", "风险")))]
@@ -503,7 +559,7 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
     if shallow_hits:
         warnings.append({"source": "quality", "message": "spec contains shallow or placeholder language", "terms": sorted(set(shallow_hits))})
     acceptance = [item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
-    if acceptance and all(str(item.get("source_evidence")) != "input" for item in acceptance):
+    if acceptance and all(not str(item.get("source_evidence")).startswith("input") for item in acceptance):
         warnings.append({"source": "acceptance_criteria", "message": "all acceptance criteria are inferred; confirm testable acceptance before expert-ready design"})
     decision = "block" if blockers else "pass"
     return {

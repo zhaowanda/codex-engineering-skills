@@ -85,6 +85,30 @@ def test_spec_extracts_multiple_requirements_scope_risks_and_questions() -> None
     assert spec["open_questions"]
 
 
+def test_spec_extracts_numbered_acceptance_section_from_prd() -> None:
+    text = """
+    # 运营系统功能优化需求
+
+    ## 可执行需求
+    1. 结算订单模块新增并填充字段：`续期月份`。
+    2. 结算订单列表隐藏已作废/已取消订单。
+
+    ## 验收标准
+    1. 结算订单列表可看到 `续期月份`，且数据来源与续期结算订单月份一致。
+    2. 默认列表和状态统计不展示已作废/已取消结算订单。
+    3. 运营人员可以批量录入或导入不续期设备号，并触发批量移出续期池。
+    4. 单个或批量移出续期池时，未选择/填写原因不可提交；提交后原因写入后端记录。
+    5. 续期试算明细查询时，租户、自有车等筛选条件在明细接口中生效。
+    6. 前端通过 `npm run build:test`；后端至少通过 `mvn -pl operate-provider -DskipTests compile`。
+    """
+    spec = spec_governor.normalize("REQ-SECTION", "运营系统功能优化", text)
+    assert len(spec["requirements"]) == 2
+    assert len(spec["acceptance_criteria"]) == 6
+    criteria = [item["criteria"] for item in spec["acceptance_criteria"]]
+    assert "结算订单列表可看到 `续期月份`" in criteria[0]
+    assert all(item["criteria"] != "标准" for item in spec["acceptance_criteria"])
+
+
 def test_spec_adds_expert_quality_fields() -> None:
     text = """
     Goal: reduce manual export work.
@@ -207,20 +231,139 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     arch = architecture_design.render(spec, tech)
     assert tech["schema"] == "codex-technical-design-v1"
     assert tech["process_flow"]
-    assert len(tech["solution_options"]) == 2
-    assert tech["option_comparison_matrix"]
+    assert len(tech["solution_options"]) >= 2
+    assert all({"when_to_choose", "implementation_outline", "risk_controls", "test_evidence", "rollout_impact"}.issubset(item) for item in tech["solution_options"])
+    assert all({"criterion", "weight", "scores", "winner", "reason"}.issubset(item) for item in tech["option_comparison_matrix"])
+    assert {"T1", "T2"}.issubset(tech["option_score_summary"])
     assert tech["implementation_invariants"]
     assert tech["expert_review_checklist"]
+    assert tech["requirement_breakdown"]
+    assert tech["code_entrypoint_confidence"]["level"] in {"high", "medium", "low"}
+    assert tech["field_api_permission_impact"]
+    assert {"data_model_design", "table_schema_changes", "system_interaction_sequence", "mq_interactions", "cache_strategy", "transaction_consistency", "observability_design"}.issubset(tech)
     assert tech["decision_confidence"]["level"] in {"high", "medium"}
     assert tech["selected_solution"]["rejected_alternative_reasoning"]
     assert arch["schema"] == "codex-architecture-design-v1"
     assert arch["architecture_options"]
-    assert arch["architecture_fit_matrix"]
+    assert all({"when_to_choose", "integration_impact", "deployment_impact", "rollback_complexity", "risk_controls"}.issubset(item) for item in arch["architecture_options"])
+    assert all({"criterion", "weight", "scores", "winner", "reason"}.issubset(item) for item in arch["architecture_fit_matrix"])
+    assert {"A1", "A2"}.issubset(arch["architecture_score_summary"])
     assert arch["architecture_invariants"]
     assert arch["expert_review_checklist"]
+    assert arch["requirement_breakdown"]
+    assert "code_entrypoint_confidence" in arch
     assert arch["architecture_decision_confidence"]["level"] in {"high", "medium"}
     assert arch["selected_architecture"]["rejected_alternative_reasoning"]
     assert arch["repo_responsibilities"][0]["role"] == "modify"
+
+
+def test_design_options_are_generated_from_impact_surface() -> None:
+    spec = spec_governor.normalize(
+        "REQ-DYNAMIC",
+        "Renewal operations",
+        "\n".join([
+            "Operator updates renewal list UI.",
+            "AC: renewal month field is shown.",
+            "AC: tenant filter applies to renewal detail query.",
+            "AC: unauthorized role cannot remove devices.",
+            "AC: cancelled orders are hidden.",
+            "AC: batch import non-renewal devices.",
+        ]),
+    )
+    spec["impact_surface"] = [
+        {"area": "ui"},
+        {"area": "api"},
+        {"area": "data"},
+        {"area": "permission"},
+        {"area": "business_flow"},
+    ]
+    tech = technical_design.render(spec)
+    arch = architecture_design.render(spec, tech)
+    option_names = " ".join(str(item.get("name")) for item in tech["solution_options"])
+    arch_names = " ".join(str(item.get("name")) for item in arch["architecture_options"])
+    assert len(tech["solution_options"]) >= 5
+    assert "前后端权限一致性方案" in option_names
+    assert "前后端分层协同方案" in option_names
+    assert "按业务子域拆分交付方案" in option_names
+    tech_criteria = {str(item.get("criterion")) for item in tech["option_comparison_matrix"]}
+    assert {"越权风险控制", "前后端协同清晰度", "子域可拆分性"}.issubset(tech_criteria)
+    assert {"越权风险控制", "前后端协同清晰度", "子域可拆分性"}.issubset(set(tech["selected_solution"]["decision_criteria"]))
+    assert len(arch["architecture_options"]) >= 4
+    assert "权限闭环" in arch_names
+    assert "业务子域" in arch_names
+    arch_criteria = {str(item.get("criterion")) for item in arch["architecture_fit_matrix"]}
+    assert {"权限闭环完整性", "子域发布可控性"}.issubset(arch_criteria)
+    assert {"权限闭环完整性", "子域发布可控性"}.issubset(set(arch["selected_architecture"]["decision_criteria"]))
+    assert tech["selected_solution"]["selected_option_id"] != "T1"
+    assert arch["selected_architecture"]["selected_option_id"] != "A1"
+
+
+def test_technical_design_adds_expert_data_mq_cache_and_sequence_sections() -> None:
+    spec = spec_governor.normalize(
+        "REQ-EXPERT-DESIGN",
+        "Payment failure events",
+        "\n".join([
+            "Req: Add database migration for payment failure reason and retry count.",
+            "Req: Publish MQ topic payment.failure.changed when retry status changes.",
+            "Req: Add API endpoint for admin dashboard query.",
+            "Req: Cache high-frequency failure statistics for dashboard display.",
+            "Rule: settlement and payment consistency must be preserved.",
+            "AC: table has failure_reason and retry_count fields.",
+            "AC: producer sends topic after transaction commits.",
+            "AC: dashboard reads cached statistics and falls back to source query.",
+        ]),
+    )
+    spec["impact_surface"] = [{"area": "data"}, {"area": "api"}, {"area": "performance"}]
+    tech = technical_design.render(spec)
+
+    assert tech["data_model_design"]["applicable"] is True
+    assert tech["data_model_design"]["entities"]
+    assert tech["table_schema_changes"]
+    assert {"table", "field", "type", "nullable", "default", "migration", "rollback"}.issubset(tech["table_schema_changes"][0])
+    assert tech["system_interaction_sequence"]["applicable"] is True
+    assert {"participants", "sequence", "timeout_retry", "idempotency", "consistency"}.issubset(tech["system_interaction_sequence"])
+    assert tech["mq_interactions"][0]["applicable"] is True
+    assert {"producer", "consumer", "topic_or_queue", "trigger", "payload_fields", "idempotency_key", "retry_policy", "dead_letter_or_compensation"}.issubset(tech["mq_interactions"][0])
+    assert tech["cache_strategy"]["applicable"] is True
+    assert {"decision", "key_design", "value_shape", "ttl", "invalidation", "consistency_risk"}.issubset(tech["cache_strategy"])
+    assert tech["transaction_consistency"]["applicable"] is True
+    assert {"boundary", "idempotency", "compensation", "rollback"}.issubset(tech["transaction_consistency"])
+    assert {"logs", "metrics", "traces", "alerts"}.issubset(tech["observability_design"])
+
+
+def test_technical_design_rejects_cache_for_strong_consistency_terms() -> None:
+    spec = spec_governor.normalize(
+        "REQ-NO-CACHE",
+        "Settlement payment consistency",
+        "Req: cache payment settlement status only if it remains strongly consistent. AC: settlement query returns committed status only.",
+    )
+    tech = technical_design.render(spec)
+    assert tech["cache_strategy"]["applicable"] is True
+    assert tech["cache_strategy"]["decision"] == "no_cache"
+
+
+def test_config_files_do_not_become_business_contracts() -> None:
+    spec = spec_governor.normalize("REQ-CONFIG-ROUTE", "UI collapse", "设备页面最近批量处理默认折叠。AC: 进入页面后最近批量处理区域默认折叠。")
+    understanding = {
+        "repository_analysis": {"project": "web", "entrypoint_hints": ["src/views/device/device.vue"], "top_level_directories": ["src"]},
+        "api_surface": {"routes": [{"method": "", "route": "/", "file": "vue.config.js"}]},
+        "code_index": {"files": [{"path": "src/views/device/device.vue", "summary": "device page"}]},
+        "dependency_surface": {"test_command_hints": ["npm run build:test"]},
+    }
+    tech = technical_design.render(spec, understanding)
+    arch = architecture_design.render(spec, tech, understanding)
+    assert all("vue.config.js" not in str(item.get("contract")) for item in tech["api_contracts"])
+    assert all("vue.config.js" not in str(item.get("contract")) for item in arch["cross_repo_contracts"])
+
+
+def test_design_options_do_not_force_data_or_permission方案_when_irrelevant() -> None:
+    spec = spec_governor.normalize("REQ-SIMPLE", "Menu click tracking", "Menu click should be tracked. AC: click event is emitted.")
+    spec["impact_surface"] = [{"area": "ui"}]
+    tech = technical_design.render(spec)
+    option_names = " ".join(str(item.get("name")) for item in tech["solution_options"])
+    assert len(tech["solution_options"]) == 2
+    assert "字段" not in option_names
+    assert "权限一致性" not in option_names
 
 
 def test_project_understanding_informs_design_and_architecture() -> None:
@@ -233,6 +376,7 @@ def test_project_understanding_informs_design_and_architecture() -> None:
         assert tech["project_context"]["project"] == "basic-web-service"
         assert "app/main.py" in tech["project_context"]["read_first"]
         assert tech["module_decomposition"][0]["module"] != "target module to be confirmed"
+        assert tech["code_entrypoint_confidence"]["selected_entrypoint"] != "target module to be confirmed"
         assert arch["repo_responsibilities"][0]["repo"] == "basic-web-service"
         assert arch["repo_responsibilities"][0]["repo_path"].endswith("examples/synthetic-repos/basic-web-service")
 
@@ -365,6 +509,7 @@ def run_all() -> None:
     test_spec_normalize_ready_for_design()
     test_spec_blocks_open_questions()
     test_spec_extracts_multiple_requirements_scope_risks_and_questions()
+    test_spec_extracts_numbered_acceptance_section_from_prd()
     test_spec_adds_expert_quality_fields()
     test_spec_handles_one_line_request_with_inferred_acceptance()
     test_spec_handles_long_prd_without_collapsing_traceability()
@@ -373,6 +518,8 @@ def run_all() -> None:
     test_spec_blocks_conflicting_permission_rules()
     test_spec_extracts_state_transitions()
     test_technical_and_architecture_design_render_core_sections()
+    test_design_options_are_generated_from_impact_surface()
+    test_config_files_do_not_become_business_contracts()
     test_project_understanding_informs_design_and_architecture()
     test_delivery_runner_reports_next_stage()
     test_delivery_runner_allows_implementation_when_pre_edit_gates_pass()

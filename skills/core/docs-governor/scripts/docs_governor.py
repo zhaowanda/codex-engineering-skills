@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,6 +33,28 @@ def load_docs_config_module() -> Any:
     assert spec and spec.loader
     spec.loader.exec_module(module)
     return module
+
+
+def load_docs_i18n_module() -> Any:
+    path = Path(__file__).resolve().parent / "docs_i18n.py"
+    spec = importlib.util.spec_from_file_location("docs_i18n", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_doc_model_module() -> Any:
+    path = Path(__file__).resolve().parent / "doc_model.py"
+    spec = importlib.util.spec_from_file_location("doc_model", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+DOCS_I18N = load_docs_i18n_module()
+DOC_MODEL = load_doc_model_module()
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
@@ -137,9 +160,13 @@ def text(value: Any, default: str = "TBD") -> str:
     return str(value)
 
 
+def human_value(value: Any, language: str = "en", default: str | None = None) -> str:
+    return DOCS_I18N.render_value(value, language, default)
+
+
 ZH_DEFAULT_PHRASES = {
-    "target module to be confirmed": "待确认目标模块",
-    "existing entrypoint to be confirmed": "待确认现有入口",
+    "target module to be confirmed": "需结合代码核对的责任模块",
+    "existing entrypoint to be confirmed": "需结合代码核对的现有入口",
     "existing producer": "现有生产方",
     "preserve existing contracts": "保持现有契约",
     "preserve existing permission and validation behavior": "保持现有权限与校验行为",
@@ -166,18 +193,18 @@ ZH_DEFAULT_PHRASES = {
     "start with owner-repo scoped architecture": "先采用责任仓库内架构",
     "cross-repo contract change": "跨仓契约变更",
     "minimize coupling and release risk": "降低耦合和发布风险",
-    "Read 待确认目标模块 and adjacent tests before editing.": "修改前阅读待确认目标模块及相邻测试。",
-    "Confirm 待确认目标模块 scope against reviewed design.": "按已评审设计确认待确认目标模块范围。",
-    "Run validation for 待确认目标模块 and mapped acceptance checks.": "运行待确认目标模块校验和已映射的验收检查。",
-    "Capture command logs and acceptance evidence for 待确认目标模块.": "采集待确认目标模块的命令日志和验收证据。",
-    "Verify rollback path for 待确认目标模块.": "验证待确认目标模块的回滚路径。",
-    "inspected-files: 待确认目标模块": "已检查文件：待确认目标模块",
-    "scope-confirmation for 待确认目标模块": "待确认目标模块范围确认",
-    "git diff for 待确认目标模块": "待确认目标模块 git diff",
-    "rollback verification for 待确认目标模块": "待确认目标模块回滚验证",
-    "待确认目标模块 behavior and dependencies understood": "已理解待确认目标模块行为和依赖",
+    "Read 待确认目标模块 and adjacent tests before editing.": "修改前阅读责任模块及相邻测试。",
+    "Confirm 待确认目标模块 scope against reviewed design.": "按已评审设计核对责任模块范围。",
+    "Run validation for 待确认目标模块 and mapped acceptance checks.": "运行责任模块校验和已映射的验收检查。",
+    "Capture command logs and acceptance evidence for 待确认目标模块.": "采集责任模块的命令日志和验收证据。",
+    "Verify rollback path for 待确认目标模块.": "验证责任模块的回滚路径。",
+    "inspected-files: 待确认目标模块": "已检查文件：责任模块",
+    "scope-confirmation for 待确认目标模块": "责任模块范围核对",
+    "git diff for 待确认目标模块": "责任模块 git diff",
+    "rollback verification for 待确认目标模块": "责任模块回滚验证",
+    "待确认目标模块 behavior and dependencies understood": "已理解责任模块行为和依赖",
     "scope still matches architecture responsibilities": "范围仍匹配架构职责",
-    "diff only touches 待确认目标模块": "diff 仅触达待确认目标模块",
+    "diff only touches 待确认目标模块": "diff 仅触达责任模块",
     "required tests pass": "必需测试通过",
     "evidence artifacts are attached to delivery": "证据产物已附加到交付记录",
     "rollback owner and steps are known": "已明确回滚责任方和步骤",
@@ -203,8 +230,8 @@ ZH_DEFAULT_PHRASES = {
     "no API request expected": "预计无 API 请求变更",
     "no API response change expected": "预计无 API 响应变更",
     "no API error contract change expected": "预计无 API 错误契约变更",
-    "read through target module to be confirmed": "通过待确认目标模块读取",
-    "write through target module to be confirmed only if requirement changes state": "仅在需求涉及状态变更时，通过待确认目标模块写入",
+    "read through target module to be confirmed": "通过责任模块读取",
+    "write through target module to be confirmed only if requirement changes state": "仅在需求涉及状态变更时，通过责任模块写入",
     "none unless design update requires it": "除非设计更新要求，否则无需迁移",
     "preserve existing permission boundary": "保持现有权限边界",
     "unauthorized user cannot access changed behavior": "未授权用户不能访问变更后的行为",
@@ -225,7 +252,234 @@ ZH_DEFAULT_PHRASES = {
     "functional_test": "功能测试",
     "permission_negative_test": "权限反向测试",
     "export_evidence": "导出证据",
+    "npm run build:test evidence": "npm run build:test 证据",
     "test evidence": "测试证据",
+    "Read": "阅读",
+    "minimal": "影响极小",
+    "depends on implementation": "取决于实现",
+    "explicit contract": "契约清晰",
+    "coordination and compatibility risk": "协同和兼容性风险",
+    "contract, integration, and regression tests": "契约、集成和回归测试",
+    "depends on new calls": "取决于新增调用",
+    "rollback simplicity": "回滚简单性",
+    "test surface": "测试面",
+    "contract safety": "契约安全",
+    "ownership": "责任归属",
+    "compatibility": "兼容性",
+    "release coordination": "发布协同",
+    "contract risk": "契约风险",
+    "Deploy": "发布",
+    " only; confirm no provider rollout is needed.": "；确认无需生产方发布。",
+    "revert ": "回滚 ",
+    "Existing owner module can satisfy acceptance criteria": "现有责任模块可满足验收标准",
+    "No confirmed contract or schema change is required": "无需已确认的契约或结构变更",
+    "Add the smallest behavior change inside the owner module": "在责任模块内加入最小行为变更",
+    "Keep existing validation, permission, and error paths intact": "保持现有校验、权限和错误路径不变",
+    "low coupling": "低耦合",
+    "small blast radius": "影响面小",
+    "simple rollback": "回滚简单",
+    "depends on existing boundaries": "依赖现有边界",
+    "may need revision if code inspection reveals missing extension point": "如果代码检查发现缺少扩展点，可能需要修订",
+    "edit permit limits changed files": "编辑许可限制变更文件范围",
+    "regression tests cover existing behavior": "回归测试覆盖既有行为",
+    "compatibility evidence before API/data change": "API 或数据变更前必须提供兼容性证据",
+    "unit/integration/browser evidence as applicable": "按影响范围提供单元、集成或浏览器证据",
+    "minimal; no extra dependency call by default": "影响极小；默认不增加额外依赖调用",
+    "single owner artifact rollout": "单一责任制品发布",
+    "Multiple modules need the behavior": "多个模块需要该行为",
+    "Existing owner boundary would duplicate rules or hide a contract change": "现有责任边界会导致规则重复或隐藏契约变更",
+    "Define new abstraction or contract": "定义新的抽象或契约",
+    "Migrate owner module to call the new boundary": "迁移责任模块调用新边界",
+    "Add contract and regression tests for old and new paths": "为新旧路径补充契约测试和回归测试",
+    "clear extension point": "扩展点清晰",
+    "better long-term reuse when repeated changes are expected": "适合预期存在重复变更时的长期复用",
+    "larger change and migration risk": "变更范围和迁移风险更大",
+    "more integration and rollback coordination": "需要更多集成和回滚协同",
+    "contract freeze before consumers change": "消费方变更前冻结契约",
+    "compatibility matrix for old consumers": "为旧消费方建立兼容性矩阵",
+    "ordered rollback plan": "有序回滚计划",
+    "contract and regression tests": "契约测试和回归测试",
+    "contract test evidence": "契约测试证据",
+    "regression test evidence": "回归测试证据",
+    "depends on implementation; review additional calls, queries, and serialization cost": "取决于实现；需评估新增调用、查询和序列化成本",
+    "may require coordinated provider/consumer rollout": "可能需要生产方和消费方协同发布",
+    "revert contract and consumers in dependency order": "按依赖顺序回滚契约和消费方",
+    "correctness": "正确性",
+    "blast_radius": "影响面",
+    "contract_clarity": "契约清晰度",
+    "test_surface": "测试面",
+    "future_extensibility": "未来扩展性",
+    "Both can satisfy acceptance if contracts are understood.": "在契约已理解的前提下，两者都可满足验收。",
+    "Scoped owner-module change touches fewer surfaces.": "责任模块内的小范围变更触达面更少。",
+    "New abstraction is clearer when repeated extension is proven.": "当确认需要重复扩展时，新抽象更清晰。",
+    "Single owner rollback is simpler.": "单一责任方回滚更简单。",
+    "Smaller test surface unless architecture requires cross-boundary change.": "除非架构要求跨边界变更，否则测试面更小。",
+    "Abstraction is better only when future changes are likely.": "只有未来变更概率较高时，抽象才更合适。",
+    "Weighted qualitative score; higher is preferred unless code inspection invalidates assumptions.": "加权定性评分；除非代码检查推翻假设，否则分数越高越优先。",
+    "Default to smallest safe change because it has lower blast radius, simpler rollback, and adequate correctness until code inspection proves abstraction is needed.": "默认选择最小安全变更，因为它影响面更小、回滚更简单，并且在代码检查证明需要抽象前具备足够正确性。",
+    "Less future extensibility than a new abstraction": "未来扩展性弱于新增抽象",
+    "Higher coordination, contract, and rollback cost unless code inspection proves the extension point is required.": "除非代码检查证明必须引入扩展点，否则协同、契约和回滚成本更高。",
+    "Owner repo can satisfy the requirement": "责任仓库可满足需求",
+    "Producer/consumer contracts can remain compatible": "生产方/消费方契约可保持兼容",
+    "Rollback should stay single-repo": "回滚应保持单仓库范围",
+    "No new cross-repo integration sequence unless code inspection proves a contract change.": "除非代码检查证明需要契约变更，否则不新增跨仓集成顺序。",
+    "lower release coordination": "发布协同成本更低",
+    "requires owner confirmation": "需要责任方确认",
+    "less extensible if this behavior becomes shared": "如果该行为后续共享，扩展性较弱",
+    "repo responsibility review": "仓库职责评审",
+    "contract compatibility confirmation": "契约兼容性确认",
+    "single-repo rollback evidence": "单仓库回滚证据",
+    "repo tests and acceptance evidence": "仓库测试和验收证据",
+    "minimal; no new remote call by default": "影响极小；默认不新增远程调用",
+    "Provider contract must change": "生产方契约必须变更",
+    "Multiple consumers need the same behavior": "多个消费方需要相同行为",
+    "Single owner repo would duplicate source-of-truth logic": "单一责任仓库会重复实现事实源逻辑",
+    "Requires contract freeze, provider-consumer integration tests, and ordered merge/release.": "需要契约冻结、生产方/消费方集成测试，以及有序合并和发布。",
+    "Deploy provider before consumers or use backward-compatible dual-read/dual-write strategy.": "先发布生产方再发布消费方，或采用向后兼容的双读/双写策略。",
+    "better shared ownership when multiple consumers are affected": "多个消费方受影响时共享责任更清晰",
+    "requires integration evidence before release": "发布前需要集成证据",
+    "cross_repo_execution_graph": "跨仓执行图",
+    "contract freeze point": "契约冻结点",
+    "consumer compatibility test": "消费方兼容性测试",
+    "depends on new calls and payload shape; review latency and serialization cost": "取决于新增调用和报文结构；需评估延迟和序列化成本",
+    "data correctness is explicit": "数据正确性更明确",
+    "rollback risk is reviewed before implementation": "实现前完成回滚风险评审",
+    "ownership_clarity": "责任清晰度",
+    "release_coordination": "发布协同",
+    "contract_risk": "契约风险",
+    "A1 starts from known owner boundary.": "A1 从已知责任边界出发。",
+    "A1 avoids multi-repo ordered release.": "A1 避免多仓有序发布。",
+    "Preserving existing contracts is safer by default.": "默认保持现有契约更稳妥。",
+    "A1 rollback is a single repo revert.": "A1 回滚是单仓库 revert。",
+    "A1 回滚是单仓库 revert。": "A1 回滚是单仓库回滚。",
+    "A2 is stronger when repeated shared behavior is expected.": "当预期存在重复共享行为时，A2 更强。",
+    "Weighted qualitative score; higher is preferred unless repo analysis proves contract change is required.": "加权定性评分；除非仓库分析证明必须变更契约，否则分数越高越优先。",
+    "Default to smallest owner-boundary change because it scores better on ownership clarity, release coordination, contract risk, and rollback.": "默认选择最小责任边界变更，因为它在责任清晰度、发布协同、契约风险和回滚方面得分更高。",
+    "Less future extensibility than a shared contract change": "未来扩展性弱于共享契约变更",
+    "Cross-repository contract work adds compatibility, integration, and release-order risk unless the existing owner boundary cannot satisfy the requirement.": "除非现有责任边界无法满足需求，否则跨仓契约变更会增加兼容性、集成和发布顺序风险。",
+    "Owner-module implementation for ": "在现有责任模块内完成：",
+    "Contract-aware service/API adjustment": "通过既有接口/服务契约承接业务规则",
+    "Data-model explicit handling": "先明确字段、默认值和历史数据口径",
+    "Single-owner architecture in ": "以单一责任仓库推进：",
+    "Provider-consumer contract architecture": "以生产方/消费方契约为架构边界推进",
+    "Data-first release architecture": "以数据口径和发布顺序为优先边界推进",
+    "User-visible behavior matches:": "验证：",
+    "regression coverage for": "回归验证：",
+    "cross-component integration remains compatible": "跨组件/跨仓集成契约保持兼容",
+    "browser acceptance for changed UI": "浏览器验收：变更页面交互和展示符合预期",
+    "integration test evidence": "集成测试证据",
+    "regression evidence": "回归测试证据",
+    "acceptance_fit": "验收适配度",
+    "contract_safety": "契约安全性",
+    "data_correctness": "数据正确性",
+    "testability": "测试可证明性",
+    "rollback_control": "回滚可控性",
+    "ownership_clarity": "责任清晰度",
+    "data_safety": "数据安全性",
+    "bind allowed_files to selected entrypoints": "将允许修改文件限制在已选责任入口内",
+    "map every acceptance criterion to evidence": "每条验收标准都绑定到证据",
+    "re-run design review if inspection finds a different owner": "如果代码检查发现责任入口不同，重新进行设计评审",
+    "Run mapped tests for": "运行已映射测试：",
+    "and acceptance evidence": "并采集验收证据",
+    "bounded to existing flow unless data/API slice adds extra queries or calls": "默认限制在现有流程内；若数据/API 切片新增查询或调用则需单独评估",
+    "changes in": "变更：",
+    "and redeploy previous artifact": "并重新部署上一版本制品",
+    "single owner module rollout": "单一责任模块发布",
+    "contract compatibility matrix": "契约兼容性矩阵",
+    "old-consumer regression evidence": "旧消费方回归证据",
+    "ordered rollback if provider and consumer both change": "生产方和消费方都变更时按依赖顺序回滚",
+    "contract, integration, and regression evidence": "契约、集成和回归证据",
+    "review route/query latency and payload growth": "评估路由/查询延迟和报文增长",
+    "rollback consumers before provider if a contract change is deployed": "如果发布了契约变更，先回滚消费方再回滚生产方",
+    "may require provider/consumer coordination": "可能需要生产方/消费方协同",
+    "migration plan or explicit no-migration proof": "迁移方案或无需迁移证明",
+    "old-data regression evidence": "历史数据回归证据",
+    "rollback data-risk review": "数据回滚风险评审",
+    "data compatibility and regression evidence": "数据兼容性和回归证据",
+    "review added query/filter/index cost": "评估新增查询、筛选或索引成本",
+    "may require data/config release step": "可能需要数据或配置发布步骤",
+    "permission negative evidence": "权限反向证据",
+    "role/data-scope fixture": "角色/数据范围测试数据",
+    "server-side authorization confirmation": "服务端鉴权确认",
+    "permission positive and negative evidence": "权限正向和反向证据",
+    "no material performance impact unless permission lookup changes": "除非权限查询路径变化，否则无显著性能影响",
+    "contract compatibility evidence": "契约兼容性证据",
+    "browser acceptance evidence": "浏览器验收证据",
+    "integration regression evidence": "集成回归证据",
+    "contract, browser, and integration evidence": "契约、浏览器和集成证据",
+    "review query/filter and render cost together": "同时评估查询/筛选和渲染成本",
+    "rollback frontend first, then backend contract change if compatibility fails": "兼容失败时先回滚前端，再回滚后端契约变更",
+    "may require backend-compatible release before frontend rollout": "可能需要后端兼容发布后再发布前端",
+    "subdomain traceability matrix": "子域追踪矩阵",
+    "per-domain acceptance evidence": "子域级验收证据",
+    "per-domain rollback note": "子域级回滚说明",
+    "per-subdomain functional and regression evidence": "子域级功能和回归证据",
+    "review each subdomain independently": "逐个子域评估",
+    "can be staged by subdomain when release policy allows": "发布策略允许时可按子域分阶段发布",
+    "owner repo tests plus mapped acceptance evidence": "责任仓库测试和已映射验收证据",
+    "allowed_files bound to module topology": "允许修改文件绑定到模块拓扑",
+    "acceptance evidence per business slice": "每个业务切片的验收证据",
+    "limited to owner repo unless technical option adds remote calls or data migration": "默认限制在责任仓库内；若技术方案新增远程调用或数据迁移则需单独评估",
+    "consumer compatibility evidence": "消费方兼容性证据",
+    "contract, provider, consumer, and regression evidence": "契约、生产方、消费方和回归证据",
+    "review payload/query/latency impact across the boundary": "评估跨边界报文、查询和延迟影响",
+    "rollback consumers before provider if compatibility fails": "兼容失败时先回滚消费方再回滚生产方",
+    "migration strategy": "迁移策略",
+    "data compatibility and regression evidence": "数据兼容性和回归证据",
+    "role fixture review": "角色测试数据评审",
+    "server authorization confirmation": "服务端鉴权确认",
+    "permission positive/negative and regression evidence": "权限正反向和回归证据",
+    "review permission lookup cost only if authorization path changes": "仅在鉴权路径变化时评估权限查询成本",
+    "subdomain delivery plan": "子域交付计划",
+    "staged rollback note": "分阶段回滚说明",
+    "per-domain acceptance and regression evidence": "子域级验收和回归证据",
+    "review each subdomain's query/render cost separately": "分别评估每个子域的查询和渲染成本",
+    "dual contract tests": "双契约测试",
+    "gray switch rollback": "灰度开关回滚",
+    "old consumer evidence": "旧消费方证据",
+    "old/new contract and gray release evidence": "新旧契约和灰度发布证据",
+    "review dual-read or compatibility branch cost": "评估双读或兼容分支成本",
+    "turn off gray switch first, then rollback producer/consumer if needed": "先关闭灰度开关，必要时再回滚生产方/消费方",
+    "Scores are weighted from requirement-specific criteria; selected option should match the highest total unless the design records an explicit exception.": "评分按需求特定维度加权；除非设计明确记录例外，通常选择总分最高方案。",
+    "Architecture scores are weighted from ownership, contract, release, observability, and rollback evidence.": "架构评分按责任归属、契约、发布、可观测性和回滚证据加权。",
+    "confirm fields touched by this slice": "确认该切片涉及的字段",
+    "no field change confirmed": "未确认字段变更",
+    "confirm existing route or contract for this slice": "确认该切片对应的既有路由或契约",
+    "no API change confirmed": "未确认 API 变更",
+    "preserve existing permission boundary": "保持现有权限边界",
+    "preserve existing permission; add negative case if role/data scope changes": "保持现有权限边界；如角色或数据范围变化则补充反向用例",
+    "preserve existing 权限测试; add negative case if role/data scope changes": "保持现有权限边界；如角色或数据范围变化则补充反向用例",
+    "Business objective is missing; design may optimize the wrong outcome.": "缺少业务目标，设计可能优化到错误结果。",
+    "Acceptance is inferred rather than explicitly provided.": "验收标准为推断结果，需确认是否明确来自需求。",
+    "High-impact requirement should declare explicit delivery or product risks.": "高影响需求应明确交付或产品风险。",
+    "API impact should state backward compatibility or consumer migration constraints.": "API 影响应说明向后兼容或消费方迁移约束。",
+    "revise design or collect evidence": "修订设计或补充证据",
+    "review query/filter/index changes": "评估查询、筛选和索引变化",
+    "rollback code first and follow data rollback/migration policy": "先回滚代码，再按数据回滚或迁移策略处理",
+    "rollback UI visibility and authorization changes together": "同时回滚 UI 可见性和鉴权变更",
+    "per-domain evidence": "子域级证据",
+    "rollback affected subdomain first when coupling allows; otherwise revert full requirement branch": "耦合允许时优先回滚受影响子域；否则回滚整个需求分支",
+    "rollback affected subdomain first when coupling allows; otherwise 回滚 full requirement branch": "耦合允许时优先回滚受影响子域；否则回滚整个需求分支",
+    "none": "无",
+    "provider/consumer owners": "生产方/消费方负责人",
+    "consumer-repo": "消费方仓库",
+    "strategy_summary": "测试策略摘要",
+    "Validate acceptance criteria for": "验证验收标准：",
+    "detailed cases belong in test_design.json.": "详细用例见 test_design.json。",
+    "fixture_or_factory": "测试夹具/工厂方法",
+    "upload_fixture_file": "上传合成文件",
+    "sql_seed": "SQL 种子数据",
+    "synthetic fixture": "合成测试数据",
+    "synthetic file": "合成测试文件",
+    "authorized-user": "授权用户",
+    "restricted-user": "受限用户",
+    "UI:": "页面路径：",
+    "API:": "接口路径：",
+    "DATA:": "数据路径：",
+    "PERMISSION:": "权限路径：",
+    "INTEGRATION:": "集成路径：",
+    "BUSINESS:": "业务路径：",
+    " -> ": " -> ",
 }
 
 
@@ -261,14 +515,128 @@ def zh_text(value: Any, default: str = "待补充") -> str:
         "evidence": "证据",
         "rollback": "回滚",
         "functional": "功能测试",
+        "regression": "回归测试",
+        "frontend": "前端验收",
+        "integration": "集成测试",
+        "api_test": "接口测试",
+        "fixture_or_factory": "测试夹具/工厂方法",
+        "upload_fixture_file": "上传合成文件",
+        "sql_seed": "SQL 种子数据",
+        "synthetic fixture": "合成测试数据",
+        "synthetic file": "合成测试文件",
+        "synthetic": "合成数据",
+        "authorized-user": "授权用户",
+        "restricted-user": "受限用户",
+        "UI:": "页面路径：",
+        "API:": "接口路径：",
+        "DATA:": "数据路径：",
+        "PERMISSION:": "权限路径：",
+        "INTEGRATION:": "集成路径：",
+        "BUSINESS:": "业务路径：",
         "positive": "正向用例",
         "negative": "反向用例",
         "modify": "修改",
         "false": "否",
         "true": "是",
         "TBD": default,
+        "待确认目标模块": "需结合代码核对的责任模块",
+        "target module to be confirmed": "需结合代码核对的责任模块",
+        "before implementation": "实施前",
+        "primary code entrypoint is generic or weakly matched; inspect project manually before implementation": "主代码入口匹配较弱，实施前需人工核对项目代码",
+        "inspect matched feature modules and update design before implementation": "实施前核对匹配到的功能模块并更新设计",
+        "write through": "通过",
+        "only if this slice changes state": "仅在该子需求改变状态时写入",
+        "unless this slice changes schema/data backfill": "除非该子需求改变表结构或数据回填",
+        "code rollback plus schema/data rollback plan if migration is applied": "如执行迁移，需配套代码回滚和结构/数据回滚方案",
+        "code rollback plus data compatibility/compensation plan": "代码回滚，并配套数据兼容或补偿方案",
+        "code rollback plus data 兼容性/compensation plan": "代码回滚，并配套数据兼容或补偿方案",
+        "no-migration evidence": "无迁移证据",
+        "owns code changes": "负责代码变更",
     }
-    return replacements.get(rendered, translate_default_zh_phrase(rendered))
+    rendered = translate_default_zh_phrase(rendered)
+    for source, target in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        rendered = rendered.replace(source, target)
+    return DOCS_I18N.translate_text(rendered, "zh")
+
+
+def zh_inline_list(value: Any, default: str = "待补充") -> str:
+    values = as_list(value)
+    if not values:
+        return default
+    rendered: list[str] = []
+    for item in values:
+        if isinstance(item, dict):
+            option = item.get("option_id") or item.get("id") or item.get("name")
+            reason = item.get("reason") or item.get("summary") or item.get("message")
+            if option and reason:
+                rendered.append(f"`{text(option)}`：{zh_text(reason)}")
+            else:
+                rendered.append(zh_text(item))
+        else:
+            rendered.append(zh_text(item))
+    return "；".join(item for item in rendered if item) or default
+
+
+def zh_option_name(item: dict[str, Any], option_kind: str) -> str:
+    option_id = text(item.get("option_id"), "")
+    name = str(item.get("name") or "")
+    if name.startswith("Owner-module implementation for "):
+        return f"在现有责任模块内完成：{name.removeprefix('Owner-module implementation for ')}"
+    if name == "Contract-aware service/API adjustment":
+        return "通过既有接口/服务契约承接业务规则"
+    if name == "Data-model explicit handling":
+        return "先明确字段、默认值和历史数据口径"
+    if name.startswith("Single-owner architecture in "):
+        return f"以 `{name.removeprefix('Single-owner architecture in ')}` 为单一责任边界推进"
+    if name == "Provider-consumer contract architecture":
+        return "以生产方/消费方契约为架构边界推进"
+    if name == "Data-first release architecture":
+        return "以数据口径和发布顺序为优先边界推进"
+    if option_kind == "technical" and option_id == "T1" and name:
+        return zh_text(name)
+    if option_kind == "architecture" and option_id == "A1" and name:
+        return zh_text(name)
+    return zh_text(name)
+
+
+def zh_decision_reason(selected: dict[str, Any], options: list[Any], option_kind: str) -> str:
+    selected_id = text(selected.get("selected_option_id"), "")
+    raw = str(selected.get("selection_reason") or "")
+    selected_option = next((item for item in options if isinstance(item, dict) and item.get("option_id") == selected_id), {})
+    selected_name = zh_option_name(selected_option, option_kind) if isinstance(selected_option, dict) else selected_id
+    if raw.startswith("Weighted comparison selects"):
+        owner = raw.split(" for `", 1)[1].split("`", 1)[0] if " for `" in raw else ""
+        summary = raw.rsplit(" for: ", 1)[-1].rstrip(".") if " for: " in raw else ""
+        return (
+            f"选择 {selected_id}（{selected_name}），因为当前证据显示 `{owner or '责任入口'}` 是最清晰的实现边界，"
+            f"「{summary or '本需求'}」可以在现有模块内闭环，不需要先扩大接口、数据模型或跨仓契约。"
+            "该选择测试路径最短，回滚也最容易控制。"
+        )
+    if raw.startswith("Weighted architecture comparison selects"):
+        owner = raw.split(" for `", 1)[1].split("`", 1)[0] if " for `" in raw else ""
+        summary = raw.rsplit(" for: ", 1)[-1].rstrip(".") if " for: " in raw else ""
+        return (
+            f"选择 {selected_id}（{selected_name}），因为当前需求「{summary or '本需求'}」的主要责任可以收敛在 `{owner or '责任仓库'}`，"
+            "暂未看到必须先扩大为跨仓契约或数据优先发布的证据。该架构发布顺序更短，回滚责任更清晰。"
+        )
+    return zh_text(raw)
+
+
+def zh_rejected_reason(value: Any, options: list[Any]) -> str:
+    if isinstance(value, dict):
+        option_id = text(value.get("option_id"), "")
+        raw = str(value.get("reason") or "")
+        option = next((item for item in options if isinstance(item, dict) and item.get("option_id") == option_id), {})
+        name = zh_option_name(option, "technical") if isinstance(option, dict) else option_id
+        if "Rejected for this pass" in raw:
+            if option_id in {"T2", "A2"}:
+                return f"`{option_id}`：暂不选择{name}，因为当前证据还不足以证明必须扩大到接口/契约或生产方/消费方协同；若代码检查发现契约字段、响应语义或多个消费方必须同步变化，再切换到该方案。"
+            if option_id in {"T3", "A3"}:
+                return f"`{option_id}`：暂不选择{name}，因为当前证据还不足以证明数据口径、历史数据或迁移/回滚风险是主导约束；若实现前发现这些因素会影响验收，再切换到该方案。"
+            return f"`{option_id}`：暂不选择{name}，因为当前证据下交付边界、测试或回滚成本高于选中方案。"
+        if option_id and raw:
+            return f"`{option_id}`：{zh_text(raw)}"
+    return zh_text(value)
 
 
 def bullet_lines(items: list[str], empty: str = "TBD") -> str:
@@ -285,8 +653,28 @@ def section_paragraph(title: str, lines: list[str], empty: str) -> str:
 def summarize_dict_item(item: dict[str, Any], fields: list[str], language: str = "en") -> str:
     values = [str(item.get(field)) for field in fields if item.get(field) not in (None, "", [], {})]
     if values:
-        return "；".join(values) if language == "zh" else "; ".join(values)
+        return "；".join(zh_text(value) for value in values) if language == "zh" else "; ".join(values)
     return zh_text(item, "待补充") if language == "zh" else text(item)
+
+
+def clean_acceptance_text(value: Any, language: str = "en") -> str:
+    rendered = text(value, "acceptance")
+    for prefix in ["User-visible behavior matches:", "user-visible behavior matches:"]:
+        if rendered.startswith(prefix):
+            rendered = rendered[len(prefix):].strip()
+    if language == "zh" and rendered.startswith("需求："):
+        rendered = rendered[len("需求："):].strip()
+    return zh_text(rendered) if language == "zh" else rendered
+
+
+def clean_test_title(value: Any, language: str = "en") -> str:
+    rendered = clean_acceptance_text(value, language)
+    if language == "zh":
+        rendered = rendered.replace("验证： 验证：", "验证：").replace("验证：验证：", "验证：")
+        rendered = rendered.replace("回归验证： 验证：", "回归验证：").replace("回归验证：验证：", "回归验证：")
+        rendered = rendered.replace("验证： ", "验证：").replace("回归验证： ", "回归验证：")
+        rendered = rendered.replace("未授权角色不能访问变更后的行为", "未授权角色不能访问或触发本次变更行为")
+    return rendered.strip()
 
 
 def render_scope(spec: dict[str, Any], fallback: str, language: str = "en") -> str:
@@ -315,9 +703,9 @@ def render_acceptance(spec: dict[str, Any], language: str = "en") -> str:
         evidence = ", ".join(str(value) for value in as_list(item.get("evidence_required"))) or ("待补充" if language == "zh" else "TBD")
         if language == "zh":
             evidence = ", ".join(zh_text(value) for value in as_list(item.get("evidence_required"))) or "待补充"
-            lines.append(f"`{text(item.get('id'))}` {text(item.get('criteria'))}（类型：{zh_text(item.get('type'), '用例')}；证据：{evidence}）")
+            lines.append(f"`{text(item.get('id'))}` {clean_acceptance_text(item.get('criteria'), 'zh')}（类型：{zh_text(item.get('type'), '用例')}；证据：{evidence}）")
         else:
-            lines.append(f"`{text(item.get('id'))}` {text(item.get('criteria'))} ({text(item.get('type'), 'case')}; evidence: {evidence})")
+            lines.append(f"`{text(item.get('id'))}` {clean_acceptance_text(item.get('criteria'), 'en')} ({text(item.get('type'), 'case')}; evidence: {evidence})")
     return bullet_lines(lines, "未同步到验收标准。" if language == "zh" else "No acceptance criteria were synced.")
 
 
@@ -439,7 +827,7 @@ def render_requirement_trace_mermaid(spec: dict[str, Any], language: str = "en")
         lines.append(f'  {req_id}["{req_id}: {text(req.get("summary"), "requirement")[:60]}"]')
     for ac in acs[:8]:
         ac_id = text(ac.get("id"), "AC")
-        lines.append(f'  {ac_id}["{ac_id}: {text(ac.get("criteria"), "acceptance")[:60]}"]')
+        lines.append(f'  {ac_id}["{ac_id}: {clean_acceptance_text(ac.get("criteria"), language)[:60]}"]')
     first_req = text(reqs[0].get("id"), "REQ")
     for ac in acs[:8]:
         lines.append(f'  {first_req} --> {text(ac.get("id"), "AC")}')
@@ -483,6 +871,56 @@ def render_architecture_mermaid(architecture: dict[str, Any], language: str = "e
     return "\n".join(lines)
 
 
+def render_system_sequence_mermaid(technical: dict[str, Any], language: str = "en") -> str:
+    sequence = technical.get("system_interaction_sequence") if isinstance(technical.get("system_interaction_sequence"), dict) else {}
+    if sequence.get("applicable") is not True:
+        reason = text(sequence.get("not_applicable_reason") or sequence.get("reason"), "未涉及多系统交互" if language == "zh" else "no multi-system interaction")
+        return f"- {reason}"
+    participants = [human_value(item, language, "") for item in as_list(sequence.get("participants")) if human_value(item, language, "")]
+    steps = []
+    for item in as_list(sequence.get("sequence")):
+        if isinstance(item, dict):
+            steps.append(human_value(item.get("action") or item.get("step") or item, language, ""))
+        else:
+            steps.append(human_value(item, language, ""))
+    steps = [item for item in steps if item]
+    if not participants or not steps:
+        return "缺少参与方或时序步骤，无法生成时序图。" if language == "zh" else "Participants or sequence steps are missing, so the sequence diagram cannot be generated."
+    lines = ["```mermaid", "sequenceDiagram"]
+    for participant in participants[:6]:
+        alias = re.sub(r"[^A-Za-z0-9_]", "_", participant)[:30] or "Participant"
+        lines.append(f"  participant {alias} as {participant[:40]}")
+    first = re.sub(r"[^A-Za-z0-9_]", "_", participants[0])[:30] or "A"
+    second = re.sub(r"[^A-Za-z0-9_]", "_", participants[1] if len(participants) > 1 else participants[0])[:30] or "B"
+    for step in steps[:8]:
+        lines.append(f"  {first}->>{second}: {step[:80]}")
+        first, second = second, first
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def render_expert_technical_sections(technical: dict[str, Any], language: str = "en") -> str:
+    lang = "zh" if language == "zh" else "en"
+    sections: list[str] = []
+    for section in DOC_MODEL.expert_design_sections(technical):
+        parts = [f"### {DOCS_I18N.section_title(section['section_key'], lang)}"]
+        for group in as_list(section.get("groups")):
+            if not isinstance(group, dict):
+                continue
+            parts.append(
+                render_named_items(
+                    as_list(group.get("items")),
+                    as_list(group.get("fields")),
+                    DOCS_I18N.fallback(str(group.get("fallback_key")), lang),
+                    lang,
+                )
+            )
+        if section.get("diagram") == "system_sequence":
+            parts.append(render_system_sequence_mermaid(technical, lang))
+        sections.append("\n\n".join(parts))
+    return "\n\n".join(sections)
+
+
 def render_release_mermaid(delivery_plan: dict[str, Any], language: str = "en") -> str:
     release = delivery_plan.get("release_plan") if isinstance(delivery_plan.get("release_plan"), dict) else {}
     rollback = delivery_plan.get("rollback_plan") if isinstance(delivery_plan.get("rollback_plan"), dict) else {}
@@ -508,7 +946,10 @@ def render_process_flows(technical: dict[str, Any], language: str = "en") -> str
         for step in as_list(flow.get("steps")):
             if isinstance(step, dict):
                 if language == "zh":
-                    steps.append(f"  - {zh_text(step.get('step'))}. {zh_text(step.get('actor'))}：{zh_text(step.get('action'))} -> {zh_text(step.get('output'))}")
+                    output = zh_text(step.get("output"))
+                    if output == "expected behavior for this sub-requirement":
+                        output = "达到该子需求的预期业务结果"
+                    steps.append(f"  - {zh_text(step.get('step'))}. {zh_text(step.get('actor'))}：{zh_text(step.get('action'))} -> {output}")
                 else:
                     steps.append(f"  - {text(step.get('step'))}. {text(step.get('actor'))}: {text(step.get('action'))} -> {text(step.get('output'))}")
         if language == "zh":
@@ -531,86 +972,142 @@ def render_process_flows(technical: dict[str, Any], language: str = "en") -> str
 
 
 def render_named_items(items: list[Any], fields: list[str], empty: str, language: str = "en") -> str:
-    en_labels = {
-        "page_or_route": "page/route",
-        "user_goal": "user goal",
-        "entry_point": "entry point",
-        "permission_visibility": "permission visibility",
-        "acceptance_evidence": "acceptance evidence",
-        "old_consumer_impact": "consumer impact",
-        "failure_handling": "failure handling",
-        "data_risk": "data risk",
-    }
-    zh_labels = {
-        "existing_behavior": "现有行为",
-        "code_entrypoints": "代码入口",
-        "known_constraints": "已知约束",
-        "reuse_points": "可复用点",
-        "system_context": "系统上下文",
-        "repo_entrypoints": "仓库入口",
-        "upstream_downstream": "上下游",
-        "constraints": "约束",
-        "module": "模块",
-        "responsibility": "职责",
-        "input": "输入",
-        "output": "输出",
-        "coupling_control": "耦合控制",
-        "contract": "契约",
-        "compatibility": "兼容性",
-        "old_consumer_impact": "存量消费方影响",
-        "name": "名称",
-        "request": "请求",
-        "response": "响应",
-        "error_response": "错误响应",
-        "read_rule": "读取规则",
-        "write_rule": "写入规则",
-        "migration": "迁移",
-        "role": "角色",
-        "rule": "规则",
-        "negative_case": "反向用例",
-        "case": "场景",
-        "handling": "处理方式",
-        "page_or_route": "页面/路由",
-        "user_goal": "用户目标",
-        "entry_point": "入口",
-        "permission_visibility": "权限可见性",
-        "acceptance_evidence": "验收证据",
-        "from": "来源",
-        "to": "目标",
-        "change": "变更",
-        "step": "步骤",
-        "actor": "参与方",
-        "action": "动作",
-        "failure_handling": "失败处理",
-        "repo": "仓库",
-        "artifact": "制品",
-        "order": "顺序",
-        "config_change": "配置变更",
-        "restart_required": "是否重启",
-        "steps": "步骤",
-        "data_risk": "数据风险",
-        "acceptance_id": "验收项",
-        "design_refs": "设计引用",
-        "evidence_required": "所需证据",
-        "type": "类型",
-        "evidence": "证据",
-        "signal": "信号",
-        "owner": "负责人",
-        "trigger": "触发条件",
-    }
-    labels = zh_labels if language == "zh" else en_labels
     lines: list[str] = []
     for item in items:
         if not isinstance(item, dict):
             continue
         values = [
-            f"{labels.get(field, field)}：{zh_text(item.get(field))}" if language == "zh" else f"{labels.get(field, field)}: {text(item.get(field))}"
+            f"{DOCS_I18N.label(field, 'zh')}：{human_value(item.get(field), 'zh')}" if language == "zh" else f"{DOCS_I18N.label(field, 'en')}: {human_value(item.get(field), 'en')}"
             for field in fields
             if item.get(field) not in (None, "", [], {})
         ]
         if values:
             lines.append("；".join(values) if language == "zh" else "; ".join(values))
     return bullet_lines(lines, empty)
+
+
+def render_requirement_breakdown_table(technical: dict[str, Any], language: str = "en") -> str:
+    rows = [item for item in as_list(technical.get("requirement_breakdown")) if isinstance(item, dict)]
+    if not rows:
+        return "- 未同步到子需求设计矩阵。" if language == "zh" else "- No sub-requirement design matrix was synced."
+    if language == "zh":
+        lines = ["| 子需求 | 行为变化 | 影响面 | 字段影响 | 接口影响 | 权限影响 |", "|---|---|---|---|---|---|"]
+        for item in rows:
+            lines.append(
+                f"| `{text(item.get('id'))}` {zh_text(item.get('summary'))} | "
+                f"{zh_text(item.get('behavior_change'))} | {zh_text(item.get('impact_areas'))} | "
+                f"{zh_text(item.get('field_impact'))} | {zh_text(item.get('api_impact'))} | {zh_text(item.get('permission_impact'))} |"
+            )
+        return "\n".join(lines)
+    lines = ["| Slice | Behavior Change | Impact Areas | Field Impact | API Impact | Permission Impact |", "|---|---|---|---|---|---|"]
+    for item in rows:
+        lines.append(
+            f"| `{text(item.get('id'))}` {text(item.get('summary'))} | "
+            f"{text(item.get('behavior_change'))} | {text(item.get('impact_areas'))} | "
+            f"{text(item.get('field_impact'))} | {text(item.get('api_impact'))} | {text(item.get('permission_impact'))} |"
+        )
+    return "\n".join(lines)
+
+
+def render_entrypoint_confidence(technical: dict[str, Any], language: str = "en") -> str:
+    confidence = technical.get("code_entrypoint_confidence") if isinstance(technical.get("code_entrypoint_confidence"), dict) else {}
+    if not confidence:
+        return "- 未同步到代码入口置信度。" if language == "zh" else "- No code entrypoint confidence was synced."
+    ranked = []
+    for item in as_list(confidence.get("ranked_candidates"))[:5]:
+        if isinstance(item, dict):
+            evidence = item.get("evidence")
+            evidence_text = zh_text(evidence, "无证据") if language == "zh" and evidence not in (None, "", [], {}) else text(evidence, "no evidence") if evidence not in (None, "", [], {}) else ("无证据" if language == "zh" else "no evidence")
+            path_text = zh_text(item.get("path")) if language == "zh" else text(item.get("path"))
+            ranked.append(f"`{path_text}` score={text(item.get('score'), '0')} evidence={evidence_text}")
+    if language == "zh":
+        return (
+            f"- 置信度：`{zh_text(confidence.get('level'))}`\n"
+            f"- 主入口：`{zh_text(confidence.get('selected_entrypoint'))}`\n"
+            f"- 命中证据：{zh_text(confidence.get('evidence'))}\n"
+            f"- 低置信原因：{zh_text(confidence.get('blocker'), '无')}\n"
+            f"- 候选入口：{'; '.join(ranked) or '未同步'}"
+        )
+    return (
+        f"- Confidence: `{text(confidence.get('level'))}`\n"
+        f"- Primary entrypoint: `{text(confidence.get('selected_entrypoint'))}`\n"
+        f"- Evidence: {text(confidence.get('evidence'))}\n"
+        f"- Low-confidence reason: {text(confidence.get('blocker'), 'none')}\n"
+        f"- Ranked candidates: {'; '.join(ranked) or 'not synced'}"
+    )
+
+
+def render_field_api_permission_impact(technical: dict[str, Any], language: str = "en") -> str:
+    rows = [item for item in as_list(technical.get("field_api_permission_impact")) if isinstance(item, dict)]
+    if not rows:
+        return "- 未同步到字段/接口/权限影响表。" if language == "zh" else "- No field/API/permission impact table was synced."
+    if language == "zh":
+        lines = ["| 子需求 | 责任入口 | 字段 | 接口 | 权限 | 入口置信度 |", "|---|---|---|---|---|---|"]
+        for item in rows:
+            lines.append(
+                f"| `{text(item.get('requirement_breakdown_id'))}` {zh_text(item.get('summary'))} | "
+                f"`{zh_text(item.get('owner_entrypoint'))}` | {zh_text(item.get('field_impact'))} | "
+                f"{zh_text(item.get('api_impact'))} | {zh_text(item.get('permission_impact'))} | {zh_text(item.get('entrypoint_confidence'))} |"
+            )
+        return "\n".join(lines)
+    lines = ["| Slice | Owner Entrypoint | Field | API | Permission | Confidence |", "|---|---|---|---|---|---|"]
+    for item in rows:
+        lines.append(
+            f"| `{text(item.get('requirement_breakdown_id'))}` {text(item.get('summary'))} | "
+            f"`{text(item.get('owner_entrypoint'))}` | {text(item.get('field_impact'))} | "
+            f"{text(item.get('api_impact'))} | {text(item.get('permission_impact'))} | {text(item.get('entrypoint_confidence'))} |"
+        )
+    return "\n".join(lines)
+
+
+def render_low_confidence_items(technical: dict[str, Any], architecture: dict[str, Any], language: str = "en") -> str:
+    rows = [item for item in as_list(technical.get("low_confidence_items")) if isinstance(item, dict)]
+    arch_conf = architecture.get("architecture_decision_confidence") if isinstance(architecture.get("architecture_decision_confidence"), dict) else {}
+    for item in as_list(arch_conf.get("confidence_reducers")):
+        if isinstance(item, dict):
+            rows.append({"item": item.get("source"), "level": item.get("severity"), "reason": item.get("message"), "required_action": "revise design or collect evidence"})
+    if not rows:
+        return "- 当前未记录低置信度需确认项。" if language == "zh" else "- No low-confidence confirmation items are recorded."
+    if language == "zh":
+        return bullet_lines([
+            f"`{zh_text(item.get('item'))}`：等级={zh_text(item.get('level'))}；原因={zh_text(item.get('reason'))}；动作={zh_text(item.get('required_action'))}"
+            for item in rows
+        ], "当前未记录低置信度需确认项。")
+    return bullet_lines([
+        f"`{text(item.get('item'))}`: level={text(item.get('level'))}; reason={text(item.get('reason'))}; action={text(item.get('required_action'))}"
+        for item in rows
+    ], "No low-confidence confirmation items are recorded.")
+
+
+def render_problem_analysis(technical: dict[str, Any], language: str = "en") -> str:
+    problem = technical.get("problem_analysis") if isinstance(technical.get("problem_analysis"), dict) else {}
+    current = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
+    data = {**current, **problem}
+    if not data:
+        return "- 未同步到现状问题分析。" if language == "zh" else "- No problem analysis was synced."
+    if language == "zh":
+        sections = [
+            ("当前行为", data.get("current_behavior") or data.get("existing_behavior")),
+            ("业务问题", data.get("business_problem")),
+            ("现有流程缺口", data.get("process_gap")),
+            ("代码入口", data.get("code_entrypoints")),
+            ("约束", data.get("constraints") or data.get("known_constraints")),
+            ("本次目标", data.get("design_goals")),
+            ("非目标", data.get("non_goals")),
+            ("成功标准", data.get("success_criteria")),
+        ]
+        return "\n".join(f"- {label}：{zh_text(value)}" for label, value in sections if value not in (None, "", [], {})) or "- 未同步到现状问题分析。"
+    sections = [
+        ("Current behavior", data.get("current_behavior") or data.get("existing_behavior")),
+        ("Business problem", data.get("business_problem")),
+        ("Process gap", data.get("process_gap")),
+        ("Code entrypoints", data.get("code_entrypoints")),
+        ("Constraints", data.get("constraints") or data.get("known_constraints")),
+        ("Design goals", data.get("design_goals")),
+        ("Non-goals", data.get("non_goals")),
+        ("Success criteria", data.get("success_criteria")),
+    ]
+    return "\n".join(f"- {label}: {text(value)}" for label, value in sections if value not in (None, "", [], {})) or "- No problem analysis was synced."
 
 
 def render_delivery_tasks(delivery_plan: dict[str, Any], language: str = "en") -> str:
@@ -675,27 +1172,74 @@ def render_test_cases(test_design: dict[str, Any], language: str = "en") -> str:
     if not cases:
         return "- 未同步到测试用例；技术设计完成后必须生成 `test_design.json`。" if language == "zh" else "- No test cases were synced; `test_design.json` is required after technical design."
     sections: list[str] = []
+    doc_title = zh_text(test_design.get("title"), "本需求") if language == "zh" else text(test_design.get("title"), "this requirement")
     for case in cases:
         steps = as_list(case.get("steps"))
         evidence = as_list(case.get("evidence_required"))
+        execution = as_list(case.get("execution_path"))
+        assertions = as_list(case.get("assertion_points"))
+        semantic_refs = case.get("semantic_refs") if isinstance(case.get("semantic_refs"), dict) else {}
+        data_strategy = case.get("data_setup_strategy") if isinstance(case.get("data_setup_strategy"), dict) else {}
+        setup_methods = as_list(data_strategy.get("setup_methods"))
+        data_records = as_list(data_strategy.get("records"))
+        accounts = as_list(data_strategy.get("accounts"))
+        cleanup = as_list(data_strategy.get("cleanup"))
         if language == "zh":
+            title = clean_test_title(case.get("title"), "zh")
+            if title in {"标准", "验收标准", "验证：标准"}:
+                title = f"验证：{doc_title}"
+            reason_title = re.sub(r"^(验证：|回归验证：)", "", title).strip()
+            record_text = "；".join(summarize_dict_item(item, ["name", "state", "source"], "zh") if isinstance(item, dict) else zh_text(item) for item in data_records)
+            account_text = "；".join(summarize_dict_item(item, ["role", "purpose"], "zh") if isinstance(item, dict) else zh_text(item) for item in accounts)
+            semantic_text = "；".join(
+                f"{label}：{', '.join(zh_text(item) for item in as_list(semantic_refs.get(key)))}"
+                for key, label in [
+                    ("ui_refs", "页面"),
+                    ("api_refs", "接口"),
+                    ("data_refs", "数据"),
+                    ("permission_refs", "权限"),
+                ]
+                if as_list(semantic_refs.get(key))
+            )
             sections.append(
-                f"### `{text(case.get('id'))}` {zh_text(case.get('title'))}\n\n"
+                f"### `{text(case.get('id'))}` {title}\n\n"
                 f"- 关联验收：{zh_text(case.get('acceptance_id'), '未绑定')}\n"
                 f"- 类型：{zh_text(case.get('type'))}\n"
+                f"- 为什么测：该用例用于证明「{reason_title or title}」是否能在真实业务入口、接口/数据语义和验收证据之间闭环。\n"
+                f"- 项目语义依据：{semantic_text or '未同步到项目语义依据'}\n"
                 f"- 前置条件：{', '.join(zh_text(item) for item in as_list(case.get('preconditions'))) or '无'}\n"
-                f"- 执行步骤：{', '.join(zh_text(item) for item in steps) or '待补充'}\n"
+                f"- 怎么造数：{', '.join(zh_text(item) for item in setup_methods) or '待补充'}；数据记录：{record_text or '待补充'}；账号角色：{account_text or '无'}\n"
+                f"- 怎么执行：{'; '.join(zh_text(item) for item in execution) or '待补充'}；详细步骤：{'; '.join(zh_text(item) for item in steps) or '待补充'}\n"
+                f"- 怎么判定通过：{'; '.join(zh_text(item) for item in assertions) or '待补充'}\n"
                 f"- 预期结果：{zh_text(case.get('expected_result'))}\n"
+                f"- 清理要求：{'; '.join(zh_text(item) for item in cleanup) or ', '.join(zh_text(item) for item in as_list(case.get('cleanup_expectations'))) or '待补充'}\n"
                 f"- 所需证据：{', '.join(zh_text(item) for item in evidence) or '待补充'}"
             )
         else:
+            record_text = "; ".join(summarize_dict_item(item, ["name", "state", "source"], "en") if isinstance(item, dict) else text(item) for item in data_records)
+            account_text = "; ".join(summarize_dict_item(item, ["role", "purpose"], "en") if isinstance(item, dict) else text(item) for item in accounts)
+            semantic_text = "; ".join(
+                f"{label}: {', '.join(text(item) for item in as_list(semantic_refs.get(key)))}"
+                for key, label in [
+                    ("ui_refs", "UI"),
+                    ("api_refs", "API"),
+                    ("data_refs", "Data"),
+                    ("permission_refs", "Permission"),
+                ]
+                if as_list(semantic_refs.get(key))
+            )
             sections.append(
                 f"### `{text(case.get('id'))}` {text(case.get('title'))}\n\n"
                 f"- Acceptance: {text(case.get('acceptance_id'), 'unmapped')}\n"
                 f"- Type: {text(case.get('type'))}\n"
+                f"- Why test: this case proves the acceptance behavior through the mapped business entry, contract/data semantics, and evidence path.\n"
+                f"- Semantic refs: {semantic_text or 'not synced'}\n"
                 f"- Preconditions: {', '.join(text(item) for item in as_list(case.get('preconditions'))) or 'none'}\n"
-                f"- Steps: {', '.join(text(item) for item in steps) or 'TBD'}\n"
+                f"- How to prepare data: {', '.join(text(item) for item in setup_methods) or 'TBD'}; records: {record_text or 'TBD'}; accounts/roles: {account_text or 'none'}\n"
+                f"- How to execute: {'; '.join(text(item) for item in execution) or 'TBD'}; steps: {'; '.join(text(item) for item in steps) or 'TBD'}\n"
+                f"- How to pass: {'; '.join(text(item) for item in assertions) or 'TBD'}\n"
                 f"- Expected result: {text(case.get('expected_result'))}\n"
+                f"- Cleanup: {'; '.join(text(item) for item in cleanup) or ', '.join(text(item) for item in as_list(case.get('cleanup_expectations'))) or 'TBD'}\n"
                 f"- Evidence required: {', '.join(text(item) for item in evidence) or 'TBD'}"
             )
     return "\n\n".join(sections)
@@ -737,29 +1281,203 @@ def render_test_data_plan(test_data_plan: dict[str, Any], language: str = "en") 
 
 
 def render_solution_options(technical: dict[str, Any], architecture: dict[str, Any], language: str = "en") -> str:
-    label_option = "方案" if language == "zh" else "Option"
-    label_selected = "选中方案" if language == "zh" else "Selected"
+    def option_coverage_summary(options: list[Any], option_kind: str) -> list[str]:
+        dict_options = [item for item in options if isinstance(item, dict)]
+        count = len(dict_options)
+        names = " ".join(str(item.get("name") or "") for item in dict_options)
+        triggers: list[str] = []
+        if any(token in names for token in ["接口", "契约", "service/API", "contract"]):
+            triggers.append("接口/契约")
+        if any(token in names for token in ["字段", "数据", "Data"]):
+            triggers.append("数据口径")
+        if "权限" in names:
+            triggers.append("权限闭环")
+        if "前后端" in names:
+            triggers.append("前后端协同")
+        if "子域" in names:
+            triggers.append("多业务子域")
+        if any(token in names for token in ["灰度", "兼容", "backward"]):
+            triggers.append("灰度兼容")
+        if option_kind == "technical":
+            base = "责任入口"
+        else:
+            base = "架构责任边界"
+        if language == "zh":
+            lines = [
+                f"- 本节候选方案共 {count} 个，不按固定二选一/三选一生成，而是从{base}、需求影响面和交付风险动态展开。",
+                f"- 触发的专项比较面：{('、'.join(triggers)) if triggers else '未发现需要独立展开的专项影响面'}。",
+                "- 阅读顺序：先看每个候选方案的适用条件、实施/发布影响和风险控制，再看后续加权矩阵和决策结论。",
+            ]
+        else:
+            lines = [
+                f"- This section has {count} candidate options. Options are generated dynamically from the owner boundary, impact surface, and delivery risk rather than a fixed two/three-option template.",
+                f"- Specialized comparison surfaces: {', '.join(triggers) if triggers else 'none detected beyond the base owner boundary'}.",
+                "- Read each option's applicability, implementation/release impact, and risk controls before the weighted matrix and final decision.",
+            ]
+        return lines
+
+    def render_option_detail(item: dict[str, Any], option_kind: str) -> list[str]:
+        if language == "zh":
+            detail_lines = [
+                f"#### 方案 `{text(item.get('option_id'))}`：{zh_option_name(item, option_kind)}",
+                "",
+                f"- 描述：{zh_text(item.get('description'))}",
+                f"- 适用条件：{zh_text(item.get('when_to_choose'))}",
+                f"- 优势：{zh_text(item.get('pros'))}",
+                f"- 劣势：{zh_text(item.get('cons'))}",
+                f"- 风险等级：{zh_text(item.get('risk_level'))}",
+                f"- 风险控制：{zh_text(item.get('risk_controls'))}",
+                f"- 验证方式：{zh_text(item.get('validation'))}",
+                f"- 性能影响：{zh_text(item.get('performance_impact'))}",
+                f"- 回滚策略：{zh_text(item.get('rollback_strategy'))}",
+            ]
+            if option_kind == "technical":
+                detail_lines.extend([
+                    f"- 实施轮廓：{zh_text(item.get('implementation_outline'))}",
+                    f"- 测试证据：{zh_text(item.get('test_evidence'))}",
+                    f"- 上线影响：{zh_text(item.get('rollout_impact'))}",
+                ])
+            else:
+                detail_lines.extend([
+                    f"- 责任仓库：{zh_text(item.get('owner_repos'))}",
+                    f"- 仅确认仓库：{zh_text(item.get('confirm_only_repos'), '无')}",
+                    f"- 集成影响：{zh_text(item.get('integration_impact'))}",
+                    f"- 部署影响：{zh_text(item.get('deployment_impact'))}",
+                    f"- 回滚复杂度：{zh_text(item.get('rollback_complexity'))}",
+                ])
+            return detail_lines
+
+        detail_lines = [
+            f"#### Option `{text(item.get('option_id'))}`: {text(item.get('name'))}",
+            "",
+            f"- Description: {text(item.get('description'))}",
+            f"- When to choose: {text(item.get('when_to_choose'))}",
+            f"- Pros: {text(item.get('pros'))}",
+            f"- Cons: {text(item.get('cons'))}",
+            f"- Risk level: {text(item.get('risk_level'))}",
+            f"- Risk controls: {text(item.get('risk_controls'))}",
+            f"- Validation: {text(item.get('validation'))}",
+            f"- Performance impact: {text(item.get('performance_impact'))}",
+            f"- Rollback strategy: {text(item.get('rollback_strategy'))}",
+        ]
+        if option_kind == "technical":
+            detail_lines.extend([
+                f"- Implementation outline: {text(item.get('implementation_outline'))}",
+                f"- Test evidence: {text(item.get('test_evidence'))}",
+                f"- Rollout impact: {text(item.get('rollout_impact'))}",
+            ])
+        else:
+            detail_lines.extend([
+                f"- Owner repos: {text(item.get('owner_repos'))}",
+                f"- Confirm-only repos: {text(item.get('confirm_only_repos'), 'none')}",
+                f"- Integration impact: {text(item.get('integration_impact'))}",
+                f"- Deployment impact: {text(item.get('deployment_impact'))}",
+                f"- Rollback complexity: {text(item.get('rollback_complexity'))}",
+            ])
+        return detail_lines
+
+    def render_matrix(matrix: list[Any], score_summary: dict[str, Any]) -> list[str]:
+        if language == "zh":
+            lines = ["", "#### 加权对比矩阵", ""]
+            if matrix:
+                lines.extend(["| 维度 | 权重 | 评分 | 优胜 | 理由 |", "|---|---:|---|---|---|"])
+                for row in matrix:
+                    if not isinstance(row, dict):
+                        continue
+                    scores = row.get("scores") if isinstance(row.get("scores"), dict) else {}
+                    score_text = "；".join(f"{key}={value}" for key, value in scores.items())
+                    lines.append(f"| {zh_text(row.get('criterion'))} | {text(row.get('weight'), '0')} | {score_text or '待补充'} | {zh_text(row.get('winner'))} | {zh_text(row.get('reason'))} |")
+            else:
+                lines.append("- 未同步到加权对比矩阵。")
+            lines.extend(["", "#### 评分汇总", ""])
+            if score_summary:
+                score_lines = []
+                for key, value in score_summary.items():
+                    if key == "scoring_rule":
+                        continue
+                    score_lines.append(f"`{key}`={value}")
+                lines.append(f"- 分数：{', '.join(score_lines) or '待补充'}")
+                lines.append(f"- 评分规则：{zh_text(score_summary.get('scoring_rule'))}")
+            else:
+                lines.append("- 未同步到评分汇总。")
+            return lines
+
+        lines = ["", "#### Weighted Comparison Matrix", ""]
+        if matrix:
+            lines.extend(["| Criterion | Weight | Scores | Winner | Reason |", "|---|---:|---|---|---|"])
+            for row in matrix:
+                if not isinstance(row, dict):
+                    continue
+                scores = row.get("scores") if isinstance(row.get("scores"), dict) else {}
+                score_text = "; ".join(f"{key}={value}" for key, value in scores.items())
+                lines.append(f"| {text(row.get('criterion'))} | {text(row.get('weight'), '0')} | {score_text or 'TBD'} | {text(row.get('winner'))} | {text(row.get('reason'))} |")
+        else:
+            lines.append("- No weighted comparison matrix was synced.")
+        lines.extend(["", "#### Score Summary", ""])
+        if score_summary:
+            score_lines = []
+            for key, value in score_summary.items():
+                if key == "scoring_rule":
+                    continue
+                score_lines.append(f"`{key}`={value}")
+            lines.append(f"- Scores: {', '.join(score_lines) or 'TBD'}")
+            lines.append(f"- Scoring rule: {text(score_summary.get('scoring_rule'))}")
+        else:
+            lines.append("- No score summary was synced.")
+        return lines
+
     sections: list[str] = []
     selected_technical = technical.get("selected_solution") if isinstance(technical.get("selected_solution"), dict) else {}
     selected_arch = architecture.get("selected_architecture") if isinstance(architecture.get("selected_architecture"), dict) else {}
-    for title, options, selected in [
-        ("技术方案对比" if language == "zh" else "Technical Options", as_list(technical.get("solution_options")), selected_technical),
-        ("架构方案对比" if language == "zh" else "Architecture Options", as_list(architecture.get("architecture_options")), selected_arch),
+    for option_title, comparison_title, decision_title, options, selected, option_kind, matrix, score_summary in [
+        (
+            "技术候选方案详述" if language == "zh" else "Technical Candidate Options",
+            "技术方案加权对比" if language == "zh" else "Technical Weighted Comparison",
+            "技术决策结论" if language == "zh" else "Technical Decision",
+            as_list(technical.get("solution_options")),
+            selected_technical,
+            "technical",
+            as_list(technical.get("option_comparison_matrix")),
+            technical.get("option_score_summary") if isinstance(technical.get("option_score_summary"), dict) else {},
+        ),
+        (
+            "架构候选方案详述" if language == "zh" else "Architecture Candidate Options",
+            "架构方案加权对比" if language == "zh" else "Architecture Weighted Comparison",
+            "架构决策结论" if language == "zh" else "Architecture Decision",
+            as_list(architecture.get("architecture_options")),
+            selected_arch,
+            "architecture",
+            as_list(architecture.get("architecture_fit_matrix")),
+            architecture.get("architecture_score_summary") if isinstance(architecture.get("architecture_score_summary"), dict) else {},
+        ),
     ]:
-        lines = [f"### {title}", ""]
+        lines = [f"### {option_title}", ""]
+        lines.extend(option_coverage_summary(options, option_kind))
+        lines.append("")
         for item in options:
             if isinstance(item, dict):
-                if language == "zh":
-                    lines.append(
-                        f"- {label_option} `{text(item.get('option_id'))}` {zh_text(item.get('name'))}："
-                        f"{zh_text(item.get('description'))}；风险：{zh_text(item.get('risk_level'))}；回滚：{zh_text(item.get('rollback_strategy'))}"
-                    )
-                else:
-                    lines.append(f"- {label_option} `{text(item.get('option_id'))}` {text(item.get('name'))}: {text(item.get('description'))}; risk: {text(item.get('risk_level'))}; rollback: {text(item.get('rollback_strategy'))}")
+                lines.extend(render_option_detail(item, option_kind))
+                lines.append("")
+        lines.extend(["", f"### {comparison_title}", ""])
+        lines.extend(render_matrix(matrix, score_summary))
+        lines.append("")
         if language == "zh":
-            lines.append(f"- {label_selected}：`{text(selected.get('selected_option_id'))}`；理由：{zh_text(selected.get('selection_reason'))}；取舍：{zh_text(selected.get('tradeoffs'))}")
+            lines.append(f"### {decision_title}")
+            lines.append("")
+            lines.append(f"- 选中：`{text(selected.get('selected_option_id'))}`")
+            lines.append(f"- 选择理由：{zh_decision_reason(selected, options, option_kind)}")
+            lines.append(f"- 决策标准：{zh_inline_list(selected.get('decision_criteria'))}")
+            lines.append(f"- 取舍：{zh_inline_list(selected.get('tradeoffs'))}")
+            rejected = as_list(selected.get("rejected_alternative_reasoning"))
+            lines.append(f"- 被拒方案理由：{'；'.join(zh_rejected_reason(item, options) for item in rejected) if rejected else '无'}")
         else:
-            lines.append(f"- {label_selected}: `{text(selected.get('selected_option_id'))}`; reason: {text(selected.get('selection_reason'))}; tradeoffs: {text(selected.get('tradeoffs'))}")
+            lines.append(f"### {decision_title}")
+            lines.append("")
+            lines.append(f"- Selected: `{text(selected.get('selected_option_id'))}`")
+            lines.append(f"- Selection reason: {text(selected.get('selection_reason'))}")
+            lines.append(f"- Decision criteria: {text(selected.get('decision_criteria'))}")
+            lines.append(f"- Tradeoffs: {text(selected.get('tradeoffs'))}")
+            lines.append(f"- Rejected alternative reasoning: {text(selected.get('rejected_alternative_reasoning'))}")
         sections.append("\n".join(lines))
     return "\n\n".join(sections)
 
@@ -798,6 +1516,34 @@ def render_review_context(spec: dict[str, Any], language: str = "en") -> str:
         f"- Acceptance size: {acceptance_count} acceptance criteria were synced and must map to design, tests, and evidence.\n"
         f"- Clarification state: {question_count} open questions are recorded; unresolved questions keep the design in draft.\n"
         "- Review path: verify scope and clarification first, then acceptance traceability, then evidence references."
+    )
+
+
+def render_spec_review_narrative(spec: dict[str, Any], language: str = "en") -> str:
+    summary = spec.get("requirement_summary") or spec.get("summary") or spec.get("title") or "本需求"
+    scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
+    in_scope = "、".join(zh_text(item) for item in as_list(scope.get("in_scope"))) or zh_text(summary)
+    out_scope = "、".join(zh_text(item) for item in as_list(scope.get("out_of_scope"))) or "未声明额外范围外事项，评审时仍需确认是否存在隐含排除项"
+    acceptance = [clean_acceptance_text(item.get("criteria"), "zh") for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
+    acceptance_text = "；".join(acceptance) or "未同步到明确验收标准"
+    questions = [zh_text(item.get("question") or item.get("summary") or item) if isinstance(item, dict) else zh_text(item) for item in as_list(spec.get("open_questions"))]
+    question_text = "；".join(questions) or "当前没有记录阻塞性澄清问题"
+    if language == "zh":
+        return (
+            f"本需求的评审重点不是只确认标题是否正确，而是确认“{zh_text(summary)}”在业务流程、页面/接口行为、权限边界和验收证据之间是否形成闭环。"
+            f"当前纳入范围的内容包括：{in_scope}。范围外或暂不处理的内容为：{out_scope}。如果评审过程中发现这些边界与真实业务预期不一致，需要先回到需求澄清，而不是直接进入实现。\n\n"
+            f"验收标准需要作为后续技术设计、测试设计和发布证据的共同锚点。当前同步到的验收口径为：{acceptance_text}。"
+            "设计评审时应逐条检查每个验收项是否能在模块设计、接口/页面行为、测试用例和证据文件中找到对应引用；缺少任一环节时，本需求只能视为未完成交付准备。\n\n"
+            f"澄清状态方面，{question_text}。即使没有阻塞性问题，也仍需在实现前确认需求原文、验收口径和交付边界没有被过度解释；"
+            "特别是涉及权限、数据筛选、状态口径、默认展示和回滚影响的内容，应在技术设计和测试设计中继续保留可追溯证据。\n\n"
+            "进入设计或实现前，评审人应重点确认三件事：第一，需求是否只描述了期望结果，还是已经隐含了实现方式；第二，验收标准是否足够观察和复现，"
+            "能否转换为明确测试用例；第三，后续交付是否需要额外的配置、数据准备、权限账号、发布窗口或回滚动作。"
+            "这些内容如果没有在需求阶段说明清楚，也必须在设计、测试和发布文档中被显式承接，避免实现完成后才发现验收口径不一致。"
+        )
+    return (
+        f"This requirement should be reviewed as a traceable delivery scope, not only as a title: {text(summary)}. "
+        f"In scope: {text(scope.get('in_scope') or summary)}. Out of scope: {text(scope.get('out_of_scope') or 'not explicitly declared')}. "
+        f"Acceptance criteria: {text(acceptance)}. Clarification state: {text(questions or 'no blocking questions recorded')}."
     )
 
 
@@ -840,14 +1586,17 @@ def render_release_review_context(status: dict[str, Any], delivery_plan: dict[st
     )
 
 
-def render_next_action(status: dict[str, Any], delivery_review: dict[str, Any]) -> str:
+def render_next_action(status: dict[str, Any], delivery_review: dict[str, Any], language: str = "en") -> str:
     primary = status.get("primary_next_action") if isinstance(status.get("primary_next_action"), dict) else {}
     for value in [primary.get("summary"), status.get("next_command")]:
         if value:
-            return text(value)
+            return zh_text(value) if language == "zh" else text(value)
     blockers = as_list(delivery_review.get("blockers"))
     if blockers and isinstance(blockers[0], dict):
-        return text(blockers[0].get("suggestion") or blockers[0].get("message"))
+        value = blockers[0].get("suggestion") or blockers[0].get("message")
+        return zh_text(value) if language == "zh" else text(value)
+    if language == "zh":
+        return "实现或发布前先处理上述阻塞项。"
     return "Resolve listed blockers before implementation or release."
 
 
@@ -878,6 +1627,16 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
     status = read_json(artifact_dir / "delivery_status.json")
     requirement_text = requirement.read_text(encoding="utf-8") if requirement.exists() else ""
     heading = title or str(spec.get("title") or doc_id)
+    zh_user_scenarios = [
+        summarize_dict_item(item, ["actor", "trigger", "expected_outcome"], "zh")
+        for item in as_list(spec.get("user_scenarios"))
+        if isinstance(item, dict)
+    ] + [text(item) for item in as_list(spec.get("user_scenarios")) if not isinstance(item, dict)]
+    zh_business_objectives = [
+        text(item.get("objective") or item.get("summary") or item)
+        for item in as_list(spec.get("business_objectives"))
+        if isinstance(item, dict)
+    ] + [text(item) for item in as_list(spec.get("business_objectives")) if not isinstance(item, dict)]
     return {
         "spec": (
             f"# {heading} 需求说明\n\n"
@@ -888,10 +1647,11 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "- 本文面向需求评审、技术设计和交付计划使用，机器可读依据见证据引用章节。\n\n"
             "### 阅读与评审重点\n\n"
             f"{render_review_context(spec, 'zh')}\n\n"
+            f"{render_spec_review_narrative(spec, 'zh')}\n\n"
             "## 二、背景与目标\n\n"
             f"{section_paragraph('业务背景', [text(spec.get('requirement_summary') or spec.get('summary') or heading)], '未同步到业务背景。')}\n\n"
-            f"{section_paragraph('用户场景', [summarize_dict_item(item, ['actor', 'trigger', 'expected_outcome'], 'zh') for item in as_list(spec.get('user_scenarios')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('user_scenarios')) if not isinstance(item, dict)], '未记录用户场景。')}\n\n"
-            f"{section_paragraph('业务目标', [text(item.get('objective') or item.get('summary') or item) for item in as_list(spec.get('business_objectives')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('business_objectives')) if not isinstance(item, dict)], '未记录业务目标。')}\n\n"
+            f"{section_paragraph('用户场景', zh_user_scenarios, '未记录用户场景。')}\n\n"
+            f"{section_paragraph('业务目标', zh_business_objectives, '未记录业务目标。')}\n\n"
             "## 三、范围与非目标\n\n"
             f"{render_scope(spec, text(spec.get('summary') or heading), 'zh')}\n\n"
             "## 四、需求澄清\n\n"
@@ -924,46 +1684,53 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "### 阅读与评审重点\n\n"
             f"{render_design_review_context(technical, architecture, delivery_plan, 'zh')}\n\n"
             "## 二、现状问题与设计目标\n\n"
-            f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], '未同步到现状分析。', 'zh')}\n\n"
+            f"{render_problem_analysis(technical, 'zh')}\n\n"
             f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], '未同步到当前架构分析。', 'zh')}\n\n"
-            f"{section_paragraph('设计目标', [text(item.get('behavior') or item.get('summary') or item) for item in as_list(technical.get('target_behavior')) if isinstance(item, dict)], '未同步到目标行为。')}\n\n"
-            f"{section_paragraph('非目标', [str(item) for item in as_list((technical.get('design_scope') or {}).get('non_goals'))], '未记录非目标。')}\n\n"
-            "## 三、方案对比与选择\n\n"
+            "## 三、子需求设计矩阵\n\n"
+            f"{render_requirement_breakdown_table(technical, 'zh')}\n\n"
+            "### 代码入口置信度\n\n"
+            f"{render_entrypoint_confidence(technical, 'zh')}\n\n"
+            "### 字段/接口/权限影响表\n\n"
+            f"{render_field_api_permission_impact(technical, 'zh')}\n\n"
+            "### 低置信度需确认项\n\n"
+            f"{render_low_confidence_items(technical, architecture, 'zh')}\n\n"
+            "## 四、候选方案、对比与决策\n\n"
             f"{render_solution_options(technical, architecture, 'zh')}\n\n"
-            "## 四、决策记录\n\n"
+            "## 五、决策记录\n\n"
             f"{render_decision_records(architecture, technical, language='zh')}\n\n"
-            "## 五、业务流程\n\n"
+            "## 六、业务流程\n\n"
             f"{render_process_flows(technical, 'zh')}\n\n"
             "### 流程图\n\n"
             f"{render_process_mermaid(technical, 'zh')}\n\n"
-            "## 六、模块与接口设计\n\n"
+            "## 七、模块与接口设计\n\n"
             f"{render_named_items(as_list(technical.get('module_decomposition')), ['module', 'responsibility', 'input', 'output', 'coupling_control'], '未同步到模块设计。', 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('api_contracts')), ['contract', 'compatibility', 'old_consumer_impact'], '未同步到接口影响。', 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], '未同步到接口示例。', 'zh')}\n\n"
-            "## 七、数据、权限、页面与异常场景\n\n"
+            "## 八、数据、权限、页面与异常场景\n\n"
             f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], '未同步到数据设计。', 'zh')}\n\n"
+            f"{render_expert_technical_sections(technical, 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('permission_model')), ['role', 'rule', 'negative_case'], '未同步到权限规则。', 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('exception_and_edge_cases')), ['case', 'handling'], '未同步到异常场景。', 'zh')}\n\n"
             f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], '未同步到页面影响。', 'zh')}\n\n"
-            "## 八、架构与运维影响\n\n"
+            "## 九、架构与运维影响\n\n"
             f"{render_named_items(as_list(architecture.get('cross_repo_dependency_graph')), ['from', 'to', 'contract', 'change'], '未同步到跨仓依赖图。', 'zh')}\n\n"
             "### 模块/仓库关系图\n\n"
             f"{render_architecture_mermaid(architecture, 'zh')}\n\n"
             f"{render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], '未同步到集成顺序。', 'zh')}\n\n"
             f"{render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], '未同步到发布影响矩阵。', 'zh')}\n\n"
             f"{render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚策略。', 'zh')}\n\n"
-            "## 九、交付执行计划\n\n"
+            "## 十、交付执行计划\n\n"
             f"{render_delivery_tasks(delivery_plan, 'zh')}\n\n"
-            "## 十、需求追踪关系\n\n"
+            "## 十一、需求追踪关系\n\n"
             "- 追踪关系：每个设计决策必须能回到 `spec.json` 的验收标准，并向前关联到 `test_design.json` 测试用例、`delivery_plan.json` 任务和发布证据。\n"
             "- 如果任一验收标准缺少设计引用、测试用例或交付证据责任人，评审时应阻止进入实现。\n\n"
-            "## 十一、测试策略摘要\n\n"
+            "## 十二、测试策略摘要\n\n"
             f"- 本节只保留验收证据映射和测试策略摘要；详细测试用例维护在 `human/tests/{doc_id}.md` 与 `test_design.json`。\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。', 'zh')}\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
-            "## 十二、风险与未过门禁\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['summary', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
+            "## 十三、风险与未过门禁\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
-            "## 十三、证据引用\n\n"
+            "## 十四、证据引用\n\n"
             "- `technical_design.json`：技术设计、接口、数据、权限和测试映射。\n"
             "- `architecture_design.json`：架构边界、跨仓依赖、部署和回滚策略。\n"
             "- `test_design.json`：详细测试用例、回归范围和验收证据要求。\n"
@@ -980,7 +1747,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "## 二、验收证据映射\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], '未同步到验收证据映射。', 'zh')}\n\n"
             "## 三、测试策略摘要\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['summary', 'type', 'evidence'], '未同步到测试策略。', 'zh')}\n\n"
             "## 四、测试用例\n\n"
             f"{render_test_cases(test_design, 'zh')}\n\n"
             "## 五、测试数据准备\n\n"
@@ -1023,7 +1790,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"{render_release_mermaid(delivery_plan, 'zh')}\n\n"
             "## 五、验证步骤\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], '未同步到验收验证步骤。', 'zh')}\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], '未同步到测试验证步骤。', 'zh')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['summary', 'type', 'evidence'], '未同步到测试验证步骤。', 'zh')}\n\n"
             "## 六、需求追踪关系\n\n"
             "- 追踪关系：发布验证必须把 `spec.json` 验收标准、`test_design.json` 测试用例、`delivery_plan_review.json` 门禁和回滚证据串联起来。\n"
             "- 任一验收标准没有执行证据或回滚责任人时，发布必须保持阻塞。\n\n"
@@ -1040,7 +1807,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"{render_named_items(as_list(architecture.get('observability')), ['signal', 'owner'], '未同步到观察指标。', 'zh')}\n\n"
             f"{render_named_items(as_list(architecture.get('monitoring_alerts')), ['signal', 'owner', 'trigger', 'action'], '未同步到告警策略。', 'zh')}\n\n"
             "## 十一、下一步动作\n\n"
-            f"- {render_next_action(status, delivery_review)}\n\n"
+            f"- {render_next_action(status, delivery_review, 'zh')}\n\n"
             "## 十二、证据引用\n\n"
             "- `delivery_status.json`：当前阶段、允许实现/发布状态和缺口。\n"
             "- `delivery_plan_review.json`：交付计划评审结论。\n"
@@ -1063,6 +1830,16 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
     status = read_json(artifact_dir / "delivery_status.json")
     requirement_text = requirement.read_text(encoding="utf-8") if requirement.exists() else ""
     heading = title or str(spec.get("title") or doc_id)
+    user_scenarios = [
+        text(item.get("scenario") or item.get("summary") or item)
+        for item in as_list(spec.get("user_scenarios"))
+        if isinstance(item, dict)
+    ] + [text(item) for item in as_list(spec.get("user_scenarios")) if not isinstance(item, dict)]
+    business_objectives = [
+        text(item.get("objective") or item.get("summary") or item)
+        for item in as_list(spec.get("business_objectives"))
+        if isinstance(item, dict)
+    ] + [text(item) for item in as_list(spec.get("business_objectives")) if not isinstance(item, dict)]
     return {
         "spec": (
             f"# {heading} Spec\n\n"
@@ -1072,10 +1849,11 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"- Permission sensitivity: {text((spec.get('permission_scope') or {}).get('sensitive'), 'unknown')}\n\n"
             "## Review Focus\n\n"
             f"{render_review_context(spec, 'en')}\n\n"
+            f"{render_spec_review_narrative(spec, 'en')}\n\n"
             "## Background And Goals\n\n"
             f"{section_paragraph('Business Background', [text(spec.get('requirement_summary') or spec.get('summary') or heading)], 'Business background was not synced.')}\n\n"
-            f"{section_paragraph('User Scenarios', [text(item.get('scenario') or item.get('summary') or item) for item in as_list(spec.get('user_scenarios')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('user_scenarios')) if not isinstance(item, dict)], 'No user scenarios were recorded.')}\n\n"
-            f"{section_paragraph('Business Objectives', [text(item.get('objective') or item.get('summary') or item) for item in as_list(spec.get('business_objectives')) if isinstance(item, dict)] + [text(item) for item in as_list(spec.get('business_objectives')) if not isinstance(item, dict)], 'No business objectives were recorded.')}\n\n"
+            f"{section_paragraph('User Scenarios', user_scenarios, 'No user scenarios were recorded.')}\n\n"
+            f"{section_paragraph('Business Objectives', business_objectives, 'No business objectives were recorded.')}\n\n"
             "## Scope\n\n"
             f"{render_scope(spec, text(spec.get('summary') or heading))}\n\n"
             "## Requirement Clarification\n\n"
@@ -1107,11 +1885,17 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "## Review Focus\n\n"
             f"{render_design_review_context(technical, architecture, delivery_plan, 'en')}\n\n"
             "## Current State, Problem, And Goals\n\n"
-            f"{render_named_items([technical.get('current_state_analysis')], ['existing_behavior', 'code_entrypoints', 'known_constraints', 'reuse_points'], 'No current-state analysis was synced.')}\n\n"
+            f"{render_problem_analysis(technical, 'en')}\n\n"
             f"{render_named_items([architecture.get('current_architecture')], ['system_context', 'repo_entrypoints', 'upstream_downstream', 'constraints'], 'No current architecture analysis was synced.')}\n\n"
-            f"{section_paragraph('Design Goals', [text(item.get('behavior') or item.get('summary') or item) for item in as_list(technical.get('target_behavior')) if isinstance(item, dict)], 'No target behavior was synced.')}\n\n"
-            f"{section_paragraph('Non Goals', [str(item) for item in as_list((technical.get('design_scope') or {}).get('non_goals'))], 'No non-goals were recorded.')}\n\n"
-            "## Options And Decision\n\n"
+            "## Sub-Requirement Design Matrix\n\n"
+            f"{render_requirement_breakdown_table(technical, 'en')}\n\n"
+            "### Code Entrypoint Confidence\n\n"
+            f"{render_entrypoint_confidence(technical, 'en')}\n\n"
+            "### Field / API / Permission Impact\n\n"
+            f"{render_field_api_permission_impact(technical, 'en')}\n\n"
+            "### Low-Confidence Confirmation Items\n\n"
+            f"{render_low_confidence_items(technical, architecture, 'en')}\n\n"
+            "## Candidate Options, Comparison, And Decision\n\n"
             f"{render_solution_options(technical, architecture, 'en')}\n\n"
             "## Decision Records\n\n"
             f"{render_decision_records(architecture, technical, language='en')}\n\n"
@@ -1125,6 +1909,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"{render_named_items(as_list(technical.get('interface_examples')), ['name', 'request', 'response', 'error_response'], 'No interface examples were synced.')}\n\n"
             "## Data And UI Impact\n\n"
             f"{render_named_items(as_list(technical.get('data_design')), ['read_rule', 'write_rule', 'migration'], 'No data design was synced.')}\n\n"
+            f"{render_expert_technical_sections(technical, 'en')}\n\n"
             f"{render_named_items(as_list(technical.get('permission_model')), ['role', 'rule', 'negative_case'], 'No permission rules were synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('exception_and_edge_cases')), ['case', 'handling'], 'No exception scenarios were synced.')}\n\n"
             f"{render_named_items(as_list(technical.get('ui_ue_design')), ['page_or_route', 'user_goal', 'entry_point', 'permission_visibility', 'acceptance_evidence'], 'No UI impact was confirmed.')}\n\n"
@@ -1143,7 +1928,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "## Test Strategy Summary\n\n"
             f"- This section keeps only acceptance evidence mapping and test strategy summary. Detailed test cases live in `human/tests/{doc_id}.md` and `test_design.json`.\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], 'No acceptance evidence mapping was synced.')}\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['summary', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
             "## Risks And Open Gates\n\n"
             f"{render_blockers(delivery_plan, architecture)}\n\n"
             "## Evidence References\n\n"
@@ -1163,7 +1948,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "## Acceptance Evidence Mapping\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'design_refs', 'evidence_required'], 'No acceptance evidence mapping was synced.')}\n\n"
             "## Test Strategy Summary\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['summary', 'type', 'evidence'], 'No test strategy was synced.')}\n\n"
             "## Test Cases\n\n"
             f"{render_test_cases(test_design, 'en')}\n\n"
             "## Test Data Preparation\n\n"
@@ -1205,7 +1990,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"{render_release_mermaid(delivery_plan, 'en')}\n\n"
             "## Validation Steps\n\n"
             f"{render_named_items(as_list(technical.get('acceptance_mapping')), ['acceptance_id', 'evidence_required'], 'No acceptance validation steps were synced.')}\n\n"
-            f"{render_named_items(as_list(technical.get('test_strategy')), ['case', 'type', 'evidence'], 'No test validation steps were synced.')}\n\n"
+            f"{render_named_items(as_list(technical.get('test_strategy')), ['summary', 'type', 'evidence'], 'No test validation steps were synced.')}\n\n"
             "## Requirement Traceability\n\n"
             "- Traceability: release validation must connect `spec.json` acceptance criteria, `test_design.json` cases, `delivery_plan_review.json` gates, and rollback evidence before any production release.\n"
             "- A release remains blocked when any acceptance criterion lacks execution evidence or rollback ownership.\n\n"
@@ -1277,7 +2062,8 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     copied_raw: list[str] = []
     for source in sorted(artifact_dir.glob("*.json")):
         dest = raw_dir / source.name
-        shutil.copy2(source, dest)
+        if source.resolve() != dest.resolve():
+            shutil.copy2(source, dest)
         copied_raw.append(str(dest.relative_to(docs_root)))
 
     manifest["synced_from"] = str(artifact_dir)

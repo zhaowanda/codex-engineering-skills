@@ -498,6 +498,32 @@ def test_human_doc_review_strict_requires_design_depth_for_designs() -> None:
         assert {"options", "risk", "rollback", "test", "traceability", "implementation_boundary"}.issubset(blocked_sources)
 
 
+def test_human_doc_review_blocks_design_decision_before_options() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/designs/REQ-ORDER.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# 订单导出 技术设计\n\n"
+            "## 一、摘要\n\n"
+            "范围 决策 方案 风险 证据 回滚 背景 目标 澄清 验收 测试 追踪 实施边界 评审重点。\n\n"
+            "## 技术决策结论\n\n"
+            "- 选中：`T1`\n\n"
+            "## 技术候选方案详述\n\n"
+            "### 方案 `T1`：单模块实现\n\n"
+            "- 适用条件：单模块、低风险。\n"
+            "- 风险：需要回归测试。\n\n"
+            "## 风险与回滚\n\n"
+            "风险可控，回滚到旧版本。\n\n"
+            "## 追踪关系与证据\n\n"
+            "- `technical_design.json`\n\n"
+            "```mermaid\nflowchart LR\nA-->B\n```\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert result["decision"] == "block"
+        assert any(item["source"] == "decision_order" for item in result["blockers"])
+
+
 def test_human_doc_review_strict_is_doc_type_aware_for_tests() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "human/tests/REQ-1.md"
@@ -525,6 +551,68 @@ def test_human_doc_review_strict_is_doc_type_aware_for_tests() -> None:
         assert "options" not in blocked_sources
         assert "rollback" not in blocked_sources
         assert "implementation_boundary" not in blocked_sources
+
+
+def test_human_doc_review_blocks_chinese_test_doc_without_execution_details() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/tests/REQ-ORDER.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# 订单导出 测试设计\n\n"
+            "## 一、摘要\n\n"
+            "范围 验收 测试 证据 追踪。\n\n"
+            "## 二、验收证据映射\n\n"
+            "- `AC-1` 映射到 `test_design.json`。\n\n"
+            "## 三、测试策略摘要\n\n"
+            "- 覆盖功能测试和回归测试。\n\n"
+            "## 四、测试用例\n\n"
+            "### `TC-1` 验证订单导出\n\n"
+            "- 关联验收：`AC-1`\n"
+            "- 执行步骤：打开页面，点击导出。\n"
+            "- 预期结果：导出成功。\n\n"
+            "## 八、追踪关系\n\n"
+            "- 追踪到 `spec.json`。\n\n"
+            "## 九、证据引用\n\n"
+            "- `test_design.json`\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert result["decision"] == "block"
+        sources = {item["source"] for item in result["blockers"]}
+        assert {"test_execution_path", "test_assertions", "test_data_setup"}.issubset(sources)
+
+
+def test_human_doc_review_accepts_review_style_test_case_sections() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/tests/REQ-ORDER.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# 订单导出 测试设计\n\n"
+            "## 一、摘要\n\n"
+            "范围 验收 测试 证据 追踪。\n\n"
+            "## 二、验收证据映射\n\n"
+            "- `AC-1` 映射到 `test_design.json`。\n\n"
+            "## 三、测试策略摘要\n\n"
+            "- 覆盖功能测试和回归测试。\n\n"
+            "## 四、测试用例\n\n"
+            "### `TC-1` 验证订单导出\n\n"
+            "- 关联验收：`AC-1`\n"
+            "- 为什么测：证明验收能通过真实入口和证据闭环。\n"
+            "- 项目语义依据：页面：/orders；接口：/api/orders/export。\n"
+            "- 怎么造数：测试夹具/工厂方法；数据记录：订单主记录。\n"
+            "- 怎么执行：页面路径：打开 /orders -> 点击导出；详细步骤：设置筛选条件并导出。\n"
+            "- 怎么判定通过：导出文件包含订单号和状态。\n"
+            "- 预期结果：导出成功。\n\n"
+            "## 八、追踪关系\n\n"
+            "- 追踪到 `spec.json`。\n\n"
+            "## 九、证据引用\n\n"
+            "- `test_design.json`\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert result["decision"] != "block"
+        sources = {item["source"] for item in result["blockers"]}
+        assert not {"test_execution_path", "test_assertions", "test_data_setup"} & sources
 
 
 def test_human_doc_review_warns_missing_formal_sections_and_diagram() -> None:
@@ -578,6 +666,72 @@ def test_human_doc_review_warns_chinese_doc_with_english_template_terms() -> Non
         result = human_doc_review.review(doc)
         assert result["decision"] == "warn"
         assert any(item["source"] == "zh_language_quality" for item in result["warnings"])
+
+
+def test_human_doc_review_tracks_unresolved_items_with_context() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/designs/REQ-CONFIRM.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# 续期优化 技术设计\n\n"
+            "## 一、摘要\n\n"
+            "范围 决策 方案 风险 证据 回滚 测试 追踪 实施边界 评审重点。\n\n"
+            "本设计用于评审续期相关数据口径的落地方式，重点说明哪些内容已经确认，哪些内容需要在实施前通过代码和数据库结构核对。"
+            "确认项不会被当作最终事实，而是作为设计评审中的显式行动项绑定到证据和责任边界，避免把占位内容包装成已确认结论。\n\n"
+            "## 二、候选方案、对比与决策\n\n"
+            "### 技术候选方案详述\n\n"
+            "- 方案：在责任模块内实现，保持既有接口契约，先通过代码核对真实表名、字段类型和历史数据影响，再进入实现。\n\n"
+            "### 技术方案加权对比\n\n"
+            "- 风险、证据、回滚均已比较；当前方案胜出是因为回滚边界最小，且未引入跨系统契约变更。\n\n"
+            "### 技术决策结论\n\n"
+            "- 决策：选择当前责任模块；接受的取舍是实施前必须完成表结构核对，否则不得把字段变更作为已确认实现任务。\n\n"
+            "## 三、数据模型与表结构\n\n"
+            "- 表：需结合代码和数据库核对；原因：当前项目理解没有可靠表名；动作：实施前核对 mapper 和 migration；证据：`technical_design.json`。\n\n"
+            "## 四、风险与回滚\n\n"
+            "- 风险：表结构需核对。回滚：按 migration 策略回滚；如发现真实表结构不支持无损回滚，应回到设计阶段重新选择方案。\n\n"
+            "## 五、测试策略摘要\n\n"
+            "- 测试：覆盖功能、回归和数据兼容。\n\n"
+            "## 六、追踪关系\n\n"
+            "- 追踪到 `spec.json`、`technical_design.json` 和 `test_design.json`。\n\n"
+            "```mermaid\nflowchart LR\nA-->B\n```\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc, strict=True)
+        assert result["decision"] != "block"
+        assert result["unresolved_summary"]["count"] == 1
+        assert not any(item["source"] == "unresolved_without_context" for item in result["blockers"])
+
+
+def test_human_doc_review_blocks_unresolved_items_without_context_in_strict_mode() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/designs/REQ-CONFIRM.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# 续期优化 技术设计\n\n"
+            "## 一、摘要\n\n"
+            "范围 决策 方案 风险 证据 回滚 测试 追踪 实施边界 评审重点。\n\n"
+            "本设计模拟缺少确认项上下文的情况。文档包含基本评审章节，但故意没有给确认项绑定原因、动作或证据，严格模式应阻止它进入共享评审。\n\n"
+            "## 二、候选方案、对比与决策\n\n"
+            "### 技术候选方案详述\n\n"
+            "- 方案：在责任模块内实现，保持既有接口契约，控制变更范围并降低回滚成本。\n\n"
+            "### 技术方案加权对比\n\n"
+            "- 风险、证据、回滚均已比较；当前方案的主要优势是边界清晰，主要风险是结构信息仍不充分。\n\n"
+            "### 技术决策结论\n\n"
+            "- 决策：选择当前责任模块；但下方确认项没有给出处置上下文，因此应被文档门禁识别。\n\n"
+            "## 三、数据模型与表结构\n\n"
+            "- 表：需结合代码和数据库核对。\n\n"
+            "## 四、风险与回滚\n\n"
+            "- 风险：表结构需核对。回滚：按 migration 策略回滚；如果真实结构不支持回滚，需要重新评审数据方案。\n\n"
+            "## 五、测试策略摘要\n\n"
+            "- 测试：覆盖功能、回归和数据兼容。\n\n"
+            "## 六、追踪关系\n\n"
+            "- 追踪到 `spec.json`、`technical_design.json` 和 `test_design.json`。\n\n"
+            "```mermaid\nflowchart LR\nA-->B\n```\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc, strict=True)
+        assert result["decision"] == "block"
+        assert any(item["source"] == "unresolved_without_context" for item in result["blockers"])
 
 
 def test_forward_test_runner_passes_synthetic_case() -> None:
@@ -1019,7 +1173,10 @@ def run_all() -> None:
     test_human_doc_review_strict_blocks_warnings()
     test_human_doc_review_strict_is_doc_type_aware_for_specs()
     test_human_doc_review_strict_requires_design_depth_for_designs()
+    test_human_doc_review_blocks_design_decision_before_options()
     test_human_doc_review_strict_is_doc_type_aware_for_tests()
+    test_human_doc_review_blocks_chinese_test_doc_without_execution_details()
+    test_human_doc_review_accepts_review_style_test_case_sections()
     test_human_doc_review_warns_missing_formal_sections_and_diagram()
     test_human_doc_review_warns_outline_only_document()
     test_human_doc_review_warns_chinese_doc_with_english_template_terms()

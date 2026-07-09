@@ -9,6 +9,21 @@ from typing import Any
 
 
 ROLES = {"modify", "read_only", "confirm_only", "out_of_scope"}
+GENERIC_ENTRYPOINT_NAMES = {
+    "application.java",
+    "main.java",
+    "index.js",
+    "index.ts",
+    "index.tsx",
+    "index.jsx",
+    "package.json",
+    "package-lock.json",
+    "vue.config.js",
+    "babel.config.js",
+    "readme.md",
+    "docker-compose.yml",
+}
+GENERIC_ENTRYPOINT_PARTS = {"assets", "icons", "plugins", "config", "node_modules"}
 
 
 def now() -> str:
@@ -38,6 +53,14 @@ def as_list(value: Any) -> list[Any]:
 
 def safe_list(value: Any) -> list[str]:
     return [str(item) for item in as_list(value) if str(item).strip()]
+
+
+def is_generic_entrypoint(path: str) -> bool:
+    low = path.strip().lower()
+    if not low:
+        return False
+    parts = set(Path(low).parts)
+    return Path(low).name in GENERIC_ENTRYPOINT_NAMES or bool(parts & GENERIC_ENTRYPOINT_PARTS)
 
 
 def load_project_understanding(path: Path | None) -> dict[str, Any]:
@@ -162,6 +185,8 @@ def narrow_allowed_files(paths: list[str]) -> list[str]:
             continue
         parts = Path(path).parts
         if len(parts) <= 1 and "." not in Path(path).name:
+            continue
+        if is_generic_entrypoint(path):
             continue
         concrete.append(path)
     return sorted(set(concrete))

@@ -37,11 +37,13 @@ Then run `design-architecture-reviewer` after architecture design exists.
 - Do not present fallback phrases such as `target module to be confirmed` as expert-ready facts; keep them as review-blocking uncertainty.
 - Preserve open questions; do not hide uncertainty.
 - Include at least two solution options and a selected option.
-- Include an option comparison matrix, decision confidence, implementation invariants, and expert review checklist.
+- For every solution option, include when to choose it, implementation outline, risk controls, test evidence, rollout impact, performance impact, and rollback strategy.
+- Include a weighted option comparison matrix, score summary, decision confidence, implementation invariants, and expert review checklist.
+- When relevant, include data model/table schema changes, multi-system interaction sequence, MQ upstream/downstream trigger rules, cache strategy, transaction consistency, and observability design.
 - Include traceability from requirements to acceptance and tests.
 
 ## Output
 
 The output uses schema `codex-technical-design-v1`.
 
-The artifact includes process flow, modules, logical data flow, API/UI behavior, options, selected approach, comparison matrix, invariants, tests, risks, and traceability.
+The artifact includes process flow, modules, logical data flow, API/UI behavior, data model/table schema, system sequence, MQ/cache/transaction/observability decisions, detailed options, selected approach, weighted comparison matrix, score summary, invariants, tests, risks, and traceability.

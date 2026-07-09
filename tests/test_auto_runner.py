@@ -89,42 +89,66 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
         )
         assert result["docs_readiness"]["decision"] == "pass"
         assert result["docs_sync"]["decision"] == "pass"
+        assert result["doc_language"] == "zh"
         assert (docs_root / "indexes/REQ-AUTO-DOCS.manifest.json").exists()
         spec_doc = (docs_root / "human/specs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         design_doc = (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         test_doc = (docs_root / "human/tests/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
         release_doc = (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        assert "## Executive Summary" in spec_doc
-        assert "## Background And Goals" in spec_doc
-        assert "## Scope" in spec_doc
-        assert "## Requirement Clarification" in spec_doc
-        assert "### Clarification Log" in spec_doc
-        assert "### Clarification Status" in spec_doc
-        assert "### Confirmed Understanding" in spec_doc
-        assert "### Pending Questions" in spec_doc
-        assert "### Working Assumptions" in spec_doc
-        assert "Design can proceed:" in spec_doc
-        assert "## Acceptance Criteria" in spec_doc
-        assert "## Requirement Traceability Diagram" in spec_doc
+        assert "## 一、摘要" in spec_doc
+        assert "## 二、背景与目标" in spec_doc
+        assert "## 三、范围与非目标" in spec_doc
+        assert "## 四、需求澄清" in spec_doc
+        assert "### 澄清记录" in spec_doc
+        assert "### 澄清状态" in spec_doc
+        assert "### 已确认理解" in spec_doc
+        assert "### 待澄清问题" in spec_doc
+        assert "### 工作假设" in spec_doc
+        assert "是否允许进入设计：是" in spec_doc
+        assert "## 六、验收标准" in spec_doc
+        assert "## 八、需求到验收追踪图" in spec_doc
         assert "`AC-1` exported file contains order id and status." in spec_doc
         assert "```mermaid" in spec_doc + design_doc + release_doc
-        assert "## Current State, Problem, And Goals" in design_doc
-        assert "## Decision Records" in design_doc
-        assert "## Process Flow" in design_doc
-        assert "## Risks And Open Gates" in design_doc
-        assert "## Test Strategy Summary" in design_doc
-        assert "### Test Cases" not in design_doc
+        assert "## 二、现状问题与设计目标" in design_doc
+        assert "## 四、候选方案、对比与决策" in design_doc
+        assert "### 技术候选方案详述" in design_doc
+        assert "### 技术方案加权对比" in design_doc
+        assert "### 技术决策结论" in design_doc
+        assert design_doc.index("### 技术候选方案详述") < design_doc.index("### 技术方案加权对比") < design_doc.index("### 技术决策结论")
+        assert "### 架构候选方案详述" in design_doc
+        assert "### 架构方案加权对比" in design_doc
+        assert "### 架构决策结论" in design_doc
+        assert design_doc.index("### 架构候选方案详述") < design_doc.index("### 架构方案加权对比") < design_doc.index("### 架构决策结论")
+        assert "## 五、决策记录" in design_doc
+        assert "## 六、业务流程" in design_doc
+        assert "### 数据模型与表结构" in design_doc
+        assert "### 多系统交互时序" in design_doc
+        assert "### MQ 上下游与触发机制" in design_doc
+        assert "### 缓存策略评估" in design_doc
+        assert "### 事务与一致性" in design_doc
+        assert "### 可观测性设计" in design_doc
+        assert "## 十三、风险与未过门禁" in design_doc
+        assert "## 十二、测试策略摘要" in design_doc
+        assert "### 测试用例" not in design_doc
         assert "`TC-1`" not in design_doc
         assert "Acceptance:" not in design_doc
-        assert "## Test Cases" in test_doc
+        assert "## 四、测试用例" in test_doc
         assert "`TC-1`" in test_doc
-        assert "Acceptance:" in test_doc
-        assert "## Regression, Integration, Frontend, And Permission Scope" in test_doc
-        assert "## Missing Readiness" in release_doc
-        assert "## Execution Steps" in release_doc
-        assert "## Release And Rollback Sequence" in release_doc
-        assert "### Test Cases" in release_doc
-        assert "### Before Implementation" in release_doc
+        assert "关联验收" in test_doc
+        assert "为什么测" in test_doc
+        assert "项目语义依据" in test_doc
+        assert "怎么造数" in test_doc
+        assert "怎么执行" in test_doc
+        assert "怎么判定通过" in test_doc
+        assert "清理要求" in test_doc
+        assert "## 六、回归、集成、前端与权限范围" in test_doc
+        assert "## 二、发布前检查" in release_doc
+        assert "## 三、执行步骤" in release_doc
+        assert "## 四、发布与回滚顺序图" in release_doc
+        assert "### 测试用例" in release_doc
+        assert "### 实现前必须补齐" in release_doc
+        assert "## Executive Summary" not in spec_doc + design_doc + test_doc + release_doc
+        assert "Evidence References" not in spec_doc + design_doc + test_doc + release_doc
         assert "- -" not in spec_doc + design_doc + test_doc + release_doc
         assert "[{\"" not in spec_doc + design_doc + test_doc + release_doc
         assert "{\"in_scope\"" not in spec_doc
@@ -165,18 +189,39 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         assert "## 二、现状问题与设计目标" in design_doc
         assert "设计覆盖" in design_doc
         assert "实施边界" in design_doc
-        assert "## 三、方案对比与选择" in design_doc
-        assert "## 四、决策记录" in design_doc
-        assert "## 五、业务流程" in design_doc
-        assert "## 六、模块与接口设计" in design_doc
-        assert "## 九、交付执行计划" in design_doc
-        assert "## 十、需求追踪关系" in design_doc
-        assert "## 十一、测试策略摘要" in design_doc
+        assert "## 三、子需求设计矩阵" in design_doc
+        assert "## 四、候选方案、对比与决策" in design_doc
+        assert "### 技术候选方案详述" in design_doc
+        assert "### 技术方案加权对比" in design_doc
+        assert "### 技术决策结论" in design_doc
+        assert design_doc.index("### 技术候选方案详述") < design_doc.index("### 技术方案加权对比") < design_doc.index("### 技术决策结论")
+        assert "### 架构候选方案详述" in design_doc
+        assert "### 架构方案加权对比" in design_doc
+        assert "### 架构决策结论" in design_doc
+        assert design_doc.index("### 架构候选方案详述") < design_doc.index("### 架构方案加权对比") < design_doc.index("### 架构决策结论")
+        assert "## 五、决策记录" in design_doc
+        assert "## 六、业务流程" in design_doc
+        assert "## 七、模块与接口设计" in design_doc
+        assert "### 数据模型与表结构" in design_doc
+        assert "### 多系统交互时序" in design_doc
+        assert "### MQ 上下游与触发机制" in design_doc
+        assert "### 缓存策略评估" in design_doc
+        assert "### 事务与一致性" in design_doc
+        assert "### 可观测性设计" in design_doc
+        assert "## 十、交付执行计划" in design_doc
+        assert "## 十一、需求追踪关系" in design_doc
+        assert "## 十二、测试策略摘要" in design_doc
         assert "### 测试用例" not in design_doc
         assert "`TC-1`" not in design_doc
         assert "## 四、测试用例" in test_doc
         assert "`TC-1`" in test_doc
         assert "关联验收" in test_doc
+        assert "为什么测" in test_doc
+        assert "项目语义依据" in test_doc
+        assert "怎么造数" in test_doc
+        assert "怎么执行" in test_doc
+        assert "怎么判定通过" in test_doc
+        assert "清理要求" in test_doc
         assert "## 五、测试数据准备" in test_doc
         assert "## 六、回归、集成、前端与权限范围" in test_doc
         assert "## 二、发布前检查" in release_doc
