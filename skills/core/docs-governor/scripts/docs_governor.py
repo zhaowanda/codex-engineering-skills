@@ -1364,6 +1364,83 @@ def runtime_entrypoint_label(entrypoint: dict[str, Any], frontend_label: str, ba
     return name or frontend_label or backend_label
 
 
+def runtime_entrypoint_from_evidence(runtime_evidence: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(runtime_evidence.get("entrypoint"), dict) and runtime_evidence.get("entrypoint"):
+        return runtime_evidence["entrypoint"]
+    for item in as_list(runtime_evidence.get("interactions")):
+        if isinstance(item, dict) and isinstance(item.get("entrypoint"), dict) and item.get("entrypoint"):
+            return item["entrypoint"]
+    frontend = runtime_evidence.get("frontend") if isinstance(runtime_evidence.get("frontend"), dict) else {}
+    backend = runtime_evidence.get("backend") if isinstance(runtime_evidence.get("backend"), dict) else {}
+    if frontend.get("source_file") or frontend.get("route") or frontend.get("page"):
+        return {
+            "kind": "frontend_action",
+            "repo": frontend.get("repo"),
+            "name": frontend.get("page") or frontend.get("route"),
+            "source_file": frontend.get("source_file") or frontend.get("file"),
+            "path": frontend.get("route"),
+        }
+    if backend.get("controller") or backend.get("service"):
+        return {
+            "kind": "backend_method",
+            "repo": backend.get("repo"),
+            "name": backend.get("controller") or backend.get("service"),
+            "source_file": backend.get("controller") or backend.get("service"),
+        }
+    return {}
+
+
+def runtime_entrypoint_kind_label(entrypoint: dict[str, Any], language: str = "en") -> str:
+    kind = text(entrypoint.get("kind"), "")
+    zh = {
+        "frontend_action": "前端操作",
+        "http_api": "HTTP/API 调用",
+        "scheduled_job": "定时任务",
+        "mq_consumer": "MQ Consumer",
+        "batch_job": "批处理任务",
+        "backend_method": "后端方法/服务入口",
+    }
+    en = {
+        "frontend_action": "frontend action",
+        "http_api": "HTTP/API call",
+        "scheduled_job": "scheduled job",
+        "mq_consumer": "MQ consumer",
+        "batch_job": "batch job",
+        "backend_method": "backend method/service entrypoint",
+    }
+    return (zh if language == "zh" else en).get(kind, kind)
+
+
+def runtime_entrypoint_plain_label(entrypoint: dict[str, Any], language: str = "en") -> str:
+    if not isinstance(entrypoint, dict) or not entrypoint:
+        return ""
+    parts = [
+        human_value(entrypoint.get("repo"), language, ""),
+        human_value(entrypoint.get("name") or entrypoint.get("handler"), language, ""),
+    ]
+    method_api = " ".join(
+        part
+        for part in [
+            human_value(entrypoint.get("method"), language, ""),
+            human_value(entrypoint.get("api") or entrypoint.get("path"), language, ""),
+        ]
+        if part
+    )
+    for value in [
+        method_api,
+        human_value(entrypoint.get("topic") or entrypoint.get("queue"), language, ""),
+        human_value(entrypoint.get("cron"), language, ""),
+        human_value(entrypoint.get("source_file"), language, ""),
+    ]:
+        if value:
+            parts.append(value)
+    compact: list[str] = []
+    for part in parts:
+        if part and part not in compact:
+            compact.append(part)
+    return " / ".join(compact)
+
+
 def render_system_sequence_mermaid(
     technical: dict[str, Any],
     language: str = "en",
@@ -2461,6 +2538,9 @@ def render_runtime_evidence_context(runtime_evidence: dict[str, Any], language: 
     interactions = [item for item in as_list(runtime_evidence.get("interactions")) if isinstance(item, dict)]
     if not frontend and not backend and not interactions:
         return ""
+    entrypoint = runtime_entrypoint_from_evidence(runtime_evidence)
+    entry_kind = runtime_entrypoint_kind_label(entrypoint, language)
+    entry_source = runtime_entrypoint_plain_label(entrypoint, language)
     actor = human_value(runtime_evidence.get("actor"), language, "")
     frontend_entry = " / ".join(
         item
@@ -2492,6 +2572,10 @@ def render_runtime_evidence_context(runtime_evidence: dict[str, Any], language: 
         lines = ["### 源码证据校准", ""]
         if actor:
             lines.append(f"- 操作角色：{actor}")
+        if entry_kind:
+            lines.append(f"- 运行时入口类型：{entry_kind}")
+        if entry_source:
+            lines.append(f"- 触发源：{entry_source}")
         if frontend_entry:
             lines.append(f"- 前端入口：{frontend_entry}")
         if trigger:
@@ -2505,6 +2589,10 @@ def render_runtime_evidence_context(runtime_evidence: dict[str, Any], language: 
     lines = ["### Source Evidence Calibration", ""]
     if actor:
         lines.append(f"- Actor: {actor}")
+    if entry_kind:
+        lines.append(f"- Runtime entrypoint type: {entry_kind}")
+    if entry_source:
+        lines.append(f"- Trigger source: {entry_source}")
     if frontend_entry:
         lines.append(f"- Frontend entry: {frontend_entry}")
     if trigger:
@@ -3633,20 +3721,28 @@ def render_runtime_process_flows(runtime_evidence: dict[str, Any], language: str
     if language == "zh":
         lines = ["### 真实业务流程"]
         for index, item in enumerate(interactions[:10], start=1):
+            entrypoint = item.get("entrypoint") if isinstance(item.get("entrypoint"), dict) else runtime_entrypoint_from_evidence(runtime_evidence)
+            entry_kind = runtime_entrypoint_kind_label(entrypoint, language) or "运行时入口"
             lines.append(f"\n#### {index}. {human_value(item.get('scenario'), language, f'流程 {index}')}")
-            lines.append(f"- 用户动作：{human_value(item.get('trigger'), language, '未同步触发动作')}")
+            lines.append(f"- 入口类型：{entry_kind}")
+            lines.append(f"- 触发动作：{human_value(item.get('trigger'), language, '未同步触发动作')}")
             api = " ".join(part for part in [human_value(item.get("method"), language, ""), human_value(item.get("api"), language, "")] if part)
-            lines.append(f"- 前端请求：{api or '未同步接口'}；{human_value(item.get('request'), language, '未同步请求参数')}")
+            request_label = "前端请求" if text(entrypoint.get("kind"), "") == "frontend_action" else "入口载荷/请求"
+            lines.append(f"- {request_label}：{api or '未同步接口'}；{human_value(item.get('request'), language, '未同步请求参数')}")
             lines.append(f"- 后端处理：{human_value(item.get('backend_action'), language, '未同步后端处理')}")
             lines.append(f"- 正常结果：{human_value(item.get('response'), language, '页面刷新或提示成功')}")
             lines.append(f"- 异常结果：{human_value(item.get('failure'), language, '保留既有错误处理')}")
         return "\n".join(lines)
     lines = ["### Real Business Flow"]
     for index, item in enumerate(interactions[:10], start=1):
+        entrypoint = item.get("entrypoint") if isinstance(item.get("entrypoint"), dict) else runtime_entrypoint_from_evidence(runtime_evidence)
+        entry_kind = runtime_entrypoint_kind_label(entrypoint, language) or "runtime entrypoint"
         api = " ".join(part for part in [human_value(item.get("method"), language, ""), human_value(item.get("api"), language, "")] if part)
         lines.append(f"\n#### {index}. {human_value(item.get('scenario'), language, f'Flow {index}')}")
-        lines.append(f"- User action: {human_value(item.get('trigger'), language, 'not synced')}")
-        lines.append(f"- Frontend request: {api or 'not synced'}; {human_value(item.get('request'), language, 'request not synced')}")
+        lines.append(f"- Entrypoint type: {entry_kind}")
+        lines.append(f"- Trigger action: {human_value(item.get('trigger'), language, 'not synced')}")
+        request_label = "Frontend request" if text(entrypoint.get("kind"), "") == "frontend_action" else "Entrypoint payload/request"
+        lines.append(f"- {request_label}: {api or 'not synced'}; {human_value(item.get('request'), language, 'request not synced')}")
         lines.append(f"- Backend handling: {human_value(item.get('backend_action'), language, 'not synced')}")
         lines.append(f"- Normal result: {human_value(item.get('response'), language, 'refresh or success message')}")
         lines.append(f"- Exception result: {human_value(item.get('failure'), language, 'preserve existing error handling')}")
@@ -3667,13 +3763,24 @@ def render_runtime_process_mermaid(runtime_evidence: dict[str, Any], language: s
         "  classDef failure fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1px;",
     ]
     for index, item in enumerate(interactions[:8], start=1):
+        entrypoint = item.get("entrypoint") if isinstance(item.get("entrypoint"), dict) else runtime_entrypoint_from_evidence(runtime_evidence)
+        kind = text(entrypoint.get("kind"), "")
+        kind_label = runtime_entrypoint_kind_label(entrypoint, language)
         trigger = mermaid_flow_label(human_value(item.get("trigger"), language, ""), language, 42)
         api = mermaid_flow_label(" ".join(part for part in [human_value(item.get("method"), language, ""), human_value(item.get("api"), language, "")] if part), language, 58)
         action = mermaid_flow_label(human_value(item.get("backend_action"), language, ""), language, 58)
         response = mermaid_flow_label(human_value(item.get("response"), language, ""), language, 44)
         failure = mermaid_flow_label(human_value(item.get("failure"), language, ""), language, 44)
-        lines.append(f'  U{index}["{trigger or ("用户操作" if language == "zh" else "User action")}"]:::actor')
-        lines.append(f'  A{index}["{api or ("调用接口" if language == "zh" else "API call")}"]:::api')
+        entry_default = kind_label or ("运行时入口" if language == "zh" else "Runtime entrypoint")
+        api_default = {
+            "frontend_action": "前端请求" if language == "zh" else "Frontend request",
+            "http_api": "HTTP/API 调用" if language == "zh" else "HTTP/API call",
+            "mq_consumer": "MQ 消息投递" if language == "zh" else "MQ delivery",
+            "scheduled_job": "调度触发" if language == "zh" else "schedule trigger",
+            "batch_job": "批处理触发" if language == "zh" else "batch trigger",
+        }.get(kind, "调用后端入口" if language == "zh" else "Backend entrypoint call")
+        lines.append(f'  U{index}["{trigger or entry_default}"]:::actor')
+        lines.append(f'  A{index}["{api or api_default}"]:::api')
         lines.append(f'  B{index}["{action or ("后端处理" if language == "zh" else "Backend handling")}"]:::backend')
         lines.append(f'  R{index}["{response or ("刷新页面" if language == "zh" else "Refresh UI")}"]:::actor')
         lines.append(f"  U{index} --> A{index} --> B{index} --> R{index}")
@@ -3732,6 +3839,9 @@ def render_runtime_entrypoint_confidence(runtime_evidence: dict[str, Any], langu
         return ""
     frontend = runtime_evidence.get("frontend") if isinstance(runtime_evidence.get("frontend"), dict) else {}
     backend = runtime_evidence.get("backend") if isinstance(runtime_evidence.get("backend"), dict) else {}
+    entrypoint = runtime_entrypoint_from_evidence(runtime_evidence)
+    entry_kind = runtime_entrypoint_kind_label(entrypoint, language)
+    entry_source = runtime_entrypoint_plain_label(entrypoint, language)
     frontend_file = human_value(frontend.get("source_file") or frontend.get("file"), language, "")
     backend_files = [human_value(item, language, "") for item in as_list(backend.get("source_files") or backend.get("files")) if human_value(item, language, "")]
     frontend_entry = " / ".join(
@@ -3756,6 +3866,8 @@ def render_runtime_entrypoint_confidence(runtime_evidence: dict[str, Any], langu
         lines = [
             "- 置信度：`高`",
             "- 来源：运行时证据已覆盖自动代码入口低置信结果。",
+            f"- 运行时入口类型：{entry_kind or '未同步'}",
+            f"- 触发源：{entry_source or '未同步'}",
             f"- 前端入口：{frontend_entry or '未同步'}",
         ]
         if frontend_file:
@@ -3767,6 +3879,8 @@ def render_runtime_entrypoint_confidence(runtime_evidence: dict[str, Any], langu
     lines = [
         "- Confidence: `high`",
         "- Source: runtime evidence overrides lower-confidence automatic entrypoint hints.",
+        f"- Runtime entrypoint type: {entry_kind or 'not synced'}",
+        f"- Trigger source: {entry_source or 'not synced'}",
         f"- Frontend entry: {frontend_entry or 'not synced'}",
     ]
     if frontend_file:
@@ -4587,6 +4701,35 @@ def ensure_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -> di
     return {"generated": False, "warnings": warnings or ["insufficient source-backed runtime evidence"]}
 
 
+def extract_manual_preface_sections(markdown: str) -> str:
+    lines = markdown.splitlines()
+    if not lines or not lines[0].startswith("# "):
+        return ""
+    start = 1
+    end = len(lines)
+    for index, line in enumerate(lines[1:], start=1):
+        if re.match(r"^##\s+(一、摘要|摘要|Executive Summary)\b", line):
+            end = index
+            break
+    segment = "\n".join(lines[start:end]).strip()
+    if not segment or not re.search(r"(?m)^##\s+", segment):
+        return ""
+    return segment
+
+
+def merge_manual_preface_sections(existing_markdown: str, generated_markdown: str) -> str:
+    preface = extract_manual_preface_sections(existing_markdown)
+    if not preface:
+        return generated_markdown
+    headings = re.findall(r"(?m)^##\s+(.+)$", preface)
+    if headings and all(f"## {heading}" in generated_markdown for heading in headings):
+        return generated_markdown
+    generated_lines = generated_markdown.splitlines()
+    if not generated_lines or not generated_lines[0].startswith("# "):
+        return generated_markdown
+    return "\n".join([generated_lines[0], "", preface, "", *generated_lines[1:]]).rstrip() + "\n"
+
+
 def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> dict[str, str]:
     requirement = artifact_dir / "requirement.normalized.txt"
     spec = read_json(artifact_dir / "spec.json")
@@ -5022,6 +5165,8 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     }
     for name, content in human_docs.items():
         human_targets[name].parent.mkdir(parents=True, exist_ok=True)
+        if name == "design" and human_targets[name].exists():
+            content = merge_manual_preface_sections(human_targets[name].read_text(encoding="utf-8", errors="ignore"), content)
         human_targets[name].write_text(content, encoding="utf-8")
 
     bundles = {

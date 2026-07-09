@@ -321,6 +321,7 @@ def test_sync_synthesizes_backend_runtime_evidence_without_fake_frontend() -> No
         assert "打开 @PostMapping" not in design_doc
         assert "前端做法" not in design_doc
         assert "调用方/入口" in design_doc
+        assert "运行时入口类型：HTTP/API 调用" in design_doc
 
 
 def test_sync_synthesizes_mq_consumer_runtime_entrypoint() -> None:
@@ -401,6 +402,7 @@ def test_sync_synthesizes_mq_consumer_runtime_entrypoint() -> None:
         assert runtime["entrypoint"]["kind"] == "mq_consumer"
         assert runtime["entrypoint"]["topic"] == "renewal.order.changed"
         assert runtime["interactions"][0]["entrypoint"]["kind"] == "mq_consumer"
+        assert "运行时入口类型：MQ Consumer" in design_doc
         assert "participant M as MQ<br/>renewal.order.changed" in design_doc
         assert "M->>C: 投递消息并触发 Consumer" in design_doc
         assert "浏览器/前端" not in design_doc
@@ -483,9 +485,48 @@ def test_sync_synthesizes_scheduled_job_runtime_entrypoint() -> None:
         design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
         assert runtime["entrypoint"]["kind"] == "scheduled_job"
         assert runtime["entrypoint"]["cron"] == "0 0 2 * * ?"
+        assert "运行时入口类型：定时任务" in design_doc
         assert "participant T as RenewalExpiryJob<br/>0 0 2 * * ?" in design_doc
         assert "T->>C: 触发定时任务处理" in design_doc
         assert "浏览器/前端" not in design_doc
+
+
+def test_sync_preserves_manual_design_preface_sections() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-MANUAL-PREFACE"
+        docs_governor.init(docs_root, doc_id, title="人工补充保留", doc_language="zh")
+        design_path = docs_root / "human/designs" / f"{doc_id}.md"
+        design_path.write_text(
+            "# 人工补充保留 技术设计\n\n"
+            "## 补充设计决策：显式保留人工判断\n\n"
+            "- 决策：这个段落来自专家复核，sync 不能覆盖。\n\n"
+            "## 一、摘要\n\n"
+            "- old generated content\n",
+            encoding="utf-8",
+        )
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "人工补充保留",
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "同步后保留人工补充", "type": "positive"}],
+            },
+        )
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id, "requirement_breakdown": []})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "人工补充保留", doc_language="zh")
+
+        design_doc = design_path.read_text(encoding="utf-8")
+        assert "## 补充设计决策：显式保留人工判断" in design_doc
+        assert "sync 不能覆盖" in design_doc
+        assert "## 一、摘要" in design_doc
 
 
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
