@@ -319,6 +319,8 @@ def test_sync_synthesizes_backend_runtime_evidence_without_fake_frontend() -> No
         assert runtime["interactions"][0]["trigger"].startswith("调用 POST /api/device/renew/trial")
         assert "POST /api/device/renew/trial" in design_doc
         assert "打开 @PostMapping" not in design_doc
+        assert "前端做法" not in design_doc
+        assert "调用方/入口" in design_doc
 
 
 def test_zh_text_preserves_unquoted_command_tokens() -> None:

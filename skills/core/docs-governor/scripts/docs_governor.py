@@ -3219,7 +3219,11 @@ def runtime_frontend_action(item: dict[str, Any], frontend_file: str, api_text: 
         for value in as_list(item.get("frontend_validation") or item.get("validation_rules"))
         if human_value(value, language, "")
     ]
+    has_frontend_evidence = bool(frontend_file or functions or bindings or validation)
     if language == "zh":
+        if not has_frontend_evidence:
+            request_part = f"；请求口径：`{request}`" if request else ""
+            return f"调用方/入口需结合业务触发点确认；当前已绑定接口：{api_text}{request_part}。"
         target = f"`{frontend_file}`" if frontend_file else "前端入口"
         parts = [f"在 {target} 处理用户动作"]
         if functions:
@@ -3234,6 +3238,9 @@ def runtime_frontend_action(item: dict[str, Any], frontend_file: str, api_text: 
         if response:
             parts.append(f"成功后按 `{response}` 刷新页面状态")
         return "；".join(parts) + "。"
+    if not has_frontend_evidence:
+        request_part = f"; request shape: `{request}`" if request else ""
+        return f"Caller/entrypoint needs confirmation; bound API: {api_text}{request_part}."
     target = f"`{frontend_file}`" if frontend_file else "frontend entry"
     parts = [f"Update {target} for the user action"]
     if functions:
@@ -3453,11 +3460,14 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
                 for ac_id in ac_ids
                 if ac_by_id.get(ac_id)
             ]
+            has_frontend_evidence = bool(frontend_file or as_list(representative.get("frontend_functions") or representative.get("frontend_methods") or representative.get("frontend_handlers")))
+            entry_label = frontend_entry if has_frontend_evidence else "调用方/业务入口"
             lines.append(f"\n#### {brk_id} {title}")
-            lines.append(f"- 当前现状：运营人员在 `{frontend_entry or '前端页面'}` 触发：{'；'.join(triggers) or '当前操作'}。")
+            lines.append(f"- 当前现状：运营人员在 `{entry_label}` 触发：{'；'.join(triggers) or '当前操作'}。")
             lines.append(f"- 现状差距：{runtime_gap_sentence(representative, ac_ids, language)}")
             lines.append(f"- 目标调整：{'；'.join(responses) or title}。")
-            lines.append(f"- 前端做法：{runtime_frontend_action(representative, frontend_file, api_text, language)}")
+            action_label = "前端做法" if has_frontend_evidence else "调用方/入口"
+            lines.append(f"- {action_label}：{runtime_frontend_action(representative, frontend_file, api_text, language)}")
             lines.append(f"- 后端做法：{runtime_backend_action(representative, backend_owner, backend_actions, language)}")
             if contract_names:
                 lines.append(f"- 契约绑定：{'；'.join(contract_names[:4])}。")
