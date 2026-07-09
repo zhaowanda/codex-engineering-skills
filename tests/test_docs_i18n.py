@@ -529,6 +529,60 @@ def test_sync_preserves_manual_design_preface_sections() -> None:
         assert "## 一、摘要" in design_doc
 
 
+def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        doc_id = "REQ-SANITIZE-PATHS"
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "路径脱敏",
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "machine docs do not expose local paths", "type": "positive"}],
+            },
+        )
+        write_json(
+            artifact_dir / "technical_design.json",
+            {
+                "doc_id": doc_id,
+                "current_state_analysis": {"code_entrypoints": ["src/app.py"]},
+                "requirement_breakdown": [{"id": "BRK-1", "summary": "路径脱敏"}],
+            },
+        )
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id, "repo_path": str(repo_root)})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "repo_tasks": [{"repo_path": str(repo_root)}]})
+        write_json(
+            artifact_dir / "project_understanding/code_index.json",
+            {
+                "schema": "codex-code-index-v1",
+                "project": "demo",
+                "repo_root": str(repo_root),
+                "files": [{"path": "src/app.py", "symbols": ["handler"]}],
+            },
+        )
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "路径脱敏", doc_language="zh")
+
+        paths_to_check = [
+            artifact_dir / "architecture_design.json",
+            artifact_dir / "delivery_plan.json",
+            artifact_dir / "project_understanding/code_index.json",
+            docs_root / "machine/designs" / f"{doc_id}.design.json",
+            docs_root / "machine/raw" / doc_id / "architecture_design.json",
+            docs_root / "machine/raw" / doc_id / "delivery_plan.json",
+            docs_root / "indexes" / f"{doc_id}.manifest.json",
+        ]
+        combined = json.dumps(result, ensure_ascii=False) + "\n" + "\n".join(path.read_text(encoding="utf-8") for path in paths_to_check)
+        assert str(root) not in combined
+        assert "<docs-root>" in combined or "<artifact-dir>" in combined or "<workspace>" in combined
+        assert result["sanitized_artifacts"]
+
+
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
     rendered = docs_governor.zh_text("npm run build:test evidence; mvn -pl operate-provider -DskipTests compile evidence")
     readable = docs_governor.render_readable_value(["npm run build:test evidence"], "zh")

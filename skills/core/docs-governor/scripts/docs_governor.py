@@ -22,6 +22,14 @@ MACHINE_ARTIFACTS = {
 EXPERT_SUPPLEMENTAL_ARTIFACTS = [
     "runtime_sequence_evidence.json",
 ]
+LOCAL_PATH_PATTERNS = [
+    re.compile(r"/private/var/folders/[^\s\"']+"),
+    re.compile(r"/var/folders/[^\s\"']+"),
+    re.compile(r"/tmp/[^\s\"']+"),
+    re.compile(r"/home/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"/" + r"Users/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"[A-Za-z]:\\[^\s\"']+"),
+]
 
 
 def load_docs_config_module() -> Any:
@@ -63,6 +71,69 @@ DOC_MODEL = load_doc_model_module()
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def sanitize_unmatched_local_path(value: str) -> str:
+    if value.startswith(("/private/var/", "/var/folders/", "/tmp/")):
+        return "<tmp>"
+    if value.startswith(("/" + "Users/", "/home/")):
+        return "<user-home>"
+    if re.match(r"^[A-Za-z]:\\", value):
+        return "<local-path>"
+    return value
+
+
+def sanitize_local_paths(value: str, docs_root: Path | None = None, artifact_dir: Path | None = None) -> str:
+    result = value
+    replacements: list[tuple[str, str]] = []
+    if artifact_dir:
+        replacements.append((str(artifact_dir), "<artifact-dir>"))
+    if docs_root:
+        replacements.append((str(docs_root), "<docs-root>"))
+        if docs_root.parent:
+            replacements.append((str(docs_root.parent), "<workspace>"))
+    replacements.append((str(Path.home()), "<user-home>"))
+    for source, target in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        if source:
+            result = result.replace(source, target)
+    for pattern in LOCAL_PATH_PATTERNS:
+        result = pattern.sub(lambda match: sanitize_unmatched_local_path(match.group(0)), result)
+    return result
+
+
+def sanitize_for_docs(value: Any, docs_root: Path | None = None, artifact_dir: Path | None = None) -> Any:
+    if isinstance(value, str):
+        return sanitize_local_paths(value, docs_root, artifact_dir)
+    if isinstance(value, list):
+        return [sanitize_for_docs(item, docs_root, artifact_dir) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitize_for_docs(item, docs_root, artifact_dir) for key, item in value.items()}
+    return value
+
+
+def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path) -> list[str]:
+    sanitized: list[str] = []
+    suffixes = {".json", ".md", ".txt", ".log"}
+    if not artifact_dir.exists():
+        return sanitized
+    for path in sorted(item for item in artifact_dir.rglob("*") if item.is_file() and item.suffix.lower() in suffixes):
+        try:
+            original = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if path.suffix.lower() == ".json":
+            try:
+                payload = json.loads(original)
+            except Exception:
+                updated = sanitize_local_paths(original, docs_root, artifact_dir)
+            else:
+                updated = json.dumps(sanitize_for_docs(payload, docs_root, artifact_dir), ensure_ascii=False, indent=2) + "\n"
+        else:
+            updated = sanitize_local_paths(original, docs_root, artifact_dir)
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            sanitized.append(str(path.relative_to(artifact_dir)))
+    return sanitized
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -5156,6 +5227,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language)
     inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir)
     generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id)
+    sanitized_artifacts = sanitize_artifact_tree_local_paths(artifact_dir, docs_root)
     human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],
@@ -5182,13 +5254,13 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
             "schema": "codex-docs-machine-bundle-v1",
             "doc_id": doc_id,
             "artifact_type": name,
-            "source_artifact_dir": str(artifact_dir),
+            "source_artifact_dir": sanitize_local_paths(str(artifact_dir), docs_root, artifact_dir),
             "artifacts": {},
         }
         for filename in files:
             source = artifact_dir / filename
             if source.exists():
-                payload["artifacts"][filename] = read_json(source)
+                payload["artifacts"][filename] = sanitize_for_docs(read_json(source), docs_root, artifact_dir)
         if payload["artifacts"]:
             write_json(target, payload)
             synced_machine.append(str(target.relative_to(docs_root)))
@@ -5199,17 +5271,19 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     for source in sorted(artifact_dir.glob("*.json")):
         dest = raw_dir / source.name
         if source.resolve() != dest.resolve():
-            shutil.copy2(source, dest)
+            write_json(dest, sanitize_for_docs(read_json(source), docs_root, artifact_dir))
         copied_raw.append(str(dest.relative_to(docs_root)))
 
-    manifest["synced_from"] = str(artifact_dir)
+    manifest["synced_from"] = sanitize_local_paths(str(artifact_dir), docs_root, artifact_dir)
     manifest["synced_human_docs"] = [str(path.relative_to(docs_root)) for path in human_targets.values()]
     manifest["synced_machine_artifacts"] = synced_machine
     manifest["raw_artifacts"] = copied_raw
-    manifest["inherited_supplemental_artifacts"] = inherited_supplemental_artifacts
-    manifest["generated_runtime_evidence"] = generated_runtime_evidence
+    manifest["inherited_supplemental_artifacts"] = sanitize_for_docs(inherited_supplemental_artifacts, docs_root, artifact_dir)
+    manifest["generated_runtime_evidence"] = sanitize_for_docs(generated_runtime_evidence, docs_root, artifact_dir)
+    manifest["sanitized_artifacts"] = sanitized_artifacts
+    manifest = sanitize_for_docs(manifest, docs_root, artifact_dir)
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", manifest)
-    return {
+    return sanitize_for_docs({
         "schema": "codex-docs-governor-sync-v1",
         "decision": "pass",
         "doc_id": doc_id,
@@ -5222,8 +5296,9 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         "raw_artifacts": copied_raw,
         "inherited_supplemental_artifacts": inherited_supplemental_artifacts,
         "generated_runtime_evidence": generated_runtime_evidence,
+        "sanitized_artifacts": sanitized_artifacts,
         "blockers": [],
-    }
+    }, docs_root, artifact_dir)
 
 
 def configure(docs_root: Path, git_url: str = "") -> dict[str, Any]:
