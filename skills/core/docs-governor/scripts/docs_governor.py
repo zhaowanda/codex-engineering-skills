@@ -4194,6 +4194,33 @@ def parse_contract_method_path(contract: str) -> tuple[str, str]:
     return method, route
 
 
+def contract_source_file(contract: str) -> str:
+    match = re.search(r"\(([^()]+\.(?:java|py|vue|js|jsx|ts|tsx))\)", contract or "")
+    return match.group(1) if match else ""
+
+
+def normalized_route_label(raw: str) -> str:
+    method, route = parse_contract_method_path(raw)
+    if method and route:
+        return f"{method} {route}"
+    return route
+
+
+def is_backend_entrypoint(entrypoint: str, has_http_contract: bool = False) -> bool:
+    lowered = entrypoint.lower()
+    return (
+        lowered.endswith(".java")
+        or lowered.endswith(".py") and (has_http_contract or lowered.endswith("main.py") or "/api/" in lowered or "/routes/" in lowered)
+        or "controller/" in lowered
+        or "service/" in lowered
+    )
+
+
+def is_frontend_entrypoint(entrypoint: str) -> bool:
+    lowered = entrypoint.lower()
+    return lowered.endswith((".vue", ".js", ".jsx", ".ts", ".tsx")) and not lowered.endswith(".d.ts")
+
+
 def route_for_entrypoint(artifact_dir: Path, entrypoint: str) -> str:
     api_surface = read_json(project_understanding_path(artifact_dir, "api_surface.json"))
     routes = [item for item in as_list(api_surface.get("routes")) if isinstance(item, dict)]
@@ -4242,12 +4269,12 @@ def source_table_hints(artifact_dir: Path, entrypoints: list[str]) -> list[dict[
 def actor_from_spec(spec: dict[str, Any]) -> str:
     actors = [text(item, "") for item in as_list(spec.get("actors")) if text(item, "")]
     if actors:
-        return actors[0]
+        return "业务操作人" if actors[0].lower() in {"user", "actor"} else actors[0]
     personas = [item for item in as_list(spec.get("personas")) if isinstance(item, dict)]
     for item in personas:
         actor = text(item.get("actor"), "")
         if actor:
-            return actor
+            return "业务操作人" if actor.lower() in {"user", "actor"} else actor
     return "业务操作人"
 
 
@@ -4283,12 +4310,8 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
     page_or_route = first_text(ui.get("page_or_route"), route_for_entrypoint(artifact_dir, primary_entrypoint))
     api_contracts = [item for item in as_list(technical.get("api_contracts")) if isinstance(item, dict)]
     has_http_contract = any(parse_contract_method_path(text(item.get("contract"), ""))[0] for item in api_contracts)
-    is_backend = (
-        primary_entrypoint.endswith(".java")
-        or primary_entrypoint.endswith(".py") and has_http_contract
-        or "controller/" in primary_entrypoint.lower()
-        or "service/" in primary_entrypoint.lower()
-    )
+    backend_owner_entrypoints = [entrypoint for entrypoint in owner_entrypoints if is_backend_entrypoint(entrypoint, has_http_contract)]
+    frontend_owner_entrypoints = [entrypoint for entrypoint in owner_entrypoints if is_frontend_entrypoint(entrypoint)]
     contracts_by_brk = {text(item.get("requirement_breakdown_id"), ""): item for item in api_contracts}
     module_by_brk = {
         text(item.get("requirement_breakdown_id"), ""): item
@@ -4300,28 +4323,37 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
         brk = text(item.get("id"), f"BRK-{index}")
         summary = text(item.get("summary") or item.get("behavior_change"), "")
         module = module_by_brk.get(brk, {})
-        entrypoint = first_text(module.get("module"), primary_entrypoint)
         contract = contracts_by_brk.get(brk, {})
-        method, api = parse_contract_method_path(text(contract.get("contract"), ""))
+        contract_text = text(contract.get("contract"), "")
+        method, api = parse_contract_method_path(contract_text)
+        contract_file = contract_source_file(contract_text)
+        entrypoint = first_text(
+            contract_file if contract_file in indexed_files else "",
+            module.get("module"),
+            primary_entrypoint,
+        )
         if not api and entrypoint:
             api = route_for_entrypoint(artifact_dir, entrypoint)
         symbols = source_symbols_for_entrypoint(artifact_dir, entrypoint)
+        entry_is_backend = is_backend_entrypoint(entrypoint, bool(method))
         trigger = first_text(ui.get("entry_point"), ui.get("user_goal"), summary)
-        if trigger == "existing entry":
+        if trigger == "existing entry" and entry_is_backend:
+            trigger = f"调用 {method + ' ' if method else ''}{api or entrypoint}，执行「{summary}」"
+        elif trigger == "existing entry":
             trigger = f"打开 {page_or_route or entrypoint} 并执行「{summary}」"
         interaction = {
             "scenario": f"{brk} {summary}".strip(),
             "trigger": trigger,
             "current_gap": text(current.get("process_gap") or current.get("business_problem"), ""),
-            "frontend_functions": symbols,
+            "frontend_functions": symbols if not entry_is_backend else [],
             "field_bindings": [text(value, "") for value in as_list(ui.get("field_rules")) if text(value, "")],
             "method": method,
             "api": api,
             "request": text(module.get("input"), ""),
-            "backend_methods": symbols if is_backend else [],
+            "backend_methods": symbols if entry_is_backend else [],
             "backend_rules": [text(module.get("responsibility") or summary, "")],
             "data_operations": [],
-            "backend_action": " -> ".join(symbols[:2]) if is_backend and symbols else "",
+            "backend_action": " -> ".join(symbols[:2]) if entry_is_backend and symbols else "",
             "response": text(module.get("output"), ""),
             "failure": "保留现有错误处理和权限边界，具体异常码需结合实现确认",
             "acceptance_assertions": [summary] if summary else [],
@@ -4333,18 +4365,23 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
     if not interactions:
         return {}, ["no_interactions_inferred"]
     data_models = source_table_hints(artifact_dir, owner_entrypoints)
+    frontend_route = page_or_route
+    if frontend_route.startswith("@"):
+        frontend_route = normalized_route_label(frontend_route)
+    primary_frontend_entrypoint = frontend_owner_entrypoints[0] if frontend_owner_entrypoints else ""
+    primary_backend_entrypoint = backend_owner_entrypoints[0] if backend_owner_entrypoints else ""
     frontend = {
         "repo": project,
         "page": text(ui.get("user_goal") or spec.get("title") or spec.get("requirement_summary"), ""),
-        "route": page_or_route,
-        "entry_menu_or_button": text(ui.get("entry_point") if ui.get("entry_point") != "existing entry" else ui.get("user_goal"), ""),
-        "source_file": primary_entrypoint if not is_backend else "",
+        "route": frontend_route if primary_frontend_entrypoint else "",
+        "entry_menu_or_button": text(ui.get("entry_point") if ui.get("entry_point") != "existing entry" else ui.get("user_goal"), "") if primary_frontend_entrypoint else "",
+        "source_file": primary_frontend_entrypoint,
     }
     backend = {
-        "repo": project if is_backend else "",
-        "controller": primary_entrypoint if "controller/" in primary_entrypoint.lower() else "",
-        "service": primary_entrypoint if "service/" in primary_entrypoint.lower() else "",
-        "source_files": owner_entrypoints[:8] if is_backend else [],
+        "repo": project if primary_backend_entrypoint else "",
+        "controller": primary_backend_entrypoint if "controller/" in primary_backend_entrypoint.lower() else "",
+        "service": primary_backend_entrypoint if "service/" in primary_backend_entrypoint.lower() else "",
+        "source_files": backend_owner_entrypoints[:8],
     }
     evidence = {
         "schema": "codex-runtime-sequence-evidence-v1",

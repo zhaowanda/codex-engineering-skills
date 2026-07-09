@@ -211,6 +211,116 @@ def test_sync_synthesizes_runtime_evidence_when_missing() -> None:
         assert "/device/replacementSettlement" in design_doc
 
 
+def test_sync_synthesizes_backend_runtime_evidence_without_fake_frontend() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        controller = repo_root / "operate-provider/src/main/java/com/acme/operate/controller/RenewController.java"
+        controller.parent.mkdir(parents=True)
+        controller.write_text(
+            """
+            @RestController
+            class RenewController {
+              @PostMapping("/api/device/renew/trial")
+              public TrialResult trial(@RequestBody TrialRequest request) {
+                return service.trial(request);
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+        doc_id = "REQ-SYNTH-BACKEND-RUNTIME"
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "续费试算",
+                "actors": ["user"],
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "续费试算返回金额", "type": "positive"}],
+            },
+        )
+        write_json(
+            artifact_dir / "technical_design.json",
+            {
+                "doc_id": doc_id,
+                "current_state_analysis": {
+                    "business_problem": "当前试算范围未覆盖目标设备。",
+                    "code_entrypoints": ["operate-provider/src/main/java/com/acme/operate/controller/RenewController.java"],
+                },
+                "requirement_breakdown": [{"id": "BRK-1", "summary": "续费试算返回金额"}],
+                "module_decomposition": [
+                    {
+                        "module": "operate-provider/src/main/java/com/acme/operate/controller/RenewController.java",
+                        "responsibility": "接收续费试算请求并返回试算金额",
+                        "input": "TrialRequest",
+                        "output": "TrialResult",
+                        "requirement_breakdown_id": "BRK-1",
+                    }
+                ],
+                "api_contracts": [
+                    {
+                        "contract": '@PostMapping("/api/device/renew/trial") (operate-provider/src/main/java/com/acme/operate/controller/RenewController.java)',
+                        "requirement_breakdown_id": "BRK-1",
+                    }
+                ],
+                "ui_ue_design": [
+                    {
+                        "page_or_route": '@PostMapping("/api/device/renew/trial") (operate-provider/src/main/java/com/acme/operate/controller/RenewController.java)',
+                        "user_goal": "续费试算",
+                        "entry_point": "existing entry",
+                    }
+                ],
+            },
+        )
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+        write_json(
+            artifact_dir / "project_understanding/code_index.json",
+            {
+                "schema": "codex-code-index-v1",
+                "project": "sigreal-operate-platform",
+                "repo_root": str(repo_root),
+                "files": [
+                    {
+                        "path": "operate-provider/src/main/java/com/acme/operate/controller/RenewController.java",
+                        "symbols": ["RenewController", "trial"],
+                    }
+                ],
+            },
+        )
+        write_json(
+            artifact_dir / "project_understanding/api_surface.json",
+            {
+                "schema": "codex-api-surface-v1",
+                "project": "sigreal-operate-platform",
+                "routes": [
+                    {
+                        "kind": "spring-controller",
+                        "route": "/api/device/renew/trial",
+                        "file": "operate-provider/src/main/java/com/acme/operate/controller/RenewController.java",
+                    }
+                ],
+            },
+        )
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "续费试算", doc_language="zh")
+
+        runtime = json.loads((artifact_dir / "runtime_sequence_evidence.json").read_text(encoding="utf-8"))
+        design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert result["generated_runtime_evidence"]["generated"] is True
+        assert runtime["actor"] == "业务操作人"
+        assert runtime["frontend"].get("route") is None
+        assert runtime["interactions"][0].get("frontend_functions") is None
+        assert runtime["interactions"][0]["backend_methods"] == ["RenewController", "trial"]
+        assert runtime["interactions"][0]["trigger"].startswith("调用 POST /api/device/renew/trial")
+        assert "POST /api/device/renew/trial" in design_doc
+        assert "打开 @PostMapping" not in design_doc
+
+
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
     rendered = docs_governor.zh_text("npm run build:test evidence; mvn -pl operate-provider -DskipTests compile evidence")
     readable = docs_governor.render_readable_value(["npm run build:test evidence"], "zh")

@@ -409,9 +409,9 @@ def review(path: Path, strict: bool = False) -> dict:
         if brk_sections:
             frontend_function_hits = len(re.findall(r"涉及函数[:：]|functions:", text, flags=re.I))
             backend_method_hits = len(re.findall(r"涉及方法[:：]|methods:", text, flags=re.I))
-            if frontend_function_hits < brk_sections:
+            if frontend_function_hits < brk_sections and backend_method_hits < brk_sections:
                 warnings.append({"source": "brk_frontend_function_depth", "message": "BRK sections should bind frontend functions/handlers when source evidence is available"})
-            if backend_method_hits < brk_sections:
+            if backend_method_hits < brk_sections and frontend_function_hits < brk_sections:
                 warnings.append({"source": "brk_backend_method_depth", "message": "BRK sections should bind backend controller/service methods when source evidence is available"})
         option_detail_count = len(re.findall(r"(?m)^####\s+(方案|Option)\s+`", text))
         if "方案决策摘要" in text and option_detail_count == 0:
