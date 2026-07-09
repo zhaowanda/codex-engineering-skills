@@ -103,6 +103,114 @@ def test_sync_inherits_existing_runtime_evidence_before_rendering_human_docs() -
         assert "POST /operate/api/device/replacementSettlement/renew/paging" in design_doc
 
 
+def test_sync_synthesizes_runtime_evidence_when_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        (repo_root / "src/views/device").mkdir(parents=True)
+        (repo_root / "src/views/device/replacementSettlement.vue").write_text(
+            """
+            export default {
+              methods: {
+                toggleRecentBatch() { this.recentBatchCollapsed = true }
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+        doc_id = "REQ-SYNTH-RUNTIME"
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "最近批量处理默认折叠",
+                "actors": ["运营人员"],
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "最近批量处理默认折叠", "type": "positive"}],
+            },
+        )
+        write_json(
+            artifact_dir / "technical_design.json",
+            {
+                "doc_id": doc_id,
+                "current_state_analysis": {
+                    "business_problem": "最近批量处理默认折叠",
+                    "process_gap": "进入页面后最近批量处理历史占用主要视图空间。",
+                    "code_entrypoints": ["src/views/device/replacementSettlement.vue"],
+                },
+                "requirement_breakdown": [{"id": "BRK-1", "summary": "最近批量处理默认折叠"}],
+                "module_decomposition": [
+                    {
+                        "module": "src/views/device/replacementSettlement.vue",
+                        "responsibility": "默认折叠最近批量处理区域",
+                        "input": "进入设备置换结算页面",
+                        "output": "最近批量处理区域处于折叠状态",
+                        "requirement_breakdown_id": "BRK-1",
+                    }
+                ],
+                "api_contracts": [
+                    {
+                        "contract": "/device/replacementSettlement",
+                        "requirement_breakdown_id": "BRK-1",
+                    }
+                ],
+                "ui_ue_design": [
+                    {
+                        "page_or_route": "/device/replacementSettlement",
+                        "user_goal": "最近批量处理默认折叠",
+                        "entry_point": "进入设备置换结算页面",
+                    }
+                ],
+            },
+        )
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+        write_json(
+            artifact_dir / "project_understanding/code_index.json",
+            {
+                "schema": "codex-code-index-v1",
+                "project": "operate-platform-fe",
+                "repo_root": str(repo_root),
+                "files": [
+                    {
+                        "path": "src/views/device/replacementSettlement.vue",
+                        "symbols": ["toggleRecentBatch"],
+                        "routes": ["/device/replacementSettlement"],
+                    }
+                ],
+            },
+        )
+        write_json(
+            artifact_dir / "project_understanding/api_surface.json",
+            {
+                "schema": "codex-api-surface-v1",
+                "project": "operate-platform-fe",
+                "routes": [
+                    {
+                        "kind": "frontend-route",
+                        "route": "/device/replacementSettlement",
+                        "file": "src/views/device/replacementSettlement.vue",
+                    }
+                ],
+            },
+        )
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "最近批量处理默认折叠", doc_language="zh")
+
+        runtime_path = artifact_dir / "runtime_sequence_evidence.json"
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert result["generated_runtime_evidence"]["generated"] is True
+        assert runtime["actor"] == "运营人员"
+        assert runtime["frontend"]["repo"] == "operate-platform-fe"
+        assert runtime["interactions"][0]["api"] == "/device/replacementSettlement"
+        assert "actor A as 运营人员" in design_doc
+        assert "/device/replacementSettlement" in design_doc
+
+
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
     rendered = docs_governor.zh_text("npm run build:test evidence; mvn -pl operate-provider -DskipTests compile evidence")
     readable = docs_governor.render_readable_value(["npm run build:test evidence"], "zh")

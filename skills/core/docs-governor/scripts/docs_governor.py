@@ -4109,6 +4109,272 @@ def inherit_expert_supplemental_artifacts(docs_root: Path, doc_id: str, artifact
     return inherited
 
 
+def first_text(*values: Any) -> str:
+    for value in values:
+        rendered = text(value, "").strip()
+        if rendered:
+            return rendered
+    return ""
+
+
+def project_understanding_path(artifact_dir: Path, name: str) -> Path:
+    return artifact_dir / "project_understanding" / name
+
+
+def project_name_from_artifacts(artifact_dir: Path) -> str:
+    for name in ["code_index.json", "api_surface.json", "repository_analysis.json"]:
+        data = read_json(project_understanding_path(artifact_dir, name))
+        project = first_text(data.get("project"))
+        if project:
+            return project
+    return ""
+
+
+def code_index_files_by_path(artifact_dir: Path) -> dict[str, dict[str, Any]]:
+    code_index = read_json(project_understanding_path(artifact_dir, "code_index.json"))
+    return {
+        text(item.get("path"), ""): item
+        for item in as_list(code_index.get("files"))
+        if isinstance(item, dict) and text(item.get("path"), "")
+    }
+
+
+def repo_root_from_code_index(artifact_dir: Path) -> Path | None:
+    code_index = read_json(project_understanding_path(artifact_dir, "code_index.json"))
+    repo_root = first_text(code_index.get("repo_root"))
+    if not repo_root:
+        return None
+    path = Path(repo_root)
+    return path if path.exists() else None
+
+
+def source_file_text(artifact_dir: Path, rel_path: str, limit: int = 50000) -> str:
+    repo_root = repo_root_from_code_index(artifact_dir)
+    if not repo_root or not rel_path:
+        return ""
+    path = repo_root / rel_path
+    if not path.exists() or not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")[:limit]
+    except Exception:
+        return ""
+
+
+def selected_owner_entrypoints(technical: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    current = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
+    candidates.extend(text(item, "") for item in as_list(current.get("code_entrypoints")))
+    for item in as_list(technical.get("field_api_permission_impact")):
+        if isinstance(item, dict):
+            candidates.append(text(item.get("owner_entrypoint"), ""))
+    for item in as_list(technical.get("module_decomposition")):
+        if isinstance(item, dict):
+            candidates.append(text(item.get("module"), ""))
+    compact: list[str] = []
+    for item in candidates:
+        if item and item not in compact:
+            compact.append(item)
+    return compact
+
+
+def parse_contract_method_path(contract: str) -> tuple[str, str]:
+    raw = contract or ""
+    method = ""
+    mapping = re.search(r"@(Get|Post|Put|Delete|Patch)Mapping", raw)
+    if mapping:
+        method = {"Get": "GET", "Post": "POST", "Put": "PUT", "Delete": "DELETE", "Patch": "PATCH"}[mapping.group(1)]
+    route_match = re.search(r'["\']([^"\']*/[^"\']*)["\']', raw)
+    if route_match:
+        return method, route_match.group(1)
+    method_path = re.match(r"\s*(GET|POST|PUT|DELETE|PATCH)\s+(\S+)", raw, re.I)
+    if method_path:
+        return method_path.group(1).upper(), method_path.group(2)
+    route = raw.split("(", 1)[0].strip() if "(" in raw and raw.strip().startswith("/") else raw.strip()
+    return method, route
+
+
+def route_for_entrypoint(artifact_dir: Path, entrypoint: str) -> str:
+    api_surface = read_json(project_understanding_path(artifact_dir, "api_surface.json"))
+    routes = [item for item in as_list(api_surface.get("routes")) if isinstance(item, dict)]
+    direct = [item for item in routes if text(item.get("file"), "") == entrypoint]
+    for item in direct:
+        route = first_text(item.get("route"))
+        if route and route != "/":
+            return route
+    for item in direct:
+        route = first_text(item.get("route"))
+        if route:
+            return route
+    return ""
+
+
+def source_symbols_for_entrypoint(artifact_dir: Path, entrypoint: str, limit: int = 8) -> list[str]:
+    files = code_index_files_by_path(artifact_dir)
+    item = files.get(entrypoint) or {}
+    symbols = [text(value, "") for value in as_list(item.get("symbols")) if text(value, "")]
+    source = source_file_text(artifact_dir, entrypoint)
+    if source:
+        symbols.extend(re.findall(r"\b(?:function\s+|const\s+|let\s+|var\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*(?:async\s*)?\([^)]*\)\s*=>", source))
+        symbols.extend(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{", source))
+        symbols.extend(re.findall(r"\b(public|private|protected)\s+[A-Za-z0-9_<>, ?]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", source))
+    compact: list[str] = []
+    for value in symbols:
+        symbol = value[1] if isinstance(value, tuple) else value
+        if symbol and symbol not in compact and symbol not in {"if", "for", "while", "switch", "catch"}:
+            compact.append(symbol)
+    return compact[:limit]
+
+
+def source_table_hints(artifact_dir: Path, entrypoints: list[str]) -> list[dict[str, Any]]:
+    tables: list[str] = []
+    for entrypoint in entrypoints:
+        source = source_file_text(artifact_dir, entrypoint)
+        tables.extend(re.findall(r"@TableName\(\s*\"([^\"]+)\"", source))
+        tables.extend(re.findall(r"\b([a-z][a-z0-9]+(?:_[a-z0-9]+){2,})\b", source))
+    compact: list[str] = []
+    for table in tables:
+        if table not in compact and any(term in table for term in ["obd_", "device", "renew", "order", "settlement", "batch", "menu", "track"]):
+            compact.append(table)
+    return [{"table": table, "operation": "需结合源码确认读写语义"} for table in compact[:8]]
+
+
+def actor_from_spec(spec: dict[str, Any]) -> str:
+    actors = [text(item, "") for item in as_list(spec.get("actors")) if text(item, "")]
+    if actors:
+        return actors[0]
+    personas = [item for item in as_list(spec.get("personas")) if isinstance(item, dict)]
+    for item in personas:
+        actor = text(item.get("actor"), "")
+        if actor:
+            return actor
+    return "业务操作人"
+
+
+def acceptance_ids_for_summary(spec: dict[str, Any], summary: str) -> list[str]:
+    result: list[str] = []
+    for item in as_list(spec.get("acceptance_criteria")):
+        if not isinstance(item, dict):
+            continue
+        criteria = text(item.get("criteria"), "")
+        ac_id = text(item.get("id"), "")
+        if ac_id and (not summary or summary in criteria or criteria in summary):
+            result.append(ac_id)
+    if not result:
+        first = next((text(item.get("id"), "") for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict) and text(item.get("id"), "")), "")
+        if first:
+            result.append(first)
+    return result
+
+
+def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -> tuple[dict[str, Any], list[str]]:
+    spec = read_json(artifact_dir / "spec.json")
+    technical = read_json(artifact_dir / "technical_design.json")
+    project = project_name_from_artifacts(artifact_dir)
+    indexed_files = code_index_files_by_path(artifact_dir)
+    if not project or not indexed_files:
+        return {}, ["project understanding code index is required for source-backed runtime evidence"]
+    owner_entrypoints = selected_owner_entrypoints(technical)
+    primary_entrypoint = owner_entrypoints[0] if owner_entrypoints else ""
+    if primary_entrypoint and primary_entrypoint not in indexed_files and not route_for_entrypoint(artifact_dir, primary_entrypoint):
+        return {}, [f"primary entrypoint is not present in code index: {primary_entrypoint}"]
+    current = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
+    ui = next((item for item in as_list(technical.get("ui_ue_design")) if isinstance(item, dict)), {})
+    page_or_route = first_text(ui.get("page_or_route"), route_for_entrypoint(artifact_dir, primary_entrypoint))
+    api_contracts = [item for item in as_list(technical.get("api_contracts")) if isinstance(item, dict)]
+    has_http_contract = any(parse_contract_method_path(text(item.get("contract"), ""))[0] for item in api_contracts)
+    is_backend = (
+        primary_entrypoint.endswith(".java")
+        or primary_entrypoint.endswith(".py") and has_http_contract
+        or "controller/" in primary_entrypoint.lower()
+        or "service/" in primary_entrypoint.lower()
+    )
+    contracts_by_brk = {text(item.get("requirement_breakdown_id"), ""): item for item in api_contracts}
+    module_by_brk = {
+        text(item.get("requirement_breakdown_id"), ""): item
+        for item in as_list(technical.get("module_decomposition"))
+        if isinstance(item, dict)
+    }
+    interactions: list[dict[str, Any]] = []
+    for index, item in enumerate([child for child in as_list(technical.get("requirement_breakdown")) if isinstance(child, dict)], start=1):
+        brk = text(item.get("id"), f"BRK-{index}")
+        summary = text(item.get("summary") or item.get("behavior_change"), "")
+        module = module_by_brk.get(brk, {})
+        entrypoint = first_text(module.get("module"), primary_entrypoint)
+        contract = contracts_by_brk.get(brk, {})
+        method, api = parse_contract_method_path(text(contract.get("contract"), ""))
+        if not api and entrypoint:
+            api = route_for_entrypoint(artifact_dir, entrypoint)
+        symbols = source_symbols_for_entrypoint(artifact_dir, entrypoint)
+        trigger = first_text(ui.get("entry_point"), ui.get("user_goal"), summary)
+        if trigger == "existing entry":
+            trigger = f"打开 {page_or_route or entrypoint} 并执行「{summary}」"
+        interaction = {
+            "scenario": f"{brk} {summary}".strip(),
+            "trigger": trigger,
+            "current_gap": text(current.get("process_gap") or current.get("business_problem"), ""),
+            "frontend_functions": symbols,
+            "field_bindings": [text(value, "") for value in as_list(ui.get("field_rules")) if text(value, "")],
+            "method": method,
+            "api": api,
+            "request": text(module.get("input"), ""),
+            "backend_methods": symbols if is_backend else [],
+            "backend_rules": [text(module.get("responsibility") or summary, "")],
+            "data_operations": [],
+            "backend_action": " -> ".join(symbols[:2]) if is_backend and symbols else "",
+            "response": text(module.get("output"), ""),
+            "failure": "保留现有错误处理和权限边界，具体异常码需结合实现确认",
+            "acceptance_assertions": [summary] if summary else [],
+            "acceptance_ids": acceptance_ids_for_summary(spec, summary),
+        }
+        if not any(interaction.get(key) for key in ["api", "frontend_functions", "backend_methods", "trigger"]):
+            continue
+        interactions.append({key: value for key, value in interaction.items() if value not in (None, "", [], {})})
+    if not interactions:
+        return {}, ["no_interactions_inferred"]
+    data_models = source_table_hints(artifact_dir, owner_entrypoints)
+    frontend = {
+        "repo": project,
+        "page": text(ui.get("user_goal") or spec.get("title") or spec.get("requirement_summary"), ""),
+        "route": page_or_route,
+        "entry_menu_or_button": text(ui.get("entry_point") if ui.get("entry_point") != "existing entry" else ui.get("user_goal"), ""),
+        "source_file": primary_entrypoint if not is_backend else "",
+    }
+    backend = {
+        "repo": project if is_backend else "",
+        "controller": primary_entrypoint if "controller/" in primary_entrypoint.lower() else "",
+        "service": primary_entrypoint if "service/" in primary_entrypoint.lower() else "",
+        "source_files": owner_entrypoints[:8] if is_backend else [],
+    }
+    evidence = {
+        "schema": "codex-runtime-sequence-evidence-v1",
+        "doc_id": doc_id,
+        "source": "docs-governor synthesized from spec, technical design, api surface, and code index",
+        "confidence": "medium",
+        "actor": actor_from_spec(spec),
+        "frontend": {key: value for key, value in frontend.items() if value},
+        "backend": {key: value for key, value in backend.items() if value},
+        "data_models": data_models,
+        "api_contracts": [
+            {"method": parse_contract_method_path(text(item.get("contract"), ""))[0], "path": parse_contract_method_path(text(item.get("contract"), ""))[1], "source": text(item.get("contract"), "")}
+            for item in api_contracts
+        ],
+        "interactions": interactions,
+    }
+    return evidence, []
+
+
+def ensure_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -> dict[str, Any]:
+    target = artifact_dir / "runtime_sequence_evidence.json"
+    if target.exists():
+        return {"generated": False, "path": str(target), "reason": "already exists"}
+    evidence, warnings = synthesize_runtime_sequence_evidence(artifact_dir, doc_id)
+    if evidence.get("interactions"):
+        write_json(target, evidence)
+        return {"generated": True, "path": str(target), "warnings": warnings}
+    return {"generated": False, "warnings": warnings or ["insufficient source-backed runtime evidence"]}
+
+
 def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> dict[str, str]:
     requirement = artifact_dir / "requirement.normalized.txt"
     spec = read_json(artifact_dir / "spec.json")
@@ -4534,6 +4800,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     language = normalize_doc_language(doc_language)
     manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language)
     inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir)
+    generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id)
     human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],
@@ -4583,6 +4850,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
     manifest["synced_machine_artifacts"] = synced_machine
     manifest["raw_artifacts"] = copied_raw
     manifest["inherited_supplemental_artifacts"] = inherited_supplemental_artifacts
+    manifest["generated_runtime_evidence"] = generated_runtime_evidence
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", manifest)
     return {
         "schema": "codex-docs-governor-sync-v1",
@@ -4596,6 +4864,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         "machine_artifacts": manifest["synced_machine_artifacts"],
         "raw_artifacts": copied_raw,
         "inherited_supplemental_artifacts": inherited_supplemental_artifacts,
+        "generated_runtime_evidence": generated_runtime_evidence,
         "blockers": [],
     }
 
