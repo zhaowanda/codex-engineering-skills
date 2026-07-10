@@ -461,7 +461,7 @@ def review_new_service_design(new_service: dict[str, Any], findings: list[dict[s
             findings.append(finding(area, "high", f"{key} lacks required new-service fields", {"missing": nested_missing}, f"Complete {key}: {', '.join(fields)}."))
 
 
-def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
+def review(technical: dict[str, Any], architecture: dict[str, Any], ui_ue_artifact: dict[str, Any] | None = None) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     current_state = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
     problem_analysis = technical.get("problem_analysis") if isinstance(technical.get("problem_analysis"), dict) else {}
@@ -493,6 +493,7 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     design_traceability = as_list(technical.get("design_traceability_matrix"))
     acceptance_mapping = as_list(technical.get("acceptance_mapping"))
     ui_ue_design = as_list(technical.get("ui_ue_design"))
+    ui_ue_artifact = ui_ue_artifact if isinstance(ui_ue_artifact, dict) else {}
     test_strategy = as_list(technical.get("test_strategy"))
     interface_examples = as_list(technical.get("interface_examples"))
     compatibility_matrix = as_list(technical.get("compatibility_matrix"))
@@ -733,6 +734,10 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
 
     frontend_signal = text_of({"frontend_behavior": technical.get("frontend_behavior", []), "requirement_trace": req_trace, "design_goal": technical.get("design_goal", "")})
     if any(token in frontend_signal for token in ["frontend", "ui", "ux", "page", "route", "页面", "按钮", "表格", "弹窗", "前端"]):
+        if ui_ue_artifact and ui_ue_artifact.get("decision") == "block":
+            findings.append(finding("frontend_behavior_review", "blocker", "independent UI/UE design gate is blocked", ui_ue_artifact.get("blockers"), "Resolve ui_ue_design.json blockers before implementation."))
+        if not ui_ue_artifact and not technical.get("ui_ue_design_ref"):
+            findings.append(finding("frontend_behavior_review", "low", "frontend requirement lacks independent UI/UE artifact", "ui_ue_design.json missing", "Generate ui_ue_design.json with ui-ue-design-governor before implementation planning."))
         if not ui_ue_design:
             findings.append(finding("frontend_behavior_review", "high", "frontend/UI requirement lacks UI/UX design", "ui_ue_design empty", "Add page/route, user goal, entry point, layout, interaction flow, states, field rules, permission visibility, and acceptance evidence."))
         for idx, item in enumerate(ui_ue_design):
@@ -895,13 +900,14 @@ def main() -> int:
     p_review = sub.add_parser("review")
     p_review.add_argument("--technical-design", required=True)
     p_review.add_argument("--architecture-design", required=True)
+    p_review.add_argument("--ui-ue-design")
     p_review.add_argument("--out")
     p_validate = sub.add_parser("validate")
     p_validate.add_argument("--file", required=True)
     args = parser.parse_args()
 
     if args.cmd == "review":
-        result = review(read_json(args.technical_design), read_json(args.architecture_design))
+        result = review(read_json(args.technical_design), read_json(args.architecture_design), read_json(args.ui_ue_design) if args.ui_ue_design else None)
         if args.out:
             Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False, indent=2))

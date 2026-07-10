@@ -710,6 +710,135 @@ def run_profile_artifact_steps(
 ) -> None:
     if run_registry_artifact_steps(profile, out, force, generated, skipped, steps):
         return
+    if profile_requires(profile, "ui-ue-design-governor"):
+        run_if_needed(
+            "ui_ue_design",
+            out / "ui_ue_design.json",
+            [
+                "python3",
+                "skills/core/ui-ue-design-governor/scripts/ui_ue_design.py",
+                "--spec",
+                str(spec),
+                "--technical-design",
+                str(technical),
+                "--out",
+                str(out / "ui_ue_design.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "ui-ue-reviewer"):
+        run_if_needed(
+            "ui_ue_review",
+            out / "ui_ue_review.json",
+            [
+                "python3",
+                "skills/core/ui-ue-reviewer/scripts/ui_ue_review.py",
+                "--ui-ue-design",
+                str(out / "ui_ue_design.json"),
+                "--out",
+                str(out / "ui_ue_review.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "frontend-implementation-planner"):
+        run_if_needed(
+            "frontend_implementation_plan",
+            out / "frontend_implementation_plan.json",
+            [
+                "python3",
+                "skills/core/frontend-implementation-planner/scripts/frontend_plan.py",
+                "--ui-ue-design",
+                str(out / "ui_ue_design.json"),
+                "--technical-design",
+                str(technical),
+                "--out",
+                str(out / "frontend_implementation_plan.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "api-contract-governor"):
+        run_if_needed(
+            "api_contract_design",
+            out / "api_contract_design.json",
+            [
+                "python3",
+                "skills/core/api-contract-governor/scripts/api_contract.py",
+                "--spec",
+                str(spec),
+                "--technical-design",
+                str(technical),
+                "--out",
+                str(out / "api_contract_design.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "data-model-governor"):
+        run_if_needed(
+            "data_model_design",
+            out / "data_model_design.json",
+            [
+                "python3",
+                "skills/core/data-model-governor/scripts/data_model.py",
+                "--spec",
+                str(spec),
+                "--technical-design",
+                str(technical),
+                "--out",
+                str(out / "data_model_design.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "domain-model-governor"):
+        run_if_needed(
+            "domain_model_design",
+            out / "domain_model_design.json",
+            [
+                "python3",
+                "skills/core/domain-model-governor/scripts/domain_model.py",
+                "--spec",
+                str(spec),
+                "--out",
+                str(out / "domain_model_design.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "observability-design-governor"):
+        run_if_needed(
+            "observability_design",
+            out / "observability_design.json",
+            [
+                "python3",
+                "skills/core/observability-design-governor/scripts/observability_design.py",
+                "--spec",
+                str(spec),
+                "--technical-design",
+                str(technical),
+                "--out",
+                str(out / "observability_design.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
     if profile_requires(profile, "frontend-acceptance-runner"):
         run_if_needed(
             "frontend_acceptance_template",

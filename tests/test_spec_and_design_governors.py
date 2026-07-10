@@ -23,6 +23,13 @@ technical_design = load_module("technical_design", ROOT / "skills/core/technical
 architecture_design = load_module("architecture_design", ROOT / "skills/core/architecture-design-governor/scripts/architecture_design.py")
 project_understand = load_module("project_understand", ROOT / "skills/core/project-understanding-runner/scripts/project_understand.py")
 delivery_runner = load_module("delivery_runner", ROOT / "skills/core/delivery-runner/scripts/delivery_runner.py")
+ui_ue_design = load_module("ui_ue_design", ROOT / "skills/core/ui-ue-design-governor/scripts/ui_ue_design.py")
+ui_ue_review = load_module("ui_ue_review", ROOT / "skills/core/ui-ue-reviewer/scripts/ui_ue_review.py")
+frontend_plan = load_module("frontend_plan", ROOT / "skills/core/frontend-implementation-planner/scripts/frontend_plan.py")
+api_contract = load_module("api_contract", ROOT / "skills/core/api-contract-governor/scripts/api_contract.py")
+data_model = load_module("data_model", ROOT / "skills/core/data-model-governor/scripts/data_model.py")
+domain_model = load_module("domain_model", ROOT / "skills/core/domain-model-governor/scripts/domain_model.py")
+observability_design = load_module("observability_design", ROOT / "skills/core/observability-design-governor/scripts/observability_design.py")
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -360,6 +367,78 @@ def test_technical_design_adds_expert_data_mq_cache_and_sequence_sections() -> N
     assert tech["transaction_consistency"]["applicable"] is True
     assert {"boundary", "idempotency", "compensation", "rollback"}.issubset(tech["transaction_consistency"])
     assert {"logs", "metrics", "traces", "alerts"}.issubset(tech["observability_design"])
+
+
+def test_specialized_ui_ue_design_review_and_frontend_plan() -> None:
+    # Coverage references for skill-health: ui-ue-design-governor, ui-ue-reviewer,
+    # frontend-implementation-planner.
+    spec = spec_governor.normalize(
+        "REQ-UI-UE",
+        "Admin dashboard export",
+        "\n".join([
+            "业务目的: 让管理员在报表页导出筛选结果，减少手工整理。",
+            "流程: 管理员打开报表页，选择筛选条件，点击导出按钮，系统生成文件。",
+            "入口: 报表页导出按钮。",
+            "Req: Admin exports filtered report rows from the dashboard page.",
+            "Rule: only admin can see export button.",
+            "AC: admin can export filtered rows.",
+            "AC: non-admin cannot see export button.",
+        ]),
+    )
+    spec["impact_surface"] = [{"area": "ui"}, {"area": "api"}, {"area": "permission"}]
+    tech = technical_design.render(spec, {
+        "repository_analysis": {"project": "operate-fe", "entrypoint_hints": ["src/views/report/ReportPage.vue"], "top_level_directories": ["src"]},
+        "code_index": {"files": [{"path": "src/views/report/ReportPage.vue", "summary": "report dashboard export button"}]},
+    })
+
+    design = ui_ue_design.design(spec, tech)
+    review = ui_ue_review.review(design)
+    plan = frontend_plan.plan(design, tech)
+
+    assert design["schema"] == "codex-ui-ue-design-v1"
+    assert design["decision"] == "pass"
+    assert {item["state"] for item in design["state_matrix"]} >= {"loading", "empty", "success", "validation_error", "permission_denied", "dependency_error"}
+    assert review["decision"] == "pass"
+    assert review["readiness_gate"]["frontend_implementation_allowed"] is True
+    assert plan["decision"] == "pass"
+    assert plan["routes"][0]["entry_action"] == "报表页导出按钮。"
+
+
+def test_specialized_api_data_domain_and_observability_artifacts() -> None:
+    # Coverage references for skill-health: api-contract-governor,
+    # data-model-governor, domain-model-governor, observability-design-governor.
+    spec = spec_governor.normalize(
+        "REQ-SPECIALIZED",
+        "Payment retry dashboard",
+        "\n".join([
+            "业务目的: 让管理员定位支付重试失败原因。",
+            "流程: 管理员打开支付失败页面，查询失败记录，重试后系统更新状态并发布 MQ。",
+            "入口: 支付失败页面重试按钮。",
+            "Req: Add API endpoint for payment retry failures.",
+            "Req: Add database migration for failure_reason and retry_count.",
+            "Req: Publish MQ topic payment.retry.changed after retry status changes.",
+            "AC: API returns failure_reason and retry_count.",
+        ]),
+    )
+    spec["impact_surface"] = [{"area": "api"}, {"area": "data"}, {"area": "performance"}]
+    tech = technical_design.render(spec)
+
+    api = api_contract.design(spec, tech)
+    data = data_model.design(spec, tech)
+    domain = domain_model.design(spec)
+    obs = observability_design.design(spec, tech)
+
+    assert api["schema"] == "codex-api-contract-design-v1"
+    assert api["decision"] in {"pass", "block"}
+    assert api["contracts"]
+    assert data["schema"] == "codex-data-model-design-v1"
+    assert data["decision"] in {"pass", "block"}
+    assert data["test_data_requirements"]
+    assert domain["schema"] == "codex-domain-model-design-v1"
+    assert domain["decision"] == "pass"
+    assert domain["business_intent"]
+    assert obs["schema"] == "codex-observability-design-v1"
+    assert obs["mq_observability"]
 
 
 def test_technical_design_rejects_cache_for_strong_consistency_terms() -> None:

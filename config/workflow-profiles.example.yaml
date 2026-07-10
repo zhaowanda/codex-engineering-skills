@@ -121,6 +121,9 @@ profiles:
       - spec-governor
       - technical-design-governor
       - architecture-design-governor
+      - ui-ue-design-governor
+      - ui-ue-reviewer
+      - frontend-implementation-planner
       - test-design-governor
       - test-data-governor
       - design-architecture-reviewer
@@ -134,6 +137,9 @@ profiles:
       - spec.json
       - technical_design.json
       - architecture_design.json
+      - ui_ue_design.json
+      - ui_ue_review.json
+      - frontend_implementation_plan.json
       - test_design.json
       - test_data_plan.json
       - design_architecture_review.json
@@ -143,6 +149,37 @@ profiles:
       - frontend_acceptance.json
       - test_evidence_gate.json
     artifact_steps:
+      - name: ui_ue_design
+        artifact: ui_ue_design.json
+        command:
+          - python3
+          - skills/core/ui-ue-design-governor/scripts/ui_ue_design.py
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --out
+          - "{artifact_dir}/ui_ue_design.json"
+      - name: ui_ue_review
+        artifact: ui_ue_review.json
+        command:
+          - python3
+          - skills/core/ui-ue-reviewer/scripts/ui_ue_review.py
+          - --ui-ue-design
+          - "{artifact_dir}/ui_ue_design.json"
+          - --out
+          - "{artifact_dir}/ui_ue_review.json"
+      - name: frontend_implementation_plan
+        artifact: frontend_implementation_plan.json
+        command:
+          - python3
+          - skills/core/frontend-implementation-planner/scripts/frontend_plan.py
+          - --ui-ue-design
+          - "{artifact_dir}/ui_ue_design.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --out
+          - "{artifact_dir}/frontend_implementation_plan.json"
       - name: frontend_acceptance_template
         artifact: frontend_acceptance.json
         command:
@@ -175,6 +212,15 @@ profiles:
           - pass
       - artifact: technical_design.json
       - artifact: architecture_design.json
+      - artifact: ui_ue_design.json
+        accepted_decisions:
+          - pass
+      - artifact: ui_ue_review.json
+        accepted_decisions:
+          - pass
+      - artifact: frontend_implementation_plan.json
+        accepted_decisions:
+          - pass
       - artifact: test_design.json
       - artifact: test_data_plan.json
       - artifact: docs_quality.json
@@ -213,6 +259,9 @@ profiles:
       - spec-governor
       - technical-design-governor
       - architecture-design-governor
+      - api-contract-governor
+      - domain-model-governor
+      - observability-design-governor
       - cross-repo-planner
       - test-design-governor
       - test-data-governor
@@ -229,6 +278,9 @@ profiles:
       - spec.json
       - technical_design.json
       - architecture_design.json
+      - api_contract_design.json
+      - domain_model_design.json
+      - observability_design.json
       - test_design.json
       - test_data_plan.json
       - design_architecture_review.json
@@ -239,6 +291,39 @@ profiles:
       - delivery_plan_review.json
       - docs_quality.json
     artifact_steps:
+      - name: api_contract_design
+        artifact: api_contract_design.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/api-contract-governor/scripts/api_contract.py
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --out
+          - "{artifact_dir}/api_contract_design.json"
+      - name: domain_model_design
+        artifact: domain_model_design.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/domain-model-governor/scripts/domain_model.py
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --out
+          - "{artifact_dir}/domain_model_design.json"
+      - name: observability_design
+        artifact: observability_design.json
+        command:
+          - python3
+          - skills/core/observability-design-governor/scripts/observability_design.py
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --out
+          - "{artifact_dir}/observability_design.json"
       - name: cross_repo_plan
         artifact: cross_repo_readiness.json
         command:
@@ -262,6 +347,12 @@ profiles:
           - pass
       - artifact: technical_design.json
       - artifact: architecture_design.json
+      - artifact: api_contract_design.json
+        accepted_decisions:
+          - pass
+      - artifact: observability_design.json
+        accepted_decisions:
+          - pass
       - artifact: test_design.json
       - artifact: test_data_plan.json
       - artifact: docs_quality.json
@@ -295,6 +386,9 @@ profiles:
       - spec-governor
       - technical-design-governor
       - architecture-design-governor
+      - data-model-governor
+      - domain-model-governor
+      - observability-design-governor
       - test-design-governor
       - test-data-governor
       - design-architecture-reviewer
@@ -311,6 +405,9 @@ profiles:
       - spec.json
       - technical_design.json
       - architecture_design.json
+      - data_model_design.json
+      - domain_model_design.json
+      - observability_design.json
       - test_design.json
       - test_data_plan.json
       - design_architecture_review.json
@@ -322,6 +419,39 @@ profiles:
       - performance_review.json
       - release_gate.json
     artifact_steps:
+      - name: data_model_design
+        artifact: data_model_design.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/data-model-governor/scripts/data_model.py
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --out
+          - "{artifact_dir}/data_model_design.json"
+      - name: domain_model_design
+        artifact: domain_model_design.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/domain-model-governor/scripts/domain_model.py
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --out
+          - "{artifact_dir}/domain_model_design.json"
+      - name: observability_design
+        artifact: observability_design.json
+        command:
+          - python3
+          - skills/core/observability-design-governor/scripts/observability_design.py
+          - --spec
+          - "{artifact_dir}/spec.json"
+          - --technical-design
+          - "{artifact_dir}/technical_design.json"
+          - --out
+          - "{artifact_dir}/observability_design.json"
       - name: configuration_review
         artifact: configuration_readiness.json
         allow_fail: true
@@ -384,6 +514,13 @@ profiles:
           - pass
       - artifact: technical_design.json
       - artifact: architecture_design.json
+      - artifact: data_model_design.json
+        accepted_decisions:
+          - pass
+          - block
+      - artifact: observability_design.json
+        accepted_decisions:
+          - pass
       - artifact: test_design.json
       - artifact: test_data_plan.json
       - artifact: docs_quality.json

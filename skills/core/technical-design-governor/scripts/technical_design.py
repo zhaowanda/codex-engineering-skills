@@ -1140,13 +1140,70 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     }
 
 
+def merge_specialized_artifacts(result: dict[str, Any], artifact_paths: dict[str, Path | None]) -> dict[str, Any]:
+    ui_design = load_json(artifact_paths.get("ui_ue_design")) if artifact_paths.get("ui_ue_design") else {}
+    api_contract = load_json(artifact_paths.get("api_contract_design")) if artifact_paths.get("api_contract_design") else {}
+    data_model = load_json(artifact_paths.get("data_model_design")) if artifact_paths.get("data_model_design") else {}
+    domain_model = load_json(artifact_paths.get("domain_model_design")) if artifact_paths.get("domain_model_design") else {}
+    observability = load_json(artifact_paths.get("observability_design")) if artifact_paths.get("observability_design") else {}
+
+    result["specialized_design_artifacts"] = {
+        name: str(path)
+        for name, path in artifact_paths.items()
+        if path and path.exists()
+    }
+    if ui_design and ui_design.get("decision") not in {"not_applicable", "block"}:
+        screens = [item for item in as_list(ui_design.get("screens")) if isinstance(item, dict)]
+        summary = ui_design.get("experience_summary") if isinstance(ui_design.get("experience_summary"), dict) else {}
+        result["ui_ue_design"] = [{
+            "page_or_route": str(screen.get("page_or_route") or summary.get("entry_surface") or ""),
+            "user_goal": str(summary.get("user_goal") or ""),
+            "entry_point": str(summary.get("trigger_action") or ""),
+            "layout": screen.get("layout_zones") or screen.get("layout") or [],
+            "interaction_flow": as_list((ui_design.get("interaction_flows") or [{}])[0].get("steps")) if as_list(ui_design.get("interaction_flows")) and isinstance(as_list(ui_design.get("interaction_flows"))[0], dict) else [],
+            "states": [str(item.get("state")) for item in as_list(ui_design.get("state_matrix")) if isinstance(item, dict)],
+            "field_rules": as_list(ui_design.get("content_i18n")),
+            "permission_visibility": "frontend visibility follows UI/UE permission state; backend authorization remains authoritative",
+            "acceptance_evidence": ", ".join(str(item) for item in as_list(ui_design.get("acceptance_evidence"))),
+            "source_artifact": "ui_ue_design.json",
+        } for screen in (screens or [{}])]
+    if api_contract and api_contract.get("decision") not in {"not_applicable", "block"}:
+        result["api_contracts"] = as_list(api_contract.get("contracts")) or result.get("api_contracts", [])
+        result["api_contract_design_ref"] = "api_contract_design.json"
+    if data_model and data_model.get("decision") not in {"not_applicable", "block"}:
+        result["data_model_design"] = data_model
+        result["table_schema_changes"] = as_list(data_model.get("tables")) or result.get("table_schema_changes", [])
+        result["data_model_design_ref"] = "data_model_design.json"
+    if domain_model and domain_model.get("decision") == "pass":
+        result["domain_model_design_ref"] = "domain_model_design.json"
+        result["business_intent"] = domain_model.get("business_intent") or result.get("business_intent")
+        result["business_flow"] = domain_model.get("business_flow") or result.get("business_flow")
+        result["state_machine"] = domain_model.get("state_machine") or result.get("state_machine")
+    if observability and observability.get("decision") == "pass":
+        result["observability_design"] = observability
+        result["observability_design_ref"] = "observability_design.json"
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render technical design from normalized spec")
     parser.add_argument("--spec", required=True)
     parser.add_argument("--project-understanding")
+    parser.add_argument("--ui-ue-design")
+    parser.add_argument("--api-contract-design")
+    parser.add_argument("--data-model-design")
+    parser.add_argument("--domain-model-design")
+    parser.add_argument("--observability-design")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     result = render(load_json(Path(args.spec)), load_project_understanding(Path(args.project_understanding)) if args.project_understanding else None)
+    result = merge_specialized_artifacts(result, {
+        "ui_ue_design": Path(args.ui_ue_design) if args.ui_ue_design else None,
+        "api_contract_design": Path(args.api_contract_design) if args.api_contract_design else None,
+        "data_model_design": Path(args.data_model_design) if args.data_model_design else None,
+        "domain_model_design": Path(args.domain_model_design) if args.domain_model_design else None,
+        "observability_design": Path(args.observability_design) if args.observability_design else None,
+    })
     write_json(Path(args.out), result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

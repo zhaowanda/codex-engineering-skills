@@ -213,6 +213,13 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/requirement-question-governor`: generates and validates focused open questions so unresolved ambiguity blocks design or implementation instead of being guessed.
 - `skills/core/technical-design-governor`: generates a structured technical design draft with process flow, module decomposition, data flow, API/UI behavior, options, tests, and traceability.
 - `skills/core/architecture-design-governor`: generates an architecture design draft with boundaries, repo responsibilities, contracts, data ownership, deployment, rollback, and option comparison.
+- `skills/core/ui-ue-design-governor`: generates first-class UI/UE design artifacts for user goals, entry actions, flows, state matrices, accessibility, and browser evidence.
+- `skills/core/ui-ue-reviewer`: reviews UI/UE artifacts so shallow entrypoints, missing states, unclear contracts, and weak evidence block frontend implementation.
+- `skills/core/frontend-implementation-planner`: maps UI/UE design into frontend routes, components, API dependencies, state handling, permission behavior, and acceptance evidence.
+- `skills/core/api-contract-governor`: generates API contract design artifacts for endpoint naming, request/response, errors, permissions, idempotency, compatibility, and consumers.
+- `skills/core/data-model-governor`: generates data model design artifacts for tables, fields, indexes, migrations, history data, consistency, rollback, and test data.
+- `skills/core/domain-model-governor`: models business objects, lifecycle, state machine, invariants, rules, triggers, and clarification gaps before technical design.
+- `skills/core/observability-design-governor`: designs logs, metrics, traces, alerts, dashboards, MQ/task/cache signals, and post-release validation.
 - `skills/core/cross-repo-planner`: generates a cross-repository execution graph, readiness gate, and release plan for multi-repo requirements with provider/consumer dependencies.
 - `skills/core/delivery-plan-reviewer`: reviews delivery plans for executable task depth, narrow file scope, evidence mapping, rollback controls, and unresolved gates before Git or edit readiness.
 - `skills/core/delivery-runner`: one-command status inspector that reports current stage, blockers, next command, and whether implementation/release is allowed.

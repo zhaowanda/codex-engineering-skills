@@ -35,10 +35,16 @@ Do not run every skill for every task. Use the workflow profile and change-risk 
 
 ## Design
 
+- `skills/core/api-contract-governor`: api-contract-governor (expert-gate, artifact-generator)
 - `skills/core/architecture-design-governor`: architecture-design-governor (deterministic-helper, artifact-generator)
+- `skills/core/data-model-governor`: data-model-governor (expert-gate, artifact-generator)
 - `skills/core/design-architecture-reviewer`: design-architecture-reviewer (expert-gate, workflow-gate)
+- `skills/core/domain-model-governor`: domain-model-governor (expert-gate, artifact-generator)
+- `skills/core/observability-design-governor`: observability-design-governor (expert-gate, artifact-generator)
 - `skills/templates/design-doc-templates`: design-doc-templates (template, template-runner)
 - `skills/core/technical-design-governor`: technical-design-governor (deterministic-helper, artifact-generator)
+- `skills/core/ui-ue-design-governor`: ui-ue-design-governor (expert-gate, artifact-generator)
+- `skills/core/ui-ue-reviewer`: ui-ue-reviewer (expert-gate, reviewer)
 
 ## Delivery Planning
 
@@ -47,6 +53,7 @@ Do not run every skill for every task. Use the workflow profile and change-risk 
 - `skills/templates/delivery-plan-templates`: delivery-plan-templates (template, template-runner)
 - `skills/core/delivery-runner`: delivery-runner (orchestrator, template-runner)
 - `skills/core/delivery-state-governor`: delivery-state-governor (expert-gate, workflow-gate)
+- `skills/core/frontend-implementation-planner`: frontend-implementation-planner (expert-gate, artifact-generator)
 
 ## Edit Readiness
 
