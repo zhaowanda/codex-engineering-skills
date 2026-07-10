@@ -19,6 +19,7 @@ def schema_name(stem: str) -> str:
 
 ALLOWED_DUPLICATE_SCHEMAS = {
     schema_name("architecture-design"): "generator and template intentionally share the same artifact contract",
+    schema_name("architecture-framing"): "generator and design template intentionally share the same pre-technical framing contract",
     schema_name("delivery-replay-skeleton"): "case capture and example runner intentionally share replay skeleton fixtures",
     schema_name("delivery-plan"): "delivery plan reviewer validates the generated delivery plan contract",
     schema_name("delivery-runner-status"): "synthetic runner asserts delivery-runner blocking behavior",

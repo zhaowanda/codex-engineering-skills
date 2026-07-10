@@ -9,7 +9,7 @@ gate: false
 
 # Architecture Design Governor
 
-Use this skill after technical design and before delivery plan.
+Use this skill after pre-technical architecture framing and detailed technical design; use it to refine, validate, and correct boundaries before delivery planning.
 
 ## Position
 
@@ -26,12 +26,14 @@ technical-design-governor
 python3 scripts/architecture_design.py \
   --spec artifacts/REQ-001/spec.json \
   --technical-design artifacts/REQ-001/technical_design.json \
+  --architecture-framing artifacts/REQ-001/architecture_framing.json \
   --out artifacts/REQ-001/architecture_design.json
 ```
 
 ## Rules
 
 - Decision contract: this generator must emit enough ownership, dependency, deployment, rollback, and option evidence for `design-architecture-reviewer` to return `decision=pass`; otherwise delivery planning and implementation must remain blocked.
+- Refine `architecture_framing.json` rather than replacing it. If technical design violates the framed owner, provider/consumer, data ownership, release, or rollback boundary, record that as an architecture risk or review blocker.
 - Requirement understanding gate: propagate the technical/spec `requirements_understanding_gate`, including `business_closure_model`, `state_machine`, `business_goal_quality`, `repo_impact_map`, `dependency_chain`, and `runtime_dependency_graph`, into architecture design. If `design_allowed=false`, architecture confidence must be low, architecture checklist must be blocked, and delivery planning must wait for requirement clarification.
 - Failure path: if owner repo, integration direction, contract compatibility, data ownership, release order, rollback, or new-service justification cannot be grounded in requirement/project evidence, keep the uncertainty explicit and require review revision instead of presenting a guessed architecture as ready.
 - Include at least two architecture options.

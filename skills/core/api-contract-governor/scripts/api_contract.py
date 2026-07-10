@@ -37,14 +37,20 @@ def has_signal(spec: dict[str, Any], technical: dict[str, Any]) -> bool:
     return "api" in impacts or any(term in text for term in API_TERMS)
 
 
-def design(spec: dict[str, Any], technical: dict[str, Any] | None = None) -> dict[str, Any]:
+def design(spec: dict[str, Any], technical: dict[str, Any] | None = None, architecture_framing: dict[str, Any] | None = None) -> dict[str, Any]:
     technical = technical or {}
-    if not has_signal(spec, technical):
+    architecture_framing = architecture_framing or {}
+    if not has_signal(spec, technical) and not architecture_framing.get("provider_consumer"):
         return {"schema": SCHEMA, "decision": "not_applicable", "applicable": False, "blockers": []}
     blockers: list[dict[str, str]] = []
     raw_contracts = [item for item in as_list(technical.get("api_contracts")) if isinstance(item, dict)]
+    framing_contracts = [
+        {"contract": item.get("contract"), "compatibility": "must preserve provider/consumer compatibility", "old_consumer_impact": f"consumer: {item.get('consumer')}"}
+        for item in as_list(architecture_framing.get("provider_consumer"))
+        if isinstance(item, dict) and item.get("contract")
+    ]
     contracts: list[dict[str, Any]] = []
-    for item in raw_contracts or [{"contract": "api path/method must be confirmed"}]:
+    for item in raw_contracts or framing_contracts or [{"contract": "api path/method must be confirmed"}]:
         name = str(item.get("contract") or item.get("api") or "")
         if "no api impact" in name.lower() and "confirm" not in str(item.get("api_impact") or "").lower():
             continue
@@ -82,9 +88,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate API contract design")
     parser.add_argument("--spec", required=True)
     parser.add_argument("--technical-design")
+    parser.add_argument("--architecture-framing")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
-    result = design(load_json(Path(args.spec)), load_json(Path(args.technical_design)) if args.technical_design else {})
+    result = design(
+        load_json(Path(args.spec)),
+        load_json(Path(args.technical_design)) if args.technical_design else {},
+        load_json(Path(args.architecture_framing)) if args.architecture_framing else {},
+    )
     write_json(Path(args.out), result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") in {"pass", "not_applicable"} else 2

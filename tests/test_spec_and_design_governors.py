@@ -21,6 +21,7 @@ def load_module(name: str, path: Path):
 spec_governor = load_module("spec_governor", ROOT / "skills/core/spec-governor/scripts/spec_governor.py")
 technical_design = load_module("technical_design", ROOT / "skills/core/technical-design-governor/scripts/technical_design.py")
 architecture_design = load_module("architecture_design", ROOT / "skills/core/architecture-design-governor/scripts/architecture_design.py")
+architecture_framing = load_module("architecture_framing", ROOT / "skills/core/architecture-framing-governor/scripts/architecture_framing.py")
 project_understand = load_module("project_understand", ROOT / "skills/core/project-understanding-runner/scripts/project_understand.py")
 delivery_runner = load_module("delivery_runner", ROOT / "skills/core/delivery-runner/scripts/delivery_runner.py")
 ui_ue_design = load_module("ui_ue_design", ROOT / "skills/core/ui-ue-design-governor/scripts/ui_ue_design.py")
@@ -439,6 +440,49 @@ def test_specialized_api_data_domain_and_observability_artifacts() -> None:
     assert domain["business_intent"]
     assert obs["schema"] == "codex-observability-design-v1"
     assert obs["mq_observability"]
+
+
+def test_architecture_framing_precedes_and_informs_technical_architecture_design() -> None:
+    # Coverage reference for skill-health: architecture-framing-governor.
+    spec = spec_governor.normalize(
+        "REQ-FRAMING",
+        "Payment retry API",
+        "\n".join([
+            "业务目的: 让管理员通过支付失败页重试支付失败记录。",
+            "流程: 管理员点击支付失败页重试按钮，后端更新重试状态并通知下游。",
+            "入口: 支付失败页重试按钮。",
+            "Req: Add API endpoint for payment retry.",
+            "Req: Publish MQ topic payment.retry.changed after retry status changes.",
+            "AC: API retry succeeds and emits event.",
+        ]),
+    )
+    spec["impact_surface"] = [{"area": "api"}, {"area": "data"}]
+    domain = domain_model.design(spec)
+    framing = architecture_framing.design(
+        spec,
+        domain,
+        {
+            "repository_analysis": {"project": "payment-service", "entrypoint_hints": ["src/payment/RetryController.java"]},
+            "api_surface": {"routes": [{"method": "POST", "route": "/api/payment/retry", "file": "src/payment/RetryController.java"}]},
+            "code_index": {"repo_root": "/repo/payment-service", "files": [{"path": "src/payment/RetryController.java"}]},
+        },
+    )
+    tech = technical_design.merge_specialized_artifacts(
+        technical_design.render(spec),
+        {"architecture_framing": None, "domain_model_design": None, "ui_ue_design": None, "api_contract_design": None, "data_model_design": None, "observability_design": None},
+    )
+    # Merge through a temp file to exercise the same path used by the CLI.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "architecture_framing.json", framing)
+        tech = technical_design.merge_specialized_artifacts(technical_design.render(spec), {"architecture_framing": root / "architecture_framing.json"})
+        arch = architecture_design.render(spec, tech, {}, framing)
+    assert framing["schema"] == "codex-architecture-framing-v1"
+    assert framing["decision"] == "pass"
+    assert tech["architecture_framing_ref"] == "architecture_framing.json"
+    assert tech["project_context"]["architecture_owner_repo"] == "payment-service"
+    assert arch["architecture_framing_ref"] == "architecture_framing.json"
+    assert arch["architecture_framing"]["system_boundary"]["owner_repo"] == "payment-service"
 
 
 def test_technical_design_rejects_cache_for_strong_consistency_terms() -> None:

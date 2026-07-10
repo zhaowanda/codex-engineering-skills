@@ -30,7 +30,49 @@ architecture_spec.loader.exec_module(architecture_design)
 
 
 def complete_design() -> tuple[dict, dict]:
+    architecture_framing = {
+        "schema": "codex-architecture-framing-v1",
+        "decision": "pass",
+        "system_boundary": {
+            "decision_type": "modify_existing_system",
+            "owner_repo": "web-app",
+            "new_service_decision": {
+                "required": False,
+                "reason": "Checkout discount display reuses the existing pricing contract and only changes web rendering.",
+            },
+        },
+        "repo_responsibilities": [
+            {"repo": "web-app", "role": "modify", "responsibility": "render discount rows"},
+            {"repo": "pricing-service", "role": "confirm_only", "responsibility": "confirm discounts[] contract"},
+        ],
+        "runtime_entrypoints": [
+            {
+                "kind": "frontend_action",
+                "trigger": "buyer opens checkout",
+                "actor": "buyer browser",
+                "repo": "web-app",
+                "entrypoint": "src/checkout/usePricing.ts -> src/checkout/CheckoutSummary.tsx",
+                "downstream": ["pricing-service GET /api/pricing"],
+            }
+        ],
+        "dependency_graph": {
+            "degree": 1,
+            "classification": "one_degree_existing_contract",
+            "edges": [
+                {"from": "web-app", "to": "pricing-service", "interaction": "GET /api/pricing", "change_type": "reuse_existing_contract"}
+            ],
+        },
+        "provider_consumer": [
+            {"provider": "pricing-service", "consumer": "web-app", "contract": "pricing response discounts[]", "compatibility": "unchanged"}
+        ],
+        "data_ownership": [
+            {"business_object": "discount", "owner_repo": "pricing-service", "write_authority": "pricing-service", "consumer_rule": "web reads only"}
+        ],
+        "blockers": [],
+    }
     technical = {
+        "architecture_framing_ref": "architecture_framing.json",
+        "architecture_framing": architecture_framing,
         "design_scope": {"in_scope": ["checkout discount display"], "out_of_scope": ["payment capture"], "assumptions": ["existing API"], "non_goals": ["schema change"]},
         "problem_analysis": {"current_behavior": "web checkout currently renders subtotal and total in src/checkout/CheckoutSummary.tsx from the pricing API", "business_problem": "buyers cannot see discount rows before submitting checkout", "process_gap": "summary render path omits discounts returned by pricing", "code_entrypoints": ["src/checkout/CheckoutSummary.tsx"], "constraints": ["pricing remains server-owned"], "design_goals": ["show discount breakdown"], "non_goals": ["payment capture"], "success_criteria": ["discount rows visible when returned"]},
         "current_state_analysis": {"existing_behavior": "checkout summary already renders subtotal and total from the pricing API response", "code_entrypoints": ["src/checkout/CheckoutSummary.tsx"], "known_constraints": ["pricing remains server-owned"], "reuse_points": ["summary row renderer"]},
@@ -88,6 +130,8 @@ def complete_design() -> tuple[dict, dict]:
         "test_strategy": [{"case": "discount breakdown visible", "evidence": "browser"}],
     }
     architecture = {
+        "architecture_framing_ref": "architecture_framing.json",
+        "architecture_framing": architecture_framing,
         "architecture_scope": {"in_scope": ["web checkout"], "out_of_scope": ["pricing service"], "assumptions": ["contract exists"], "decision_drivers": ["low coupling"]},
         "current_architecture": {"system_context": "web-app consumes pricing-service during checkout and renders summary data", "repo_entrypoints": ["web-app/src/checkout/CheckoutSummary.tsx"], "upstream_downstream": ["pricing-service -> web-app"], "constraints": ["API remains source of truth"]},
         "architecture_options": [

@@ -9,12 +9,15 @@ gate: false
 
 # Technical Design Governor
 
-Use this skill after `spec-governor` and before architecture design or delivery planning.
+Use this skill after requirement/domain understanding, architecture framing, and applicable UI/API/data/observability specialty design; run it before architecture refinement or delivery planning.
 
 ## Position
 
 ```text
 spec-governor
+-> domain-model-governor
+-> architecture-framing-governor
+-> specialty design governors
 -> technical-design-governor
 -> architecture-design-governor
 -> design-architecture-reviewer
@@ -25,6 +28,7 @@ spec-governor
 ```bash
 python3 scripts/technical_design.py \
   --spec artifacts/REQ-001/spec.json \
+  --architecture-framing artifacts/REQ-001/architecture_framing.json \
   --out artifacts/REQ-001/technical_design.json
 ```
 
@@ -44,6 +48,7 @@ Then run `design-architecture-reviewer` after architecture design exists.
 - For every solution option, include when to choose it, implementation outline, risk controls, test evidence, rollout impact, performance impact, and rollback strategy.
 - Include a weighted option comparison matrix, score summary, decision confidence, implementation invariants, and expert review checklist.
 - When relevant, include data model/table schema changes, multi-system interaction sequence, MQ upstream/downstream trigger rules, cache strategy, transaction consistency, and observability design.
+- Consume `architecture_framing.json`, `ui_ue_design.json`, `api_contract_design.json`, `data_model_design.json`, `domain_model_design.json`, and `observability_design.json` when present; do not re-guess their owner, entrypoint, contract, data, or observability decisions.
 - Include traceability from requirements to acceptance and tests.
 
 ## Output

@@ -671,14 +671,20 @@ def run_registry_artifact_steps(
     generated: list[str],
     skipped: list[str],
     steps: list[dict[str, Any]],
+    skip_artifacts: set[str] | None = None,
 ) -> bool:
     registry_steps = [item for item in as_list(profile.get("artifact_steps")) if isinstance(item, dict)]
     if not registry_steps:
         return False
+    skip_artifacts = skip_artifacts or set()
     for item in registry_steps:
         name = str(item.get("name") or item.get("artifact") or "artifact_step")
         artifact = str(item.get("artifact") or "")
         command = [render_command_item(part, out) for part in as_list(item.get("command"))]
+        if artifact in skip_artifacts:
+            skipped.append(artifact)
+            steps.append({"name": name, "skipped": True, "output": str(out / artifact), "reason": "artifact is generated in pre-technical stage"})
+            continue
         if not artifact or not command:
             steps.append({"name": name, "returncode": 1, "passed": False, "reason": "artifact_steps entry requires artifact and command"})
             continue
@@ -708,137 +714,24 @@ def run_profile_artifact_steps(
     skipped: list[str],
     steps: list[dict[str, Any]],
 ) -> None:
-    if run_registry_artifact_steps(profile, out, force, generated, skipped, steps):
+    if run_registry_artifact_steps(
+        profile,
+        out,
+        force,
+        generated,
+        skipped,
+        steps,
+        skip_artifacts={
+            "domain_model_design.json",
+            "architecture_framing.json",
+            "ui_ue_design.json",
+            "ui_ue_review.json",
+            "api_contract_design.json",
+            "data_model_design.json",
+            "observability_design.json",
+        },
+    ):
         return
-    if profile_requires(profile, "ui-ue-design-governor"):
-        run_if_needed(
-            "ui_ue_design",
-            out / "ui_ue_design.json",
-            [
-                "python3",
-                "skills/core/ui-ue-design-governor/scripts/ui_ue_design.py",
-                "--spec",
-                str(spec),
-                "--technical-design",
-                str(technical),
-                "--out",
-                str(out / "ui_ue_design.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
-    if profile_requires(profile, "ui-ue-reviewer"):
-        run_if_needed(
-            "ui_ue_review",
-            out / "ui_ue_review.json",
-            [
-                "python3",
-                "skills/core/ui-ue-reviewer/scripts/ui_ue_review.py",
-                "--ui-ue-design",
-                str(out / "ui_ue_design.json"),
-                "--out",
-                str(out / "ui_ue_review.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
-    if profile_requires(profile, "frontend-implementation-planner"):
-        run_if_needed(
-            "frontend_implementation_plan",
-            out / "frontend_implementation_plan.json",
-            [
-                "python3",
-                "skills/core/frontend-implementation-planner/scripts/frontend_plan.py",
-                "--ui-ue-design",
-                str(out / "ui_ue_design.json"),
-                "--technical-design",
-                str(technical),
-                "--out",
-                str(out / "frontend_implementation_plan.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
-    if profile_requires(profile, "api-contract-governor"):
-        run_if_needed(
-            "api_contract_design",
-            out / "api_contract_design.json",
-            [
-                "python3",
-                "skills/core/api-contract-governor/scripts/api_contract.py",
-                "--spec",
-                str(spec),
-                "--technical-design",
-                str(technical),
-                "--out",
-                str(out / "api_contract_design.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
-    if profile_requires(profile, "data-model-governor"):
-        run_if_needed(
-            "data_model_design",
-            out / "data_model_design.json",
-            [
-                "python3",
-                "skills/core/data-model-governor/scripts/data_model.py",
-                "--spec",
-                str(spec),
-                "--technical-design",
-                str(technical),
-                "--out",
-                str(out / "data_model_design.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
-    if profile_requires(profile, "domain-model-governor"):
-        run_if_needed(
-            "domain_model_design",
-            out / "domain_model_design.json",
-            [
-                "python3",
-                "skills/core/domain-model-governor/scripts/domain_model.py",
-                "--spec",
-                str(spec),
-                "--out",
-                str(out / "domain_model_design.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
-    if profile_requires(profile, "observability-design-governor"):
-        run_if_needed(
-            "observability_design",
-            out / "observability_design.json",
-            [
-                "python3",
-                "skills/core/observability-design-governor/scripts/observability_design.py",
-                "--spec",
-                str(spec),
-                "--technical-design",
-                str(technical),
-                "--out",
-                str(out / "observability_design.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
     if profile_requires(profile, "frontend-acceptance-runner"):
         run_if_needed(
             "frontend_acceptance_template",
@@ -939,6 +832,142 @@ def run_profile_artifact_steps(
         if profile_requires(profile, "frontend-acceptance-runner"):
             command.append("--require-frontend")
         run_if_needed("test_evidence_gate", out / "test_evidence_gate.json", command, force, generated, skipped, steps)
+
+
+def run_pre_technical_design_steps(
+    profile: dict[str, Any],
+    out: Path,
+    spec: Path,
+    project_out: Path | None,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> None:
+    if profile_requires(profile, "domain-model-governor"):
+        run_if_needed(
+            "domain_model_design",
+            out / "domain_model_design.json",
+            [
+                "python3",
+                "skills/core/domain-model-governor/scripts/domain_model.py",
+                "--spec",
+                str(spec),
+                "--out",
+                str(out / "domain_model_design.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "architecture-framing-governor"):
+        command = [
+            "python3",
+            "skills/core/architecture-framing-governor/scripts/architecture_framing.py",
+            "--spec",
+            str(spec),
+            "--out",
+            str(out / "architecture_framing.json"),
+        ]
+        if (out / "domain_model_design.json").exists():
+            command.extend(["--domain-model-design", str(out / "domain_model_design.json")])
+        if project_out:
+            command.extend(["--project-understanding", str(project_out)])
+        run_if_needed("architecture_framing", out / "architecture_framing.json", command, force, generated, skipped, steps)
+    if profile_requires(profile, "ui-ue-design-governor"):
+        command = [
+            "python3",
+            "skills/core/ui-ue-design-governor/scripts/ui_ue_design.py",
+            "--spec",
+            str(spec),
+            "--out",
+            str(out / "ui_ue_design.json"),
+        ]
+        run_if_needed("ui_ue_design", out / "ui_ue_design.json", command, force, generated, skipped, steps)
+    if profile_requires(profile, "ui-ue-reviewer"):
+        run_if_needed(
+            "ui_ue_review",
+            out / "ui_ue_review.json",
+            [
+                "python3",
+                "skills/core/ui-ue-reviewer/scripts/ui_ue_review.py",
+                "--ui-ue-design",
+                str(out / "ui_ue_design.json"),
+                "--out",
+                str(out / "ui_ue_review.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+    if profile_requires(profile, "api-contract-governor"):
+        command = [
+            "python3",
+            "skills/core/api-contract-governor/scripts/api_contract.py",
+            "--spec",
+            str(spec),
+            "--out",
+            str(out / "api_contract_design.json"),
+        ]
+        if (out / "architecture_framing.json").exists():
+            command.extend(["--architecture-framing", str(out / "architecture_framing.json")])
+        run_if_needed("api_contract_design", out / "api_contract_design.json", command, force, generated, skipped, steps)
+    if profile_requires(profile, "data-model-governor"):
+        command = [
+            "python3",
+            "skills/core/data-model-governor/scripts/data_model.py",
+            "--spec",
+            str(spec),
+            "--out",
+            str(out / "data_model_design.json"),
+        ]
+        if (out / "architecture_framing.json").exists():
+            command.extend(["--architecture-framing", str(out / "architecture_framing.json")])
+        run_if_needed("data_model_design", out / "data_model_design.json", command, force, generated, skipped, steps)
+    if profile_requires(profile, "observability-design-governor"):
+        command = [
+            "python3",
+            "skills/core/observability-design-governor/scripts/observability_design.py",
+            "--spec",
+            str(spec),
+            "--out",
+            str(out / "observability_design.json"),
+        ]
+        if (out / "architecture_framing.json").exists():
+            command.extend(["--architecture-framing", str(out / "architecture_framing.json")])
+        run_if_needed("observability_design", out / "observability_design.json", command, force, generated, skipped, steps)
+
+
+def run_post_technical_design_steps(
+    profile: dict[str, Any],
+    out: Path,
+    technical: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> None:
+    if profile_requires(profile, "frontend-implementation-planner"):
+        run_if_needed(
+            "frontend_implementation_plan",
+            out / "frontend_implementation_plan.json",
+            [
+                "python3",
+                "skills/core/frontend-implementation-planner/scripts/frontend_plan.py",
+                "--ui-ue-design",
+                str(out / "ui_ue_design.json"),
+                "--technical-design",
+                str(technical),
+                "--out",
+                str(out / "frontend_implementation_plan.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
 
 
 def run_release_profile_steps(
@@ -1151,10 +1180,23 @@ def run(
     spec_data = read_json(spec)
     selected_profile, profile_selection_reason = select_workflow_profile_with_reason(spec_data, bool(repo and project), profile)
 
+    run_pre_technical_design_steps(selected_profile, out, spec, project_out, force, generated, skipped, steps)
+
     technical = out / "technical_design.json"
     technical_command = ["python3", "skills/core/technical-design-governor/scripts/technical_design.py", "--spec", str(spec), "--out", str(technical)]
     if project_out:
         technical_command.extend(["--project-understanding", str(project_out)])
+    for arg_name, file_name in [
+        ("--architecture-framing", "architecture_framing.json"),
+        ("--domain-model-design", "domain_model_design.json"),
+        ("--ui-ue-design", "ui_ue_design.json"),
+        ("--api-contract-design", "api_contract_design.json"),
+        ("--data-model-design", "data_model_design.json"),
+        ("--observability-design", "observability_design.json"),
+    ]:
+        artifact = out / file_name
+        if artifact.exists():
+            technical_command.extend([arg_name, str(artifact)])
     run_if_needed(
         "technical_design",
         technical,
@@ -1164,6 +1206,8 @@ def run(
         skipped,
         steps,
     )
+
+    run_post_technical_design_steps(selected_profile, out, technical, force, generated, skipped, steps)
 
     architecture = out / "architecture_design.json"
     architecture_command = [
@@ -1178,6 +1222,8 @@ def run(
     ]
     if project_out:
         architecture_command.extend(["--project-understanding", str(project_out)])
+    if (out / "architecture_framing.json").exists():
+        architecture_command.extend(["--architecture-framing", str(out / "architecture_framing.json")])
     run_if_needed(
         "architecture_design",
         architecture,

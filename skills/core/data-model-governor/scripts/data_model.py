@@ -30,15 +30,21 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def design(spec: dict[str, Any], technical: dict[str, Any] | None = None) -> dict[str, Any]:
+def design(spec: dict[str, Any], technical: dict[str, Any] | None = None, architecture_framing: dict[str, Any] | None = None) -> dict[str, Any]:
     technical = technical or {}
+    architecture_framing = architecture_framing or {}
     model = technical.get("data_model_design") if isinstance(technical.get("data_model_design"), dict) else {}
     if model.get("applicable") is False:
         return {"schema": SCHEMA, "decision": "not_applicable", "applicable": False, "blockers": []}
     applicable = bool(model.get("applicable")) or any(str(item.get("area") or "") in {"data", "database"} for item in as_list(spec.get("impact_surface")) if isinstance(item, dict))
     if not applicable:
         return {"schema": SCHEMA, "decision": "not_applicable", "applicable": False, "blockers": []}
-    tables = as_list(model.get("tables")) or as_list(technical.get("table_schema_changes"))
+    framing_data = as_list(architecture_framing.get("data_ownership"))
+    tables = as_list(model.get("tables")) or as_list(technical.get("table_schema_changes")) or [
+        {"table": "needs_confirmation", "business_object": item.get("business_object"), "owner_repo": item.get("owner_repo"), "write_authority": item.get("write_authority")}
+        for item in framing_data
+        if isinstance(item, dict)
+    ]
     blockers = []
     if any(isinstance(item, dict) and "needs_confirmation" in json.dumps(item, ensure_ascii=False).lower() for item in tables):
         blockers.append({"source": "data_model", "message": "Table, field type, nullable/default, or index details need source confirmation before schema migration."})
@@ -66,9 +72,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate data model design")
     parser.add_argument("--spec", required=True)
     parser.add_argument("--technical-design")
+    parser.add_argument("--architecture-framing")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
-    result = design(load_json(Path(args.spec)), load_json(Path(args.technical_design)) if args.technical_design else {})
+    result = design(
+        load_json(Path(args.spec)),
+        load_json(Path(args.technical_design)) if args.technical_design else {},
+        load_json(Path(args.architecture_framing)) if args.architecture_framing else {},
+    )
     write_json(Path(args.out), result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") in {"pass", "not_applicable"} else 2

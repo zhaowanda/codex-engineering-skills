@@ -498,6 +498,7 @@ def review(technical: dict[str, Any], architecture: dict[str, Any], ui_ue_artifa
     interface_examples = as_list(technical.get("interface_examples"))
     compatibility_matrix = as_list(technical.get("compatibility_matrix"))
     project_context = technical.get("project_context") if isinstance(technical.get("project_context"), dict) else {}
+    architecture_framing = technical.get("architecture_framing") if isinstance(technical.get("architecture_framing"), dict) else {}
 
     current_architecture = architecture.get("current_architecture") if isinstance(architecture.get("current_architecture"), dict) else {}
     arch_entrypoint_confidence = architecture.get("code_entrypoint_confidence") if isinstance(architecture.get("code_entrypoint_confidence"), dict) else {}
@@ -531,8 +532,14 @@ def review(technical: dict[str, Any], architecture: dict[str, Any], ui_ue_artifa
     mq_signal = has_signal(design_blob, ("mq", "topic", "queue", "producer", "consumer", "message", "event", "kafka", "rocketmq", "rabbitmq", "消息", "队列", "生产者", "消费者"))
     cache_signal = has_signal(design_blob, ("cache", "redis", "ttl", "缓存", "高频", "热点"))
     consistency_signal = has_signal(design_blob, ("transaction", "consistency", "idempot", "rollback", "compensation", "事务", "一致性", "幂等", "补偿", "回滚"))
+    framing_signal = system_signal or data_signal or mq_signal or new_service_signal(technical, architecture)
 
     review_requirements_understanding_gate(technical, architecture, findings)
+    if framing_signal:
+        if not architecture_framing and not technical.get("architecture_framing_ref") and not architecture.get("architecture_framing_ref"):
+            findings.append(finding("architecture_boundary_review", "high", "complex design lacks pre-technical architecture framing", "architecture_framing.json missing", "Generate architecture_framing.json before detailed technical design for API/data/MQ/cross-system/new-service requirements."))
+        elif architecture_framing.get("decision") == "block":
+            findings.append(finding("architecture_boundary_review", "blocker", "pre-technical architecture framing is blocked", architecture_framing.get("blockers"), "Resolve owner repo, entrypoint, data ownership, provider/consumer, or new-service boundary blockers before implementation."))
 
     if not isinstance(technical.get("design_scope"), dict) or not technical.get("design_scope", {}).get("in_scope"):
         findings.append(finding("technical_design_quality", "high", "technical design lacks explicit design_scope", technical.get("design_scope"), "Define in_scope, out_of_scope, assumptions, and non_goals."))

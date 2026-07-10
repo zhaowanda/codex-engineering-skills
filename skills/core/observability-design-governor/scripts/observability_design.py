@@ -30,10 +30,11 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def design(spec: dict[str, Any], technical: dict[str, Any] | None = None) -> dict[str, Any]:
+def design(spec: dict[str, Any], technical: dict[str, Any] | None = None, architecture_framing: dict[str, Any] | None = None) -> dict[str, Any]:
     technical = technical or {}
+    architecture_framing = architecture_framing or {}
     base = technical.get("observability_design") if isinstance(technical.get("observability_design"), dict) else {}
-    text = json.dumps([spec, technical], ensure_ascii=False).lower()
+    text = json.dumps([spec, technical, architecture_framing], ensure_ascii=False).lower()
     mq = any(token in text for token in ["mq", "topic", "queue", "consumer", "消息", "队列", "消费"])
     cache = any(token in text for token in ["cache", "redis", "缓存"])
     scheduled = any(token in text for token in ["cron", "schedule", "job", "task", "定时", "任务", "手搓"])
@@ -62,9 +63,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate observability design")
     parser.add_argument("--spec", required=True)
     parser.add_argument("--technical-design")
+    parser.add_argument("--architecture-framing")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
-    result = design(load_json(Path(args.spec)), load_json(Path(args.technical_design)) if args.technical_design else {})
+    result = design(
+        load_json(Path(args.spec)),
+        load_json(Path(args.technical_design)) if args.technical_design else {},
+        load_json(Path(args.architecture_framing)) if args.architecture_framing else {},
+    )
     write_json(Path(args.out), result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

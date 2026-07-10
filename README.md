@@ -219,6 +219,7 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/api-contract-governor`: generates API contract design artifacts for endpoint naming, request/response, errors, permissions, idempotency, compatibility, and consumers.
 - `skills/core/data-model-governor`: generates data model design artifacts for tables, fields, indexes, migrations, history data, consistency, rollback, and test data.
 - `skills/core/domain-model-governor`: models business objects, lifecycle, state machine, invariants, rules, triggers, and clarification gaps before technical design.
+- `skills/core/architecture-framing-governor`: frames owner system, repo boundaries, new-service decisions, provider/consumer direction, entrypoints, dependency degree, release order, and rollback before technical design.
 - `skills/core/observability-design-governor`: designs logs, metrics, traces, alerts, dashboards, MQ/task/cache signals, and post-release validation.
 - `skills/core/cross-repo-planner`: generates a cross-repository execution graph, readiness gate, and release plan for multi-repo requirements with provider/consumer dependencies.
 - `skills/core/delivery-plan-reviewer`: reviews delivery plans for executable task depth, narrow file scope, evidence mapping, rollback controls, and unresolved gates before Git or edit readiness.

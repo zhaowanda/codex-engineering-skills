@@ -36,6 +36,7 @@ Do not run every skill for every task. Use the workflow profile and change-risk 
 ## Design
 
 - `skills/core/api-contract-governor`: api-contract-governor (expert-gate, artifact-generator)
+- `skills/core/architecture-framing-governor`: architecture-framing-governor (expert-gate, artifact-generator)
 - `skills/core/architecture-design-governor`: architecture-design-governor (deterministic-helper, artifact-generator)
 - `skills/core/data-model-governor`: data-model-governor (expert-gate, artifact-generator)
 - `skills/core/design-architecture-reviewer`: design-architecture-reviewer (expert-gate, workflow-gate)

@@ -23,7 +23,7 @@ script/schema changes
 ## Command
 
 ```bash
-python3 scripts/artifact_schema.py --root .
+python3 scripts/codex_eng.py run artifact-schema --root .
 ```
 
 ## Rules

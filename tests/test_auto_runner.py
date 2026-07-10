@@ -552,6 +552,32 @@ def test_cross_repo_profile_artifact_step_generates_graph_artifacts() -> None:
         assert all(step.get("passed") for step in steps if not step.get("skipped"))
 
 
+def test_auto_runner_generates_specialty_design_before_technical_design() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "frontend.md"
+        req.write_text(
+            "\n".join([
+                "业务目的: 让管理员在报表页导出筛选结果。",
+                "流程: 管理员打开报表页，点击导出按钮，系统生成文件。",
+                "入口: 报表页导出按钮。",
+                "Req: Admin exports filtered report rows from the dashboard page.",
+                "AC: admin can export filtered rows.",
+            ]),
+            encoding="utf-8",
+        )
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-FE-ORDER", title="Frontend export", out=out, profile="frontend_change", force=True)
+        step_names = [step.get("name") for step in result["steps"]]
+        assert step_names.index("domain_model_design") < step_names.index("architecture_framing") < step_names.index("technical_design")
+        assert step_names.index("ui_ue_design") < step_names.index("technical_design")
+        assert step_names.index("frontend_implementation_plan") > step_names.index("technical_design")
+        tech = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))
+        assert tech["architecture_framing_ref"] == "architecture_framing.json"
+        assert (out / "ui_ue_design.json").exists()
+        assert (out / "frontend_implementation_plan.json").exists()
+
+
 def test_workflow_strictness_classifies_light_standard_and_regulated() -> None:
     light = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": []}, {"name": "bugfix"}, "high")
     assert light["tier"] == "light"

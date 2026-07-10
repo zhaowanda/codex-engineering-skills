@@ -1141,6 +1141,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
 
 
 def merge_specialized_artifacts(result: dict[str, Any], artifact_paths: dict[str, Path | None]) -> dict[str, Any]:
+    architecture_framing = load_json(artifact_paths.get("architecture_framing")) if artifact_paths.get("architecture_framing") else {}
     ui_design = load_json(artifact_paths.get("ui_ue_design")) if artifact_paths.get("ui_ue_design") else {}
     api_contract = load_json(artifact_paths.get("api_contract_design")) if artifact_paths.get("api_contract_design") else {}
     data_model = load_json(artifact_paths.get("data_model_design")) if artifact_paths.get("data_model_design") else {}
@@ -1152,6 +1153,20 @@ def merge_specialized_artifacts(result: dict[str, Any], artifact_paths: dict[str
         for name, path in artifact_paths.items()
         if path and path.exists()
     }
+    if architecture_framing and architecture_framing.get("decision") in {"pass", "block"}:
+        result["architecture_framing_ref"] = "architecture_framing.json"
+        result["architecture_framing"] = architecture_framing
+        boundary = architecture_framing.get("system_boundary") if isinstance(architecture_framing.get("system_boundary"), dict) else {}
+        if boundary.get("owner_repo"):
+            result["project_context"]["architecture_owner_repo"] = boundary.get("owner_repo")
+        if architecture_framing.get("runtime_entrypoints"):
+            result["entrypoints"] = architecture_framing.get("runtime_entrypoints")
+        if architecture_framing.get("dependency_graph"):
+            result["runtime_dependency_graph"] = architecture_framing.get("dependency_graph")
+        result["expert_review_checklist"].append({
+            "item": "Architecture framing is consumed before detailed technical design.",
+            "status": "ready" if architecture_framing.get("decision") == "pass" else "blocked",
+        })
     if ui_design and ui_design.get("decision") not in {"not_applicable", "block"}:
         screens = [item for item in as_list(ui_design.get("screens")) if isinstance(item, dict)]
         summary = ui_design.get("experience_summary") if isinstance(ui_design.get("experience_summary"), dict) else {}
@@ -1189,6 +1204,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Render technical design from normalized spec")
     parser.add_argument("--spec", required=True)
     parser.add_argument("--project-understanding")
+    parser.add_argument("--architecture-framing")
     parser.add_argument("--ui-ue-design")
     parser.add_argument("--api-contract-design")
     parser.add_argument("--data-model-design")
@@ -1198,6 +1214,7 @@ def main() -> int:
     args = parser.parse_args()
     result = render(load_json(Path(args.spec)), load_project_understanding(Path(args.project_understanding)) if args.project_understanding else None)
     result = merge_specialized_artifacts(result, {
+        "architecture_framing": Path(args.architecture_framing) if args.architecture_framing else None,
         "ui_ue_design": Path(args.ui_ue_design) if args.ui_ue_design else None,
         "api_contract_design": Path(args.api_contract_design) if args.api_contract_design else None,
         "data_model_design": Path(args.data_model_design) if args.data_model_design else None,

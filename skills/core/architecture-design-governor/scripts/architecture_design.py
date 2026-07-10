@@ -392,14 +392,16 @@ def build_architecture_options(
     return options, matrix, score_summary, selected
 
 
-def render(spec: dict[str, Any], technical: dict[str, Any], project_understanding: dict[str, Any] | None = None) -> dict[str, Any]:
+def render(spec: dict[str, Any], technical: dict[str, Any], project_understanding: dict[str, Any] | None = None, architecture_framing: dict[str, Any] | None = None) -> dict[str, Any]:
+    architecture_framing = architecture_framing or {}
     ctx = project_context(project_understanding or {})
     doc_id = str(spec.get("doc_id") or technical.get("doc_id") or "")
     title = str(spec.get("title") or technical.get("title") or "")
     summary = str(spec.get("requirement_summary") or title)
     reqs = [item for item in as_list(spec.get("requirements")) if isinstance(item, dict)]
     req_id = str(reqs[0].get("id") if reqs else "REQ-1")
-    owner_repo = ctx["project"]
+    framing_boundary = architecture_framing.get("system_boundary") if isinstance(architecture_framing.get("system_boundary"), dict) else {}
+    owner_repo = str(framing_boundary.get("owner_repo") or ctx["project"])
     repo_path = ctx["repo_path"]
     breakdown = [item for item in as_list(technical.get("requirement_breakdown")) if isinstance(item, dict)] or [
         {"id": str(item.get("id") or req_id), "summary": str(item.get("summary") or summary), "impact_areas": ["behavior"]}
@@ -460,7 +462,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
     else:
         architecture_confidence = "high"
     architecture_options, architecture_fit_matrix, architecture_score_summary, selected_architecture = build_architecture_options(owner_repo, owner_module, producer, route_contract, breakdown, technical, summary)
-    return {
+    result = {
         "schema": "codex-architecture-design-v1",
         "doc_id": doc_id,
         "title": title,
@@ -522,6 +524,21 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "decision_records": [{"decision": "start with owner-repo scoped architecture", "alternatives": ["cross-repo contract change"], "reason": "minimize coupling and release risk"}],
         "architecture_risks": [] if repo_path else [{"risk": "owner repo not yet routed", "mitigation": "fill repo_path and rerun delivery plan before git/edit"}],
     }
+    if architecture_framing:
+        result["architecture_framing_ref"] = "architecture_framing.json"
+        result["architecture_framing"] = architecture_framing
+        result["component_boundaries"] = [
+            {"component": item.get("repo"), "role": item.get("role"), "exclusion": "respect pre-technical architecture framing"}
+            for item in as_list(architecture_framing.get("repo_responsibilities"))
+            if isinstance(item, dict)
+        ] or result["component_boundaries"]
+        result["cross_repo_dependency_graph"] = as_list((architecture_framing.get("dependency_graph") or {}).get("edges")) or result["cross_repo_dependency_graph"]
+        result["data_ownership"] = as_list(architecture_framing.get("data_ownership")) or result["data_ownership"]
+        result["expert_review_checklist"].append({
+            "item": "Architecture design refines pre-technical architecture framing.",
+            "status": "ready" if architecture_framing.get("decision") == "pass" else "blocked",
+        })
+    return result
 
 
 def main() -> int:
@@ -529,9 +546,15 @@ def main() -> int:
     parser.add_argument("--spec", required=True)
     parser.add_argument("--technical-design", required=True)
     parser.add_argument("--project-understanding")
+    parser.add_argument("--architecture-framing")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
-    result = render(load_json(Path(args.spec)), load_json(Path(args.technical_design)), load_project_understanding(Path(args.project_understanding)) if args.project_understanding else None)
+    result = render(
+        load_json(Path(args.spec)),
+        load_json(Path(args.technical_design)),
+        load_project_understanding(Path(args.project_understanding)) if args.project_understanding else None,
+        load_json(Path(args.architecture_framing)) if args.architecture_framing else {},
+    )
     write_json(Path(args.out), result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

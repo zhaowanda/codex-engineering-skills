@@ -106,9 +106,156 @@ def empty_architecture(doc_id: str, title: str) -> dict[str, Any]:
     }
 
 
+def checkout_architecture_framing(doc_id: str, title: str) -> dict[str, Any]:
+    return {
+        "schema": "codex-architecture-framing-v1",
+        "doc_id": doc_id,
+        "title": title,
+        "decision": "pass",
+        "system_boundary": {
+            "decision_type": "modify_existing_system",
+            "owner_repo": "web-app",
+            "owner_repo_path": "",
+            "new_service_decision": {
+                "required": False,
+                "reason": "The requirement only renders an existing pricing response field in the checkout UI; pricing ownership and provider contracts stay unchanged.",
+                "rejected_existing_owners": [],
+                "creation_conditions": [],
+            },
+        },
+        "repo_responsibilities": [
+            {"repo": "web-app", "role": "modify", "responsibility": "render discount rows from the existing pricing response"},
+            {"repo": "pricing-service", "role": "confirm_only", "responsibility": "confirm discounts[] remains part of the pricing response contract"},
+        ],
+        "runtime_entrypoints": [
+            {
+                "kind": "frontend_action",
+                "trigger": "buyer opens the checkout summary page",
+                "actor": "buyer browser",
+                "repo": "web-app",
+                "entrypoint": "src/checkout/usePricing.ts -> src/checkout/CheckoutSummary.tsx",
+                "downstream": ["pricing-service GET /api/pricing?cartId={cartId}"],
+            }
+        ],
+        "dependency_graph": {
+            "degree": 1,
+            "classification": "one_degree_existing_contract",
+            "edges": [
+                {
+                    "from": "web-app checkout page",
+                    "to": "pricing-service",
+                    "interaction": "GET /api/pricing?cartId={cartId}",
+                    "change_type": "reuse_existing_contract",
+                    "contract": "pricing response discounts[]",
+                }
+            ],
+        },
+        "provider_consumer": [
+            {
+                "provider": "pricing-service",
+                "consumer": "web-app",
+                "contract": "GET /api/pricing returns subtotal, total, discounts[]",
+                "compatibility": "unchanged provider contract; frontend consumes existing field",
+            }
+        ],
+        "data_ownership": [
+            {
+                "business_object": "discount",
+                "owner_repo": "pricing-service",
+                "write_authority": "pricing-service",
+                "consumer_rule": "web-app displays values read-only and must not recalculate discounts",
+            }
+        ],
+        "release_order": [
+            {"order": 1, "repo": "pricing-service", "action": "confirm contract evidence only"},
+            {"order": 2, "repo": "web-app", "action": "deploy checkout UI rendering change"},
+        ],
+        "rollback_boundary": [
+            {"repo": "web-app", "rollback": "revert or hide discount row rendering", "data_risk": "none"},
+        ],
+        "blockers": [],
+    }
+
+
+def notification_service_architecture_framing(doc_id: str, title: str) -> dict[str, Any]:
+    return {
+        "schema": "codex-architecture-framing-v1",
+        "doc_id": doc_id,
+        "title": title,
+        "decision": "pass",
+        "system_boundary": {
+            "decision_type": "new_service_required",
+            "owner_repo": "notification-service",
+            "owner_repo_path": "",
+            "new_service_decision": {
+                "required": True,
+                "reason": "Preference lifecycle, consent audit, and multiple downstream consumers need an owner independent from the monolith account module.",
+                "rejected_existing_owners": [
+                    {"repo": "monolith", "reason": "would keep sender consumers coupled to account release cadence and account persistence"},
+                    {"repo": "identity-service", "reason": "owns user identity only and should not own notification preference lifecycle"},
+                ],
+                "creation_conditions": ["new CI/CD baseline", "owned database schema", "service SLO and oncall", "provider API contract tests"],
+            },
+        },
+        "repo_responsibilities": [
+            {"repo": "notification-service", "role": "create", "responsibility": "own preference APIs, validation, persistence, consent audit, observability, and deployment baseline"},
+            {"repo": "monolith", "role": "modify", "responsibility": "add compatibility adapter and traffic flag for account settings"},
+            {"repo": "identity-service", "role": "confirm_only", "responsibility": "confirm user validation read contract"},
+        ],
+        "runtime_entrypoints": [
+            {
+                "kind": "frontend_action",
+                "trigger": "customer saves notification preference from account settings",
+                "actor": "customer browser",
+                "repo": "monolith",
+                "entrypoint": "account settings notification tab -> monolith account adapter",
+                "downstream": ["notification-service POST /api/notification/preferences", "identity-service user validation"],
+            },
+            {
+                "kind": "api_request",
+                "trigger": "downstream sender reads notification preferences before sending",
+                "actor": "sender service",
+                "repo": "notification-service",
+                "entrypoint": "GET /api/notification/preferences/{userId}",
+                "downstream": ["notification database"],
+            },
+        ],
+        "dependency_graph": {
+            "degree": 2,
+            "classification": "multi_degree_new_provider",
+            "edges": [
+                {"from": "account frontend", "to": "monolith account adapter", "interaction": "save notification preference", "change_type": "modify_consumer"},
+                {"from": "monolith account adapter", "to": "notification-service", "interaction": "POST /api/notification/preferences", "change_type": "new_provider_contract"},
+                {"from": "notification-service", "to": "identity-service", "interaction": "validate user and tenant scope", "change_type": "reuse_existing_contract"},
+                {"from": "notification-service", "to": "notification database", "interaction": "write preference and consent audit", "change_type": "new_data_owner"},
+            ],
+        },
+        "provider_consumer": [
+            {"provider": "notification-service", "consumer": "monolith", "contract": "POST/GET /api/notification/preferences", "compatibility": "new additive provider contract behind adapter flag"},
+            {"provider": "identity-service", "consumer": "notification-service", "contract": "user validation read API", "compatibility": "existing contract confirmation only"},
+        ],
+        "data_ownership": [
+            {"business_object": "notification preference", "owner_repo": "notification-service", "write_authority": "notification-service", "consumer_rule": "monolith and senders read through provider APIs"},
+            {"business_object": "user identity", "owner_repo": "identity-service", "write_authority": "identity-service", "consumer_rule": "notification-service validates identity read-only"},
+        ],
+        "release_order": [
+            {"order": 1, "repo": "notification-service", "action": "create schema, deploy service dark, verify API and observability baseline"},
+            {"order": 2, "repo": "monolith", "action": "deploy adapter with traffic flag disabled"},
+            {"order": 3, "repo": "monolith", "action": "enable tenant allowlist after contract and UAT evidence"},
+        ],
+        "rollback_boundary": [
+            {"repo": "monolith", "rollback": "disable adapter flag and route account settings back to legacy preference path", "data_risk": "new rows remain dormant"},
+            {"repo": "notification-service", "rollback": "roll back service image after traffic is disabled", "data_risk": "no destructive data rollback"},
+        ],
+        "blockers": [],
+    }
+
+
 def example_technical(doc_id: str, title: str) -> dict[str, Any]:
     data = empty_technical(doc_id, title)
     data.update({
+        "architecture_framing_ref": "architecture_framing.json",
+        "architecture_framing": checkout_architecture_framing(doc_id, title),
         "design_scope": {"in_scope": ["checkout discount display"], "out_of_scope": ["payment capture"], "assumptions": ["pricing API already returns discounts"], "non_goals": ["pricing calculation change"]},
         "current_state_analysis": {"existing_behavior": "checkout summary already renders subtotal and total from the pricing API response", "code_entrypoints": ["src/checkout/CheckoutSummary.tsx", "src/checkout/usePricing.ts"], "known_constraints": ["pricing calculation must remain server-owned", "no additional checkout request is allowed"], "reuse_points": ["existing summary row renderer", "existing pricing response type"]},
         "problem_analysis": {
@@ -191,6 +338,8 @@ def example_technical(doc_id: str, title: str) -> dict[str, Any]:
 def example_architecture(doc_id: str, title: str) -> dict[str, Any]:
     data = empty_architecture(doc_id, title)
     data.update({
+        "architecture_framing_ref": "architecture_framing.json",
+        "architecture_framing": checkout_architecture_framing(doc_id, title),
         "architecture_scope": {"in_scope": ["web checkout"], "out_of_scope": ["pricing service logic"], "assumptions": ["contract exists"], "decision_drivers": ["low coupling"]},
         "current_architecture": {"system_context": "web-app consumes pricing-service during checkout and renders the returned summary", "repo_entrypoints": ["web-app/src/checkout/CheckoutSummary.tsx", "pricing-service existing pricing endpoint"], "upstream_downstream": ["pricing-service -> web-app"], "constraints": ["pricing-service remains source of truth"]},
         "architecture_options": [
@@ -231,6 +380,7 @@ def example_architecture(doc_id: str, title: str) -> dict[str, Any]:
 
 def new_service_example_technical(doc_id: str, title: str) -> dict[str, Any]:
     data = example_technical(doc_id, title)
+    data["architecture_framing"] = notification_service_architecture_framing(doc_id, title)
     data["design_scope"] = {
         "in_scope": ["create notification-service for customer notification preferences"],
         "out_of_scope": ["migrate historical notification delivery logs"],
@@ -317,6 +467,7 @@ def new_service_example_technical(doc_id: str, title: str) -> dict[str, Any]:
 
 def new_service_example_architecture(doc_id: str, title: str) -> dict[str, Any]:
     data = example_architecture(doc_id, title)
+    data["architecture_framing"] = notification_service_architecture_framing(doc_id, title)
     data["architecture_scope"] = {"in_scope": ["new notification-service", "monolith compatibility adapter"], "out_of_scope": ["replace downstream senders in first release"], "assumptions": ["identity-service user contract exists"], "decision_drivers": ["clear ownership", "auditable consent", "controlled migration"]}
     data["current_architecture"] = {"system_context": "monolith account module owns preference UI and persistence today, identity-service owns user identity, and sender services lack independent preference APIs", "repo_entrypoints": ["monolith/account/preferences", "identity-service/users"], "upstream_downstream": ["account frontend -> monolith", "monolith -> identity-service"], "constraints": ["monolith compatibility must remain during first release"]}
     data["architecture_options"] = [
