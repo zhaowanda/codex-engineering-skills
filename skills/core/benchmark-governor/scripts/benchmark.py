@@ -66,6 +66,22 @@ def requirement_understanding_strict(root: Path) -> bool:
                 ]
             ),
         )
+        missing_state_controls = spec_governor.normalize(
+            "REQ-BENCH-MISSING-STATE-CONTROLS",
+            "订单状态同步",
+            "\n".join(
+                [
+                    "业务目的: 减少订单同步失败导致的客服排查。",
+                    "成功指标: 订单同步失败人工排查量下降 50%。",
+                    "流程: 订单服务发送 order-sync MQ；报表服务 Consumer 消费消息并同步订单状态；失败时需要重试。",
+                    "入口: order-sync MQ Consumer。",
+                    "状态: pending -> synced.",
+                    "重试策略: order-sync Consumer fails can retry three times.",
+                    "Req: 报表服务同步订单状态。",
+                    "AC: 消息消费成功后报表订单状态更新。",
+                ]
+            ),
+        )
         multi_entry = spec_governor.normalize(
             "REQ-BENCH-MULTI-ENTRY",
             "续费状态修复",
@@ -74,10 +90,22 @@ def requirement_understanding_strict(root: Path) -> bool:
                     "业务目的: 减少运营和系统补偿续费状态不一致导致的人工排查。",
                     "成功指标: 续费状态异常人工处理量下降 50%。",
                     "现状: 当前已有续费列表重新试算按钮、renewal/recalculate 后端接口、renewal-status topic 消费者和夜间补偿 Task。",
+                    "证据: baseline shows renewal list page, renewal/recalculate API, renewal-status topic, and nightly renewal compensation Task.",
                     "流程: 运营在续费列表点击重新试算按钮，前端调用续费试算接口；后端复用试算服务并发送 renewal-status MQ；消费者刷新续费状态，夜间补偿 Task 处理超时未回调记录；无权限用户不可触发。",
                     "入口: 续费列表重新试算按钮。",
                     "入口: renewal-status MQ Consumer 消费续费状态消息。",
                     "入口: 夜间续费状态补偿 Task。",
+                    "仓库: operate-platform-fe owns renewal list button.",
+                    "仓库: sigreal-operate-platform owns renewal/recalculate API and renewal-status producer.",
+                    "仓库: renewal-worker owns renewal-status Consumer and nightly compensation Task.",
+                    "依赖: operate-platform-fe -> sigreal-operate-platform -> renewal-status topic -> renewal-worker.",
+                    "状态: pending -> recalculating.",
+                    "状态: recalculating -> calculated.",
+                    "重试策略: renewal-status Consumer fails can retry three times with dead-letter observation.",
+                    "幂等键: renewalId + calculationVersion.",
+                    "超时规则: nightly Task scans recalculating records older than 30 minutes.",
+                    "补偿规则: timeout records are moved back to pending and emit renewal-status compensation event.",
+                    "非法流转: calculated cannot transition back to recalculating without a new calculationVersion.",
                     "Req: 运营可以对单个设备重新触发续费试算并修复状态不一致。",
                     "Rule: 只有续费管理权限角色可以触发前端重新试算。",
                     "AC: 有权限运营点击重新试算按钮后，接口返回成功且页面展示新的试算金额和试算时间。",
@@ -87,6 +115,46 @@ def requirement_understanding_strict(root: Path) -> bool:
                 ]
             ),
         )
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence_root = Path(tmp)
+            (evidence_root / "api_surface.json").write_text(json.dumps({
+                "project": "sigreal-operate-platform",
+                "routes": [{"method": "POST", "route": "/renewal/recalculate", "file": "RenewalController.java"}],
+            }, ensure_ascii=False), encoding="utf-8")
+            (evidence_root / "code_index.json").write_text(json.dumps({
+                "symbols": ["RenewalStatusConsumer", "NightlyRenewalCompensationTask"],
+            }, ensure_ascii=False), encoding="utf-8")
+            (evidence_root / "config_surface.json").write_text(json.dumps({
+                "items": [{"key": "rocketmq.topic.renewal-status", "value": "renewal-status"}],
+            }, ensure_ascii=False), encoding="utf-8")
+            (evidence_root / "baseline.json").write_text(json.dumps({
+                "project": "sigreal-operate-platform",
+                "module_hints": [{"module": "renewal"}],
+                "fields": ["renewal_status", "retry_count", "calculation_version", "updated_at"],
+            }, ensure_ascii=False), encoding="utf-8")
+            (evidence_root / "dependency_surface.json").write_text(json.dumps({
+                "dependencies": ["sigreal-operate-platform -> renewal-status topic -> renewal-worker"],
+            }, ensure_ascii=False), encoding="utf-8")
+            evidence_backed = spec_governor.normalize(
+                "REQ-BENCH-EVIDENCE",
+                "续费重新试算",
+                "\n".join([
+                    "业务目的: 减少续费状态不一致导致的人工排查。",
+                    "成功指标: 续费状态异常人工处理量下降 50%。",
+                    "流程: 运营点击重新试算后，后端接口发送 renewal-status MQ，Consumer 刷新续费状态。",
+                    "入口: 续费列表重新试算按钮。",
+                    "状态: pending -> recalculating.",
+                    "状态: recalculating -> calculated.",
+                    "重试策略: renewal-status Consumer fails can retry three times.",
+                    "幂等键: renewalId + calculationVersion.",
+                    "补偿规则: retry exhausted records remain recalculating and are picked by the nightly compensation task.",
+                    "非法流转: calculated cannot transition back to recalculating without a new calculationVersion.",
+                    "Req: 运营可以重新触发续费试算。",
+                    "AC: 接口成功后页面展示新的试算金额和试算时间。",
+                    "AC: renewal-status MQ 消费失败时可以重试且不会重复更新同一条状态。",
+                ]),
+                spec_governor.load_project_evidence(evidence_root),
+            )
         return (
             ambiguous.get("design_allowed") is False
             and ambiguous.get("requirements_understanding", {}).get("decision") == "needs_clarification"
@@ -95,8 +163,23 @@ def requirement_understanding_strict(root: Path) -> bool:
             and clear.get("requirements_understanding", {}).get("scorecard", {}).get("overall_score", 0) >= 80
             and no_goal.get("design_allowed") is False
             and no_goal.get("requirements_understanding", {}).get("level") == "clarification_required"
+            and missing_state_controls.get("design_allowed") is False
+            and {"invalid_transition_rules", "compensation_rule"}.issubset(set(missing_state_controls.get("state_machine", {}).get("missing", [])))
             and multi_entry.get("business_flow_model", {}).get("supports_multiple_entrypoints") is True
+            and multi_entry.get("business_closure_model", {}).get("ready") is True
+            and multi_entry.get("state_machine", {}).get("ready") is True
+            and multi_entry.get("state_machine", {}).get("completeness", {}).get("ready") is True
+            and multi_entry.get("dependency_chain", {}).get("ready") is True
+            and multi_entry.get("runtime_dependency_graph", {}).get("nodes")
+            and all(edge.get("degree") and edge.get("source_evidence") for edge in multi_entry.get("runtime_dependency_graph", {}).get("edges", []))
+            and multi_entry.get("repo_impact_map", {}).get("multi_repo_required") is True
             and multi_entry.get("requirements_understanding", {}).get("level") == "expert_ready"
+            and evidence_backed.get("project_evidence", {}).get("matched_item_count", 0) > 0
+            and evidence_backed.get("business_goal_quality", {}).get("score", 0) >= evidence_backed.get("business_goal_quality", {}).get("threshold", 80)
+            and any(item.get("source_evidence") == "api_surface.json" for item in evidence_backed.get("current_state_evidence", []))
+            and any(item.get("evidence_match_score", 0) > 0 for item in evidence_backed.get("evidence_match_table", []))
+            and any(node.get("source_evidence") != "inferred" for node in evidence_backed.get("business_closure_model", {}).get("nodes", []))
+            and evidence_backed.get("runtime_dependency_graph", {}).get("edges")
             and spec_governor.validate_spec(clear).get("decision") == "pass"
         )
     except Exception:

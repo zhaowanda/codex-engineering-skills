@@ -19,6 +19,7 @@ python3 scripts/spec_governor.py \
   --doc-id REQ-001 \
   --title "Checkout discount display" \
   --input requirement.txt \
+  --project-understanding artifacts/project-understanding \
   --out artifacts/REQ-001/spec.json
 ```
 
@@ -46,6 +47,13 @@ python3 scripts/spec_governor.py \
 - Extract business intent, current business problem, expected business outcome, business flow, entrypoints, trigger conditions, preconditions, postconditions, and ambiguity records.
 - Model business flow as structured steps with actor, entrypoint, trigger, system actions, downstream effects, result, and branch signals.
 - Capture current business state evidence when available: existing UI/API/task/MQ/manual entrypoints, existing data ownership, downstream dependencies, and whether the change reuses, modifies, or adds capability.
+- When `--project-understanding` is provided, read `baseline.json`, `api_surface.json`, `code_index.json`, `config_surface.json`, `dependency_surface.json`, and `repository_analysis.json` to bind current-state facts to real artifact sources.
+- Produce `evidence_match_table` with `evidence_match_score` and `match_reason` for project evidence used by current-state and dependency reasoning.
+- Build `business_closure_model` from actor/external trigger through UI/API/task/consumer, domain behavior, DB/MQ/cache/downstream effects, and visible business result.
+- Build `runtime_dependency_graph` with nodes/edges, `degree`, and `source_evidence` from dependency chain, closure model, and project evidence.
+- Score `business_goal_quality` from explicit goal, target user, measurable metric, testable outcome, and flow binding.
+- For stateful, asynchronous, retry, timeout, idempotency, compensation, MQ, or synchronization requirements, require `state_machine` with transitions, retry policy, idempotency key, timeout rule, compensation rule, invalid transitions, and completeness scoring when applicable.
+- For multi-system or multi-repository requirements, extract `repo_impact_map` and `dependency_chain` with owner, upstream, downstream, and dependency order evidence.
 - Score requirement understanding across intent, flow, entrypoint, acceptance, and evidence dimensions; `expert_ready` requires all core dimensions to meet the expert threshold.
 - Convert high-risk implicit constraints into derived clarification questions and expert readiness gaps.
 - Treat fully inferred acceptance criteria as usable but not expert-ready until confirmed.
@@ -62,8 +70,17 @@ Key fields:
 - `expected_business_outcome`
 - `business_flow`
 - `business_flow_model`
+- `business_closure_model`
 - `entrypoints`
 - `current_business_state`
+- `current_state_evidence`
+- `evidence_match_table`
+- `project_evidence`
+- `state_machine`
+- `business_goal_quality`
+- `repo_impact_map`
+- `dependency_chain`
+- `runtime_dependency_graph`
 - `trigger_conditions`
 - `ambiguities`
 - `requirements_understanding`

@@ -31,7 +31,7 @@ python3 scripts/test_design.py \
 ## Rules
 
 - Every acceptance criterion needs at least one test case.
-- Carry `requirements_understanding_gate` from spec/technical/architecture design. If `design_allowed=false` or `implementation_allowed=false`, the test design artifact may be generated only as a blocked clarification draft and validation must return `decision=block`.
+- Carry `requirements_understanding_gate` from spec/technical/architecture design, including business closure, state machine completeness, business goal quality, repository impact, dependency chain, and runtime dependency graph models. If `design_allowed=false` or `implementation_allowed=false`, the test design artifact may be generated only as a blocked clarification draft and validation must return `decision=block`.
 - Permission-sensitive requirements need negative permission cases.
 - Cross-repo changes need integration tests.
 - UI changes need frontend/browser acceptance evidence.

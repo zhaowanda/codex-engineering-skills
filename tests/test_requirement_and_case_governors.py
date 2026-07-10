@@ -173,10 +173,22 @@ def test_spec_models_multi_entry_business_flow_and_scores() -> None:
     业务目的: 减少运营和系统补偿续费状态不一致导致的人工排查。
     成功指标: 续费状态异常人工处理量下降 50%。
     现状: 当前已有续费列表重新试算按钮、renewal/recalculate 后端接口、renewal-status topic 消费者和夜间补偿 Task。
+    证据: baseline shows renewal list page, renewal/recalculate API, renewal-status topic, and nightly renewal compensation Task.
     流程: 运营在续费列表点击重新试算按钮，前端调用续费试算接口；后端复用试算服务并发送 renewal-status MQ；消费者刷新续费状态，夜间补偿 Task 处理超时未回调记录；无权限用户不可触发。
     入口: 续费列表重新试算按钮。
     入口: renewal-status MQ Consumer 消费续费状态消息。
     入口: 夜间续费状态补偿 Task。
+    仓库: operate-platform-fe owns renewal list button.
+    仓库: sigreal-operate-platform owns renewal/recalculate API and renewal-status producer.
+    仓库: renewal-worker owns renewal-status Consumer and nightly compensation Task.
+    依赖: operate-platform-fe -> sigreal-operate-platform -> renewal-status topic -> renewal-worker.
+    状态: pending -> recalculating.
+    状态: recalculating -> calculated.
+    重试策略: renewal-status Consumer fails can retry three times with dead-letter observation.
+    幂等键: renewalId + calculationVersion.
+    超时规则: nightly Task scans recalculating records older than 30 minutes.
+    补偿规则: timeout records are moved back to pending and emit renewal-status compensation event.
+    非法流转: calculated cannot transition back to recalculating without a new calculationVersion.
     Req: 运营可以对单个设备重新触发续费试算并修复状态不一致。
     Rule: 只有续费管理权限角色可以触发前端重新试算。
     AC: 有权限运营点击重新试算按钮后，接口返回成功且页面展示新的试算金额和试算时间。
@@ -188,12 +200,78 @@ def test_spec_models_multi_entry_business_flow_and_scores() -> None:
     assert spec["design_allowed"] is True
     assert spec["requirements_understanding"]["level"] == "expert_ready"
     assert spec["requirements_understanding"]["scorecard"]["dimensions"]["flow_score"] >= 90
+    assert spec["requirements_understanding"]["scorecard"]["dimensions"]["state_score"] >= 90
+    assert spec["requirements_understanding"]["scorecard"]["dimensions"]["dependency_score"] >= 90
     assert spec["business_flow_model"]["supports_multiple_entrypoints"] is True
     assert len(spec["entrypoints"]) >= 3
     branches = {item["type"] for item in spec["business_flow_model"]["branches"]}
     assert {"permission_denied", "retry", "timeout"}.issubset(branches)
     assert spec["current_business_state"]["known_current_facts"]
+    assert spec["current_state_evidence"]
+    assert spec["state_machine"]["ready"] is True
+    assert spec["state_machine"]["completeness"]["ready"] is True
+    assert spec["dependency_chain"]["ready"] is True
+    assert spec["runtime_dependency_graph"]["nodes"]
+    assert all(edge.get("degree") and edge.get("source_evidence") for edge in spec["runtime_dependency_graph"]["edges"])
+    assert spec["business_goal_quality"]["ready"] is True
+    assert spec["repo_impact_map"]["multi_repo_required"] is True
+    assert spec["business_closure_model"]["ready"] is True
     assert spec["success_metrics"]
+
+
+def test_spec_blocks_async_stateful_requirement_without_state_controls() -> None:
+    text = """
+    业务目的: 减少订单同步失败导致的客服排查。
+    现状: 当前订单服务会发送 order-sync MQ，报表服务消费后更新订单状态。
+    流程: 订单服务发送 order-sync MQ；报表服务 Consumer 消费消息并同步订单状态；失败时需要重试和补偿。
+    入口: order-sync MQ Consumer。
+    Req: 报表服务同步订单状态。
+    AC: 消息消费成功后报表订单状态更新。
+    """
+    spec = spec_governor.normalize("REQ-ASYNC-MISSING", "订单状态同步", text)
+    assert spec["design_allowed"] is False
+    assert spec["state_machine"]["required"] is True
+    assert {"state_transitions", "retry_policy", "compensation_rule"}.issubset(set(spec["state_machine"]["missing"]))
+    result = question_governor.generate(spec)
+    categories = {item.get("category") for item in result["questions"]}
+    assert "state_machine" in categories
+
+
+def test_spec_uses_project_understanding_evidence_for_current_state() -> None:
+    text = """
+    业务目的: 减少续费状态不一致导致的人工排查。
+    成功指标: 续费状态异常人工处理量下降 50%。
+    流程: 运营点击重新试算后，后端接口发送 renewal-status MQ，Consumer 刷新续费状态。
+    入口: 续费列表重新试算按钮。
+    状态: pending -> recalculating.
+    状态: recalculating -> calculated.
+    重试策略: renewal-status Consumer fails can retry three times.
+    幂等键: renewalId + calculationVersion.
+    补偿规则: retry exhausted records remain recalculating and are picked by the nightly compensation task.
+    非法流转: calculated cannot transition back to recalculating without a new calculationVersion.
+    Req: 运营可以重新触发续费试算。
+    AC: 接口成功后页面展示新的试算金额和试算时间。
+    AC: renewal-status MQ 消费失败时可以重试且不会重复更新同一条状态。
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "api_surface.json", {"project": "sigreal-operate-platform", "routes": [{"method": "POST", "route": "/renewal/recalculate", "file": "RenewalController.java"}]})
+        write_json(root / "code_index.json", {"symbols": ["RenewalStatusConsumer", "NightlyRenewalCompensationTask"]})
+        write_json(root / "config_surface.json", {"items": [{"key": "rocketmq.topic.renewal-status", "value": "renewal-status"}]})
+        write_json(root / "baseline.json", {"project": "sigreal-operate-platform", "module_hints": [{"module": "renewal"}], "fields": ["renewal_status", "retry_count", "calculation_version", "updated_at"]})
+        write_json(root / "dependency_surface.json", {"dependencies": ["sigreal-operate-platform -> renewal-status topic -> renewal-worker"]})
+        evidence = spec_governor.load_project_evidence(root)
+        spec = spec_governor.normalize("REQ-EVIDENCE", "续费重新试算", text, evidence)
+    assert spec["project_evidence"]["matched_item_count"] > 0
+    assert {item["source_evidence"] for item in spec["current_state_evidence"]} >= {"api_surface.json", "code_index.json", "config_surface.json"}
+    assert any(node["source_evidence"] == "api_surface.json" for node in spec["business_closure_model"]["nodes"])
+    assert any(item.get("source_evidence") == "dependency_surface.json" for item in spec["dependency_chain"]["chain"])
+    assert spec["current_business_state"]["known_current_facts"]
+    assert spec["evidence_match_table"][0]["evidence_match_score"] > 0
+    assert spec["business_goal_quality"]["score"] >= spec["business_goal_quality"]["threshold"]
+    assert spec["runtime_dependency_graph"]["edges"]
+    assert all(edge.get("degree") and edge.get("source_evidence") for edge in spec["runtime_dependency_graph"]["edges"])
+    assert spec["design_allowed"] is True
 
 
 def test_question_governor_generates_categorized_clarification_for_ambiguous_spec() -> None:
@@ -249,6 +327,8 @@ def run_all() -> None:
     test_spec_blocks_ambiguous_auto_processing_and_unclear_defect()
     test_spec_allows_clear_goal_flow_entrypoint_and_acceptance()
     test_spec_models_multi_entry_business_flow_and_scores()
+    test_spec_blocks_async_stateful_requirement_without_state_controls()
+    test_spec_uses_project_understanding_evidence_for_current_state()
     test_question_governor_generates_categorized_clarification_for_ambiguous_spec()
     test_question_governor_asks_from_weak_understanding_dimensions()
     test_delivery_case_capture_summarizes_artifacts()

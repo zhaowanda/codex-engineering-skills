@@ -38,6 +38,7 @@ python3 scripts/question_governor.py \
 - Convert `spec.ambiguities` and `requirements_understanding.blockers` into required clarification questions.
 - Convert weak `requirements_understanding.scorecard` dimensions into targeted clarification questions.
 - Ask for current-state implementation evidence when existing UI/API/task/MQ/manual entrypoints, data ownership, or downstream dependencies are missing.
+- Ask decision-level questions for missing business closure, state machine, retry/idempotency/timeout/compensation, dependency chain, and repository/service ownership.
 - Generate expert clarification questions from impact surface and implicit constraints, including permission, data/export, API, performance, security, and configuration questions.
 - Treat required questions as closed only when they include an answer.
 

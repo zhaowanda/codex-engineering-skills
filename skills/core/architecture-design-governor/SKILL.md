@@ -32,7 +32,7 @@ python3 scripts/architecture_design.py \
 ## Rules
 
 - Decision contract: this generator must emit enough ownership, dependency, deployment, rollback, and option evidence for `design-architecture-reviewer` to return `decision=pass`; otherwise delivery planning and implementation must remain blocked.
-- Requirement understanding gate: propagate the technical/spec `requirements_understanding_gate` into architecture design. If `design_allowed=false`, architecture confidence must be low, architecture checklist must be blocked, and delivery planning must wait for requirement clarification.
+- Requirement understanding gate: propagate the technical/spec `requirements_understanding_gate`, including `business_closure_model`, `state_machine`, `business_goal_quality`, `repo_impact_map`, `dependency_chain`, and `runtime_dependency_graph`, into architecture design. If `design_allowed=false`, architecture confidence must be low, architecture checklist must be blocked, and delivery planning must wait for requirement clarification.
 - Failure path: if owner repo, integration direction, contract compatibility, data ownership, release order, rollback, or new-service justification cannot be grounded in requirement/project evidence, keep the uncertainty explicit and require review revision instead of presenting a guessed architecture as ready.
 - Include at least two architecture options.
 - Explain each architecture option before selecting one; do not place the architecture decision ahead of option detail and comparison.

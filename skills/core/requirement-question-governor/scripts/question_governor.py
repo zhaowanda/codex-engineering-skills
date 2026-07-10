@@ -54,6 +54,10 @@ def risk_for_category(category: str) -> str:
         "configuration": "Without environment defaults and rollback rules, release behavior can differ across environments.",
         "current_business_state": "Without current-state evidence, design may invent new APIs, jobs, consumers, or data ownership instead of reusing or safely changing existing behavior.",
         "understanding_score": "Without closing weak understanding dimensions, the downstream design can look complete while still missing the real business intent or flow.",
+        "business_closure": "Without the business closure chain, sequence diagrams and implementation plans can miss backend services, DB/MQ/cache effects, downstream systems, or user-visible outcomes.",
+        "state_machine": "Without state transitions, retry, idempotency, timeout, and compensation rules, asynchronous or stateful changes can corrupt data or leave inconsistent business state.",
+        "dependency_chain": "Without upstream/downstream dependency order, multi-system delivery can break contracts, publish messages to the wrong consumers, or miss required integration tests.",
+        "repo_impact": "Without concrete repositories and service ownership, cross-repo plans cannot assign implementation, test, release, and rollback responsibilities.",
     }.get(category, "Without this clarification, design and implementation would rely on unapproved assumptions.")
 
 
@@ -116,6 +120,10 @@ def generate(spec: dict[str, Any]) -> dict[str, Any]:
             "ambiguous_rule": "What exact rule, default value, priority, exception, and rollback behavior should apply?",
             "ambiguous_exception": "Which exception cases must be handled, ignored, retried, or surfaced to users/operators?",
             "ambiguous_state": "Which state should be updated, when, by whom, and what downstream effects are expected?",
+            "business_closure": "What is the full business closure chain from actor/external trigger through UI/API/task/consumer, domain service, DB/MQ/cache, downstream systems, and user-visible result?",
+            "state_machine": "What are the exact state transitions, triggers, retry policy, idempotency key, timeout rule, compensation rule, and invalid transitions?",
+            "dependency_chain": "What are the ordered upstream and downstream systems, message topics, API contracts, consumers, and integration evidence required?",
+            "repo_impact": "Which repositories/services own each part of this requirement, and which are one-degree or multi-degree dependencies?",
         }.get(category, f"Clarify requirement ambiguity: {message}")
         add_question(questions, question_text, "product/engineering", True, f"ambiguity.{ambiguity.get('source', category)}", category, risk_for_category(category))
     scorecard = understanding.get("scorecard") if isinstance(understanding.get("scorecard"), dict) else {}
@@ -126,6 +134,10 @@ def generate(spec: dict[str, Any]) -> dict[str, Any]:
         "entrypoint_score": "Which exact entrypoints trigger the change, including frontend actions, backend APIs, scheduled jobs, MQ consumers, manual tasks, or external callbacks?",
         "acceptance_score": "Which executable positive and negative acceptance cases prove every business branch is satisfied?",
         "evidence_score": "Which current-state evidence proves the existing entrypoints, APIs, tasks, consumers, data ownership, and downstream dependencies?",
+        "closure_score": "What concrete business closure evidence connects the trigger to backend behavior, persistence or messages, downstream effects, and visible result?",
+        "state_score": "What state machine, retry, idempotency, timeout, and compensation rules govern this requirement?",
+        "dependency_score": "What ordered dependency chain and repository/service ownership prove the multi-system plan?",
+        "runtime_dependency_score": "What runtime dependency graph proves API-to-service, service-to-DB, producer-to-topic, topic-to-consumer, and downstream interactions with source evidence?",
     }
     for dimension in sorted({str(item) for item in weak_dimensions if item}):
         question_text = score_questions.get(dimension)
@@ -142,6 +154,46 @@ def generate(spec: dict[str, Any]) -> dict[str, Any]:
                 "current_business_state.evidence_gaps",
                 "current_business_state",
             )
+    state_machine = spec.get("state_machine") if isinstance(spec.get("state_machine"), dict) else {}
+    if state_machine.get("missing"):
+        add_question(
+            questions,
+            "What state transitions, retry policy, idempotency key, timeout rule, compensation rule, and invalid transitions are required?",
+            "product/engineering",
+            True,
+            "state_machine.missing",
+            "state_machine",
+        )
+    closure = spec.get("business_closure_model") if isinstance(spec.get("business_closure_model"), dict) else {}
+    if closure.get("missing_nodes"):
+        add_question(
+            questions,
+            "What complete actor-to-result business closure chain should the design use, including UI/API/task/consumer, service, DB/MQ/cache, downstream systems, and visible outcome?",
+            "engineering/product",
+            True,
+            "business_closure_model.missing_nodes",
+            "business_closure",
+        )
+    dependency_chain = spec.get("dependency_chain") if isinstance(spec.get("dependency_chain"), dict) else {}
+    if dependency_chain.get("missing"):
+        add_question(
+            questions,
+            "What ordered upstream/downstream dependency chain, message topics, API contracts, and repository ownership must be followed?",
+            "engineering",
+            True,
+            "dependency_chain.missing",
+            "dependency_chain",
+        )
+    repo_impact = spec.get("repo_impact_map") if isinstance(spec.get("repo_impact_map"), dict) else {}
+    if repo_impact.get("missing_repo_evidence"):
+        add_question(
+            questions,
+            "Which repositories and services are owner, upstream, downstream, or confirm-only dependencies for this requirement?",
+            "engineering",
+            True,
+            "repo_impact_map.missing_repo_evidence",
+            "repo_impact",
+        )
     if not as_list(spec.get("acceptance_criteria")):
         add_question(questions, "What are the acceptance criteria and evidence required?", "product", True, "missing.acceptance_criteria", "acceptance")
     if as_list(spec.get("acceptance_criteria")) and all(str(item.get("source_evidence")) != "input" for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)):
