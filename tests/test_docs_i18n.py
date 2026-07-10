@@ -321,7 +321,7 @@ def test_sync_synthesizes_backend_runtime_evidence_without_fake_frontend() -> No
         assert "打开 @PostMapping" not in design_doc
         assert "前端做法" not in design_doc
         assert "调用方/入口" in design_doc
-        assert "运行时入口类型：HTTP/API 调用" in design_doc
+        assert "运行时入口：HTTP/API 调用" in design_doc
 
 
 def test_sync_synthesizes_mq_consumer_runtime_entrypoint() -> None:
@@ -335,7 +335,7 @@ def test_sync_synthesizes_mq_consumer_runtime_entrypoint() -> None:
         consumer.write_text(
             """
             class RenewOrderConsumer {
-              @KafkaListener(topics = "renewal.order.changed")
+              @KafkaListener(topics = "renewal.order.changed", groupId = "settlement-worker")
               public void consume(RenewOrderChangedMessage message) {
                 service.rebuildSettlement(message);
               }
@@ -401,10 +401,13 @@ def test_sync_synthesizes_mq_consumer_runtime_entrypoint() -> None:
         design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
         assert runtime["entrypoint"]["kind"] == "mq_consumer"
         assert runtime["entrypoint"]["topic"] == "renewal.order.changed"
+        assert runtime["entrypoint"]["consumer_group"] == "settlement-worker"
+        assert runtime["entrypoint"]["message_type"] == "RenewOrderChangedMessage"
+        assert runtime["entrypoints"][0]["kind"] == "mq_consumer"
         assert runtime["interactions"][0]["entrypoint"]["kind"] == "mq_consumer"
-        assert "运行时入口类型：MQ Consumer" in design_doc
-        assert "participant M as MQ<br/>renewal.order.changed" in design_doc
-        assert "M->>C: 投递消息并触发 Consumer" in design_doc
+        assert "运行时入口：MQ Consumer" in design_doc
+        assert "participant MQ1 as RenewOrderConsumer<br/>renewal.order.changed<br/>sigreal-operate-platform" in design_doc
+        assert "MQ1->>C: 投递消息并触发 Consumer: settlement-worker / RenewOrderConsumer / RenewOrderChangedMessage" in design_doc
         assert "浏览器/前端" not in design_doc
 
 
@@ -485,9 +488,93 @@ def test_sync_synthesizes_scheduled_job_runtime_entrypoint() -> None:
         design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
         assert runtime["entrypoint"]["kind"] == "scheduled_job"
         assert runtime["entrypoint"]["cron"] == "0 0 2 * * ?"
-        assert "运行时入口类型：定时任务" in design_doc
-        assert "participant T as RenewalExpiryJob<br/>0 0 2 * * ?" in design_doc
-        assert "T->>C: 触发定时任务处理" in design_doc
+        assert "运行时入口：定时任务" in design_doc
+        assert "participant JOB1 as RenewalExpiryJob<br/>0 0 2 * * ?" in design_doc
+        assert "JOB1->>C: 触发定时任务处理: RenewalExpiryJob" in design_doc
+        assert "浏览器/前端" not in design_doc
+
+
+def test_sync_synthesizes_custom_task_runtime_entrypoint() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        task = repo_root / "operate-provider/src/main/java/com/acme/operate/task/RenewalRepairTask.java"
+        task.parent.mkdir(parents=True)
+        task.write_text(
+            """
+            class RenewalRepairTask implements Runnable {
+              public void run() {
+                service.repairRenewalPool();
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+        doc_id = "REQ-SYNTH-CUSTOM-TASK-RUNTIME"
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "手写任务修复续期池",
+                "actors": ["任务平台"],
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "执行手写任务后修复续期池数据", "type": "positive"}],
+            },
+        )
+        write_json(
+            artifact_dir / "technical_design.json",
+            {
+                "doc_id": doc_id,
+                "current_state_analysis": {
+                    "business_problem": "续期池历史数据需要通过手写任务修复。",
+                    "code_entrypoints": ["operate-provider/src/main/java/com/acme/operate/task/RenewalRepairTask.java"],
+                },
+                "requirement_breakdown": [{"id": "BRK-1", "summary": "执行手写任务后修复续期池数据"}],
+                "module_decomposition": [
+                    {
+                        "module": "operate-provider/src/main/java/com/acme/operate/task/RenewalRepairTask.java",
+                        "responsibility": "执行续期池历史数据修复",
+                        "input": "task parameters",
+                        "output": "续期池数据修复完成",
+                        "requirement_breakdown_id": "BRK-1",
+                    }
+                ],
+                "api_contracts": [],
+                "ui_ue_design": [{"entry_point": "existing entry", "user_goal": "手写任务修复续期池"}],
+            },
+        )
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+        write_json(
+            artifact_dir / "project_understanding/code_index.json",
+            {
+                "schema": "codex-code-index-v1",
+                "project": "sigreal-operate-platform",
+                "repo_root": str(repo_root),
+                "files": [
+                    {
+                        "path": "operate-provider/src/main/java/com/acme/operate/task/RenewalRepairTask.java",
+                        "symbols": ["RenewalRepairTask", "run"],
+                    }
+                ],
+            },
+        )
+        write_json(artifact_dir / "project_understanding/api_surface.json", {"schema": "codex-api-surface-v1", "project": "sigreal-operate-platform", "routes": []})
+
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "手写任务修复续期池", doc_language="zh")
+
+        runtime = json.loads((artifact_dir / "runtime_sequence_evidence.json").read_text(encoding="utf-8"))
+        design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert runtime["entrypoint"]["kind"] == "custom_task"
+        assert runtime["entrypoint"]["trigger_condition"] == "任务平台、启动器或业务调度代码触发"
+        assert runtime["entrypoints"][0]["kind"] == "custom_task"
+        assert runtime["interactions"][0]["entrypoint"]["kind"] == "custom_task"
+        assert "运行时入口：自定义 Task" in design_doc
+        assert "participant TASK1 as RenewalRepairTask<br/>sigreal-operate-platform" in design_doc
+        assert "TASK1->>C: 触发自定义 Task 处理: RenewalRepairTask" in design_doc
         assert "浏览器/前端" not in design_doc
 
 
@@ -1296,6 +1383,89 @@ def test_runtime_sequence_diagram_includes_database_when_models_exist() -> None:
     assert "participant DB as 数据库表" in rendered
     assert "obd_device_renew_pool" in rendered
     assert "C->>DB: 读取 obd_device_renew_pool.pool_status" in rendered
+
+
+def test_runtime_sequence_diagram_renders_all_runtime_entrypoints() -> None:
+    rendered = docs_governor.render_runtime_sequence_evidence(
+        {
+            "actor": "运营人员",
+            "frontend": {"repo": "operate-platform-fe", "page": "续费管理", "route": "/renewal/orders"},
+            "backend": {"repo": "sigreal-operate-platform", "service": "RenewalService"},
+            "entrypoints": [
+                {
+                    "kind": "frontend_action",
+                    "repo": "operate-platform-fe",
+                    "name": "续费管理",
+                    "path": "/renewal/orders",
+                    "menu_or_button": "点击「重新试算」按钮",
+                    "handler": "handleRecalculate",
+                },
+                {
+                    "kind": "scheduled_job",
+                    "repo": "sigreal-operate-platform",
+                    "name": "RenewalExpiryJob",
+                    "cron": "0 0 2 * * ?",
+                    "handler": "scanExpiredRenewals",
+                },
+            ],
+            "interactions": [
+                {
+                    "scenario": "BRK-1 人工重新试算",
+                    "trigger": "点击「重新试算」按钮",
+                    "entrypoint": {
+                        "kind": "frontend_action",
+                        "repo": "operate-platform-fe",
+                        "name": "续费管理",
+                        "path": "/renewal/orders",
+                        "menu_or_button": "点击「重新试算」按钮",
+                        "handler": "handleRecalculate",
+                    },
+                    "method": "POST",
+                    "api": "/operate/api/renewal/recalculate",
+                    "backend_action": "RenewalController.recalculate -> RenewalService.recalculate",
+                    "response": "返回试算结果",
+                },
+                {
+                    "scenario": "BRK-2 每日过期扫描",
+                    "trigger": "到达每日凌晨调度时间",
+                    "entrypoint": {
+                        "kind": "scheduled_job",
+                        "repo": "sigreal-operate-platform",
+                        "name": "RenewalExpiryJob",
+                        "cron": "0 0 2 * * ?",
+                        "handler": "scanExpiredRenewals",
+                    },
+                    "backend_action": "RenewalExpiryJob.scanExpiredRenewals -> RenewalService.expireOrders",
+                    "response": "过期续费状态已刷新",
+                },
+            ],
+        },
+        "zh",
+    )
+    assert "participant FE1 as 续费管理<br/>/renewal/orders<br/>operate-platform-fe" in rendered
+    assert "participant JOB1 as RenewalExpiryJob<br/>0 0 2 * * ?<br/>sigreal-operate-platform" in rendered
+    assert "FE1->>C: POST /operate/api/renewal/recalculate" in rendered
+    assert "JOB1->>C: 触发定时任务处理: scanExpiredRenewals" in rendered
+    assert "A->>B" not in rendered
+    assert "B-->>A" not in rendered
+    assert "A->>T" not in rendered
+
+
+def test_runtime_entrypoint_confidence_derives_legacy_frontend_entrypoint() -> None:
+    rendered = docs_governor.render_runtime_entrypoint_confidence(
+        {
+            "frontend": {
+                "repo": "operate-platform-fe",
+                "page": "设备置换结算",
+                "route": "/device/replacementSettlement",
+                "source_file": "src/views/device/replacementSettlement.vue",
+            },
+            "interactions": [{"scenario": "BRK-1", "trigger": "点击试算"}],
+        },
+        "zh",
+    )
+    assert "运行时入口：前端操作 / operate-platform-fe / 设备置换结算" in rendered
+    assert "运行时入口：未同步" not in rendered
 
 
 def test_runtime_module_and_ui_design_replace_template_placeholders() -> None:
