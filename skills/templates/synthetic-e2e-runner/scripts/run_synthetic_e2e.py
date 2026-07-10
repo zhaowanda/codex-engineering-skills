@@ -111,6 +111,37 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "release_change.json", {"decision": "pass", "blockers": [], "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"}, "approvers": ["release-owner"], "rollback_plan": ["rollback synthetic"], "rollback_owner": "release-owner", "post_release_checks": ["check synthetic metric"]})
 
 
+def write_release_followup_chain_evidence(out_dir: Path) -> None:
+    write_release_happy_evidence(out_dir)
+    write_json(out_dir / "code_review.json", {"decision": "pass", "findings": []})
+    write_json(out_dir / "code_design_quality.json", {"decision": "pass", "findings": []})
+    write_json(out_dir / "data_security_review.json", {"decision": "pass", "findings": []})
+    write_json(out_dir / "performance_diff_review.json", {"decision": "pass", "risk_level": "low", "evidence_plan": []})
+    write_json(
+        out_dir / "implementation_completion_gate.json",
+        {
+            "decision": "pass",
+            "blockers": [],
+            "evidence_followups": [
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner", "evidence": ["browser evidence"]},
+                {"surface": "transaction_idempotency", "required_by": "test-evidence-gate", "evidence": ["rollback evidence"]},
+            ],
+        },
+    )
+    write_json(out_dir / "frontend_acceptance.json", {"decision": "pass", "pass": True, "blockers": []})
+    write_json(
+        out_dir / "test_execution_evidence.json",
+        {
+            "executed_cases": [
+                {"id": "TC-FOLLOWUP-1", "status": "passed", "name": "frontend follow-up acceptance"},
+                {"id": "TC-FOLLOWUP-2", "status": "passed", "name": "transaction idempotency proof"},
+            ],
+            "failed_cases": [],
+            "untested_blockers": [],
+        },
+    )
+
+
 def write_docs_manifest(out_dir: Path, doc_id: str) -> Path:
     docs_root = out_dir / "delivery-docs"
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", {"schema": "codex-" + "docs-governor-v1", "doc_id": doc_id})
@@ -128,12 +159,14 @@ def run(out_dir: Path) -> dict[str, Any]:
     data_dir = out_dir / "data_migration_blocked_path"
     release_blocked_dir = out_dir / "release_readiness_blocked_path"
     release_happy_dir = out_dir / "release_readiness_happy_path"
+    release_followup_dir = out_dir / "release_followup_chain_path"
     blocked_dir.mkdir(parents=True, exist_ok=True)
     happy_dir.mkdir(parents=True, exist_ok=True)
     frontend_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
     release_blocked_dir.mkdir(parents=True, exist_ok=True)
     release_happy_dir.mkdir(parents=True, exist_ok=True)
+    release_followup_dir.mkdir(parents=True, exist_ok=True)
     req = ROOT / "examples/synthetic-e2e-case/requirement.md"
     happy_docs = write_docs_manifest(happy_dir, "REQ-SYN-HAPPY")
     frontend_docs = write_docs_manifest(frontend_dir, "REQ-SYN-FE")
@@ -202,6 +235,22 @@ def run(out_dir: Path) -> dict[str, Any]:
         ["python3", "skills/core/release-evidence-binder/scripts/bind_release.py", "--artifact-dir", str(release_happy_dir), "--out", str(release_happy_dir / "release_gate.json")],
     )
     steps.append(release_happy_step)
+    write_release_followup_chain_evidence(release_followup_dir)
+    release_followup_collect = run_json_step(
+        "release_followup_collect",
+        ["python3", "skills/core/evidence-auto-collector/scripts/evidence_collect.py", "--diff-impact", str(release_followup_dir / "diff_impact.json"), "--artifact-dir", str(release_followup_dir), "--out", str(release_followup_dir / "evidence_gap_summary.json")],
+    )
+    steps.append(release_followup_collect)
+    release_followup_review = run_json_step(
+        "release_followup_review_gate",
+        ["python3", "skills/core/code-review-gate/scripts/review_gate.py", "--artifact-dir", str(release_followup_dir), "--out", str(release_followup_dir / "code_review_gate.json")],
+    )
+    steps.append(release_followup_review)
+    release_followup_binder = run_json_step(
+        "release_followup_binder",
+        ["python3", "skills/core/release-evidence-binder/scripts/bind_release.py", "--artifact-dir", str(release_followup_dir), "--out", str(release_followup_dir / "release_gate.json")],
+    )
+    steps.append(release_followup_binder)
     happy_summary = json.loads((happy_dir / "auto_run_summary.json").read_text(encoding="utf-8")) if (happy_dir / "auto_run_summary.json").exists() else {}
     data_summary = json.loads((data_dir / "auto_run_summary.json").read_text(encoding="utf-8")) if (data_dir / "auto_run_summary.json").exists() else {}
     blocked_case = {
@@ -251,7 +300,20 @@ def run(out_dir: Path) -> dict[str, Any]:
         "decision": release_happy_step.get("decision", ""),
         "reason": "release binder approves complete clean synthetic evidence",
     }
-    cases = [blocked_case, happy_case, frontend_case, data_case, release_blocked_case, release_happy_case]
+    release_followup_case = {
+        "case": "release_followup_chain_path",
+        "passed": (
+            release_followup_collect.get("returncode") == 0
+            and release_followup_collect.get("decision") == "pass"
+            and release_followup_review.get("returncode") == 0
+            and release_followup_review.get("decision") == "approve"
+            and release_followup_binder.get("returncode") == 0
+            and release_followup_binder.get("decision") == "go"
+        ),
+        "decision": release_followup_binder.get("decision", ""),
+        "reason": "implementation follow-ups are collected, reviewed, and release-bound end to end",
+    }
+    cases = [blocked_case, happy_case, frontend_case, data_case, release_blocked_case, release_happy_case, release_followup_case]
     return {
         "schema": "codex-synthetic-e2e-run-v1",
         "out_dir": str(out_dir),

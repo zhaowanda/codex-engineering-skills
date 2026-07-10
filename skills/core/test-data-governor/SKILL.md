@@ -29,10 +29,12 @@ python3 scripts/test_data.py \
 ## Rules
 
 - Every test case that needs data must map to at least one dataset.
+- Carry `requirements_understanding_gate` and the source test design decision. If the source test design is blocked, or requirement understanding disallows design/implementation, the test data plan must return `decision=block`.
 - Use synthetic or anonymized data only.
 - Block plans that declare real sensitive data, production data, missing cleanup, missing setup method, or missing case links.
 - Permission cases must include role/account data.
 - Frontend/integration cases must include environment or dependency preconditions.
+- Do not prepare executable fixtures for ambiguous requirements; clarify the requirement and regenerate test design first.
 
 ## Output
 

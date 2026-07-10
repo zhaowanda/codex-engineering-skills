@@ -22,6 +22,11 @@ COMMAND_HINTS = {
     "delivery_plan": "python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py --doc-id REQ-001 --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/delivery_plan.json",
     "design_architecture_review": "python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py review --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json",
     "write_guard_audit": "python3 skills/core/workspace-write-guard/scripts/write_guard.py audit --permit artifacts/REQ-001/edit_permit.json --repo /path/to/repo --out artifacts/REQ-001/write_guard_audit.json",
+    "evidence_gap_summary": "python3 skills/core/evidence-auto-collector/scripts/evidence_collect.py --diff-impact artifacts/REQ-001/diff_impact.json --artifact-dir artifacts/REQ-001",
+}
+FOLLOWUP_REQUIRED_ARTIFACTS = {
+    "frontend_acceptance": ["frontend_acceptance"],
+    "configuration": ["configuration_readiness"],
 }
 
 
@@ -172,6 +177,40 @@ def post_release_items(evidence: dict[str, dict[str, Any]]) -> list[Any]:
     return result
 
 
+def implementation_followup_gaps(evidence: dict[str, dict[str, Any]], change_type: str) -> list[dict[str, Any]]:
+    if change_type == "docs":
+        return []
+    implementation = evidence.get("implementation_completion_gate", {})
+    followups = [item for item in as_list(implementation.get("evidence_followups")) if isinstance(item, dict)]
+    if not followups:
+        return []
+    gaps: list[dict[str, Any]] = []
+    evidence_gap = evidence.get("evidence_gap_summary", {})
+    followup_surfaces = sorted({str(item.get("surface")) for item in followups if item.get("surface")})
+    if not evidence_gap:
+        gaps.append({"source": "evidence_gap_summary", "message": "evidence_gap_summary is required to close implementation evidence follow-ups"})
+    elif decision_of(evidence_gap) in BLOCK_DECISIONS or as_list(evidence_gap.get("missing_evidence")) or as_list(evidence_gap.get("blockers")):
+        gaps.append({"source": "evidence_gap_summary", "message": "implementation evidence follow-ups still have missing or blocking evidence"})
+    elif followup_surfaces:
+        covered_surfaces = {
+            str(item.get("surface"))
+            for item in as_list(evidence_gap.get("implementation_followup_requirements"))
+            if isinstance(item, dict) and item.get("surface")
+        }
+        missing_surfaces = [surface for surface in followup_surfaces if surface not in covered_surfaces]
+        if missing_surfaces:
+            gaps.append({"source": "evidence_gap_summary", "message": "evidence_gap_summary does not cover implementation evidence follow-ups", "missing_surfaces": missing_surfaces})
+    for item in followups:
+        surface = str(item.get("surface") or "")
+        for artifact in FOLLOWUP_REQUIRED_ARTIFACTS.get(surface, []):
+            data = evidence.get(artifact, {})
+            if not data:
+                gaps.append({"source": artifact, "message": f"{artifact}.json is required for implementation follow-up surface: {surface}"})
+            elif decision_of(data) in BLOCK_DECISIONS or has_blocker_findings(data):
+                gaps.append({"source": artifact, "message": f"{artifact}.json blocks implementation follow-up surface: {surface}"})
+    return gaps
+
+
 def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     gaps: list[dict[str, Any]] = []
     policy = policy or {}
@@ -294,6 +333,7 @@ def bind(artifact_dir: Path, change_type: str = "code", policy: dict[str, Any] |
         blockers.append({"source": "post_release_checks", "message": "post-release checks are required"})
     if change_type != "docs":
         blockers.extend(release_policy_gaps(evidence, policy=policy))
+        blockers.extend(implementation_followup_gaps(evidence, change_type))
 
     missing_evidence = [item["source"] for item in blockers if "is required" in item.get("message", "")]
     next_required_actions = [
@@ -326,6 +366,7 @@ def bind(artifact_dir: Path, change_type: str = "code", policy: dict[str, Any] |
         "post_release_checks": post_release,
         "source_files": sorted(set(source_files)),
         "release_policy": policy or {},
+        "implementation_evidence_followups": as_list(evidence.get("implementation_completion_gate", {}).get("evidence_followups")),
         "next_action": "Do not release. Fix blockers and re-bind evidence." if blockers else "Proceed to release approval/change process.",
     }
 

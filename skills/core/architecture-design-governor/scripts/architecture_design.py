@@ -424,12 +424,37 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         producer = owner_repo
     impact_areas = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
     readiness_gaps = [item for item in as_list(spec.get("expert_readiness_gaps")) if isinstance(item, dict)]
-    architecture_confidence = "medium" if readiness_gaps or not repo_path or entrypoint_confidence.get("level") in {"low", "medium"} else "high"
+    technical_understanding_gate = technical.get("requirements_understanding_gate") if isinstance(technical.get("requirements_understanding_gate"), dict) else {}
+    spec_understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
+    design_allowed = bool(spec.get("design_allowed", technical_understanding_gate.get("design_allowed", spec_understanding.get("design_allowed", True))))
+    implementation_allowed = bool(spec.get("implementation_allowed", technical_understanding_gate.get("implementation_allowed", spec_understanding.get("implementation_allowed", design_allowed))))
+    requirements_understanding_gate = {
+        "decision": technical_understanding_gate.get("decision") or spec_understanding.get("decision") or ("pass" if design_allowed else "needs_clarification"),
+        "design_allowed": design_allowed,
+        "implementation_allowed": implementation_allowed and design_allowed,
+        "understanding_confidence": spec.get("understanding_confidence") or technical_understanding_gate.get("understanding_confidence") or spec_understanding.get("confidence") or ("high" if design_allowed else "low"),
+        "business_intent": spec.get("business_intent") or technical_understanding_gate.get("business_intent") or spec_understanding.get("business_intent") or "",
+        "business_flow": spec.get("business_flow") or technical_understanding_gate.get("business_flow") or spec_understanding.get("business_flow") or [],
+        "entrypoints": spec.get("entrypoints") or technical_understanding_gate.get("entrypoints") or spec_understanding.get("entrypoints") or [],
+        "trigger_conditions": spec.get("trigger_conditions") or technical_understanding_gate.get("trigger_conditions") or spec_understanding.get("trigger_conditions") or [],
+        "preconditions": spec.get("preconditions") or technical_understanding_gate.get("preconditions") or spec_understanding.get("preconditions") or [],
+        "postconditions": spec.get("postconditions") or technical_understanding_gate.get("postconditions") or spec_understanding.get("postconditions") or [],
+        "blockers": as_list(technical_understanding_gate.get("blockers")) or as_list(spec_understanding.get("blockers")),
+        "ambiguities": as_list(technical_understanding_gate.get("ambiguities")) or as_list(spec.get("ambiguities")),
+        "required_action": "resolve requirement clarification questions before architecture can be treated as delivery-ready" if not design_allowed else "none",
+    }
+    if not design_allowed:
+        architecture_confidence = "low"
+    elif readiness_gaps or not repo_path or entrypoint_confidence.get("level") in {"low", "medium"}:
+        architecture_confidence = "medium"
+    else:
+        architecture_confidence = "high"
     architecture_options, architecture_fit_matrix, architecture_score_summary, selected_architecture = build_architecture_options(owner_repo, owner_module, producer, route_contract, breakdown, technical, summary)
     return {
         "schema": "codex-architecture-design-v1",
         "doc_id": doc_id,
         "title": title,
+        "requirements_understanding_gate": requirements_understanding_gate,
         "architecture_scope": {"in_scope": as_list((spec.get("scope") or {}).get("in_scope")) or [summary], "out_of_scope": as_list((spec.get("scope") or {}).get("out_of_scope")), "assumptions": as_list((spec.get("scope") or {}).get("assumptions")), "decision_drivers": ["low coupling", "clear ownership", "rollback safety"]},
         "current_architecture": {
             "system_context": f"{owner_repo} 承担本需求的初始变更边界；主入口 `{owner_module}` 的置信度为 {entrypoint_confidence.get('level', 'unknown')}。",
@@ -443,7 +468,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "architecture_fit_matrix": architecture_fit_matrix,
         "architecture_score_summary": architecture_score_summary,
         "selected_architecture": selected_architecture,
-        "architecture_decision_confidence": {"level": architecture_confidence, "reason": "Repo routing, requirement gaps, or weak code entrypoint confidence remain." if architecture_confidence != "high" else "Repo owner is routed and code entrypoint confidence is high.", "confidence_reducers": readiness_gaps + ([] if repo_path else [{"source": "repo_path", "message": "owner repo path is not routed", "severity": "high"}]) + ([{"source": "code_entrypoint_confidence", "message": f"entrypoint confidence is {entrypoint_confidence.get('level')}", "severity": "high" if entrypoint_confidence.get("level") == "low" else "medium"}] if entrypoint_confidence.get("level") in {"low", "medium"} else [])},
+        "architecture_decision_confidence": {"level": architecture_confidence, "reason": "Requirement understanding is not sufficient for architecture delivery." if not design_allowed else "Repo routing, requirement gaps, or weak code entrypoint confidence remain." if architecture_confidence != "high" else "Repo owner is routed and code entrypoint confidence is high.", "confidence_reducers": requirements_understanding_gate["blockers"] + requirements_understanding_gate["ambiguities"] + readiness_gaps + ([] if repo_path else [{"source": "repo_path", "message": "owner repo path is not routed", "severity": "high"}]) + ([{"source": "code_entrypoint_confidence", "message": f"entrypoint confidence is {entrypoint_confidence.get('level')}", "severity": "high" if entrypoint_confidence.get("level") == "low" else "medium"}] if entrypoint_confidence.get("level") in {"low", "medium"} else [])},
         "architecture_invariants": [
             {"invariant": "One repository owns each write authority.", "verification": "repo_responsibilities and data_ownership agree"},
             {"invariant": "Cross-repo contract changes require freeze and integration evidence.", "verification": "cross_repo_contracts and integration_sequence are reviewed"},
@@ -454,6 +479,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             {"item": "High-risk impacts have matching security/data/performance/release boundaries.", "status": "review" if impact_areas & {"data", "security", "performance", "config"} else "ready"},
             {"item": "Cross-repo dependencies are explicitly represented or waived.", "status": "ready"},
             {"item": "Repo path is known before delivery planning.", "status": "ready" if repo_path else "review"},
+            {"item": "Requirement understanding allows architecture delivery planning.", "status": "ready" if design_allowed else "blocked"},
         ],
         "architecture_traceability_matrix": [
             {"requirement_id": str(item.get("id") or req_id), "requirement_breakdown_refs": [row.get("id") for row in breakdown], "component_boundary_refs": [f"{owner_repo} owns change"], "module_topology_refs": [owner_module], "data_flow_refs": [f"{route_contract or 'existing source'}->{owner_repo}"], "integration_sequence_refs": ["load/execute affected behavior"], "contract_refs": [route_contract or "preserve existing contracts"], "selected_architecture_option_id": selected_architecture.get("selected_option_id"), "decision_reason": selected_architecture.get("selection_reason")}

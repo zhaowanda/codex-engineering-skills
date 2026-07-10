@@ -19,12 +19,20 @@ def schema_name(stem: str) -> str:
 
 ALLOWED_DUPLICATE_SCHEMAS = {
     schema_name("architecture-design"): "generator and template intentionally share the same artifact contract",
+    schema_name("delivery-replay-skeleton"): "case capture and example runner intentionally share replay skeleton fixtures",
     schema_name("delivery-plan"): "delivery plan reviewer validates the generated delivery plan contract",
     schema_name("delivery-runner-status"): "synthetic runner asserts delivery-runner blocking behavior",
     schema_name("edit-permit"): "write guard validates permits emitted by edit readiness",
+    schema_name("post-change-implementation-report"): "post-change sync and synthetic runner intentionally share the implementation report contract",
     schema_name("project-registry"): "framework validation and project onboarding share registry contract",
     schema_name("synthetic-e2e-run"): "forward runner reports the synthetic runner contract",
+    schema_name("test-data-plan"): "test data governor and synthetic runner intentionally share the test data plan contract",
     schema_name("technical-design"): "generator and template intentionally share the same artifact contract",
+}
+
+ALLOWED_SCHEMALESS_HELPERS = {
+    "skills/core/docs-governor/scripts/doc_model.py": "language-neutral document model helper; emits no standalone JSON artifact",
+    "skills/core/docs-governor/scripts/docs_i18n.py": "i18n rendering helper; emits no standalone JSON artifact",
 }
 
 
@@ -94,6 +102,9 @@ def inventory(root: Path) -> dict[str, Any]:
         rel = script.relative_to(root).as_posix()
         schemas = sorted(set(literal_schemas(text) + assigned_schemas(text)))
         gate_like = is_gate_like_script(script, root)
+        if not schemas and rel in ALLOWED_SCHEMALESS_HELPERS:
+            artifacts.append({"script": rel, "schemas": schemas, "gate_like": gate_like, "schema_waiver": ALLOWED_SCHEMALESS_HELPERS[rel]})
+            continue
         if not schemas and gate_like:
             blockers.append({"source": rel, "message": "gate-like script has no schema literal"})
         elif not schemas:

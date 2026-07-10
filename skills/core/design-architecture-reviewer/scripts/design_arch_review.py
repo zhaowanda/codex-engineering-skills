@@ -51,6 +51,7 @@ GENERIC_ENTRYPOINT_NAMES = {
 GENERIC_ENTRYPOINT_PARTS = {"assets", "icons", "plugins", "config", "node_modules"}
 REVIEW_AREAS = [
     "requirement_coverage",
+    "standalone_readability_review",
     "technical_design_quality",
     "design_depth_review",
     "api_contract_review",
@@ -179,6 +180,46 @@ def score_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
     return {"score": score, "level": level, "severity_counts": counts, "minimum_pass_score": 85, "expert_ready_score": 90}
 
 
+def review_requirements_understanding_gate(technical: dict[str, Any], architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    tech_gate = technical.get("requirements_understanding_gate") if isinstance(technical.get("requirements_understanding_gate"), dict) else {}
+    arch_gate = architecture.get("requirements_understanding_gate") if isinstance(architecture.get("requirements_understanding_gate"), dict) else {}
+    gate = tech_gate or arch_gate
+    if not gate:
+        return
+    design_allowed = gate.get("design_allowed")
+    if design_allowed is False:
+        findings.append(finding(
+            "requirement_coverage",
+            "blocker",
+            "requirement understanding gate blocks design",
+            {"technical_gate": tech_gate, "architecture_gate": arch_gate},
+            "Clarify business intent, business flow, entrypoints, trigger conditions, and acceptance criteria before treating the design as implementation-ready.",
+        ))
+    required = {
+        "business_intent": "State the real business purpose and expected business outcome.",
+        "business_flow": "Describe the concrete business flow before technical options.",
+        "entrypoints": "Name concrete entrypoints such as frontend action, API, scheduled task, consumer, or manual task.",
+    }
+    for key, suggestion in required.items():
+        value = gate.get(key)
+        if (isinstance(value, list) and not value) or (not isinstance(value, list) and lacks_detail(value, 8)):
+            findings.append(finding(
+                "requirement_coverage",
+                "high",
+                f"requirement understanding gate lacks {key}",
+                gate,
+                suggestion,
+            ))
+    if gate.get("implementation_allowed") is False:
+        findings.append(finding(
+            "requirement_coverage",
+            "blocker" if design_allowed is False else "high",
+            "requirement understanding gate does not allow implementation",
+            gate,
+            "Resolve requirement blockers or explicitly record approved business assumptions before implementation planning.",
+        ))
+
+
 def review_process_flow(process_flow: list[Any], findings: list[dict[str, Any]]) -> None:
     if not process_flow:
         findings.append(finding("technical_design_quality", "high", "process flow is missing", "process_flow empty", "Describe actors, ordered steps, success end state, and failure states."))
@@ -304,6 +345,48 @@ def review_traceability(req_trace: list[Any], rows: list[Any], area: str, kind: 
                 findings.append(finding(area, "high", "architecture traceability row lacks required fields", {"index": idx, "missing": missing}, "Complete architecture traceability before implementation."))
             if not item.get("contract_refs") and not item.get("no_cross_repo_reason"):
                 findings.append(finding(area, "high", "architecture traceability lacks cross-repo contract decision", {"index": idx}, "Reference cross-repo contract or state no cross-repo reason."))
+
+
+def review_standalone_readability(
+    technical: dict[str, Any],
+    architecture: dict[str, Any],
+    req_trace: list[Any],
+    requirement_breakdown: list[Any],
+    current_state: dict[str, Any],
+    problem_analysis: dict[str, Any],
+    target_behavior: list[Any],
+    modules: list[Any],
+    technical_options: list[Any],
+    selected_solution: dict[str, Any],
+    acceptance_mapping: list[Any],
+    design_traceability: list[Any],
+    current_architecture: dict[str, Any],
+    boundaries: list[Any],
+    findings: list[dict[str, Any]],
+) -> None:
+    missing: list[str] = []
+    if not req_trace and not requirement_breakdown:
+        missing.append("requirement_intent")
+    if not current_state and not problem_analysis:
+        missing.append("current_state")
+    if not target_behavior and not modules:
+        missing.append("target_adjustments")
+    if not technical_options or not selected_solution.get("selected_option_id"):
+        missing.append("implementation_approach")
+    if not acceptance_mapping and not design_traceability:
+        missing.append("satisfaction_proof")
+    if not current_architecture and not boundaries:
+        missing.append("engineering_context")
+    if missing:
+        findings.append(
+            finding(
+                "standalone_readability_review",
+                "high",
+                "design cannot be understood standalone",
+                {"missing_answers": missing},
+                "A reviewer reading only these design artifacts must understand the requirement, current state, target adjustments, implementation approach, and acceptance proof.",
+            )
+        )
 
 
 def new_service_signal(technical: dict[str, Any], architecture: dict[str, Any]) -> bool:
@@ -448,8 +531,27 @@ def review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str,
     cache_signal = has_signal(design_blob, ("cache", "redis", "ttl", "缓存", "高频", "热点"))
     consistency_signal = has_signal(design_blob, ("transaction", "consistency", "idempot", "rollback", "compensation", "事务", "一致性", "幂等", "补偿", "回滚"))
 
+    review_requirements_understanding_gate(technical, architecture, findings)
+
     if not isinstance(technical.get("design_scope"), dict) or not technical.get("design_scope", {}).get("in_scope"):
         findings.append(finding("technical_design_quality", "high", "technical design lacks explicit design_scope", technical.get("design_scope"), "Define in_scope, out_of_scope, assumptions, and non_goals."))
+    review_standalone_readability(
+        technical,
+        architecture,
+        req_trace,
+        requirement_breakdown,
+        current_state,
+        problem_analysis,
+        target_behavior,
+        modules,
+        technical_options,
+        selected_solution,
+        acceptance_mapping,
+        design_traceability,
+        current_architecture,
+        boundaries,
+        findings,
+    )
     if not current_state or missing_required(current_state, ["existing_behavior", "code_entrypoints", "known_constraints"]):
         findings.append(finding("technical_design_quality", "high", "current state analysis is incomplete", current_state, "Describe existing behavior, code entrypoints, constraints, and reuse points before proposing changes."))
     elif lacks_detail(current_state.get("existing_behavior"), 24):

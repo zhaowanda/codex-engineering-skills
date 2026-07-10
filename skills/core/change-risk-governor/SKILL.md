@@ -26,6 +26,8 @@ diff-impact-analyzer / implementation-completion-gate
 - Never downgrade risk just because an evidence file is missing; missing evidence should increase uncertainty.
 - Prefer `medium` for ordinary code changes with standard review and tests.
 - Include required controls so release planning can choose validation, approval, and rollback depth.
+- Consume `implementation_completion_gate.evidence_followups` and promote them into explicit evidence requirements.
+- Escalate risk when implementation follow-ups include MQ interaction, transaction/idempotency, cache consistency, data model, permission/data-scope, frontend acceptance, configuration, or observability surfaces.
 
 ## Command
 
@@ -45,3 +47,10 @@ python3 scripts/change_risk.py \
 ## Output
 
 The output uses schema `codex-change-risk-v1`.
+
+Decision values:
+
+- `pass`: risk was classified and no risk blockers prevent release planning.
+- `block`: required risk evidence is missing for a high/critical change or traceability blocks remain.
+
+The artifact reports risk level, control level, score, impact areas, signals, mandatory gates, evidence required, blockers, and next action.

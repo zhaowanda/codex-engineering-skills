@@ -48,11 +48,25 @@ Optional but binding when present:
 - `performance_design_review.json`
 - `evidence_gap_summary.json`
 
+## Rules
+
+- Bind every required and optional evidence artifact that is relevant to the change type.
+- Do not downgrade missing required evidence to a warning for code changes.
+- Treat failed commands, blocked gates, unresolved high-risk findings, missing rollback, or missing post-release checks as blockers.
+- Treat unclosed `implementation_completion_gate.evidence_followups` as blockers for code/config releases.
+- Require `evidence_gap_summary.json` when implementation follow-ups exist, so release binding can prove required evidence was not skipped.
+- Require `evidence_gap_summary.implementation_followup_requirements` to cover every surface declared by `implementation_completion_gate.evidence_followups`; an empty pass summary is not sufficient.
+- Require surface-specific artifacts for implementation follow-ups when the surface has a dedicated gate; for example `frontend_acceptance` requires `frontend_acceptance.json`, and `configuration` requires `configuration_readiness.json`.
+- Treat accepted risks, manual waivers, non-blocking warnings, or incomplete optional evidence as conditional release signals.
+- Keep documentation-only release binding separate from code-change release binding.
+
 ## Decision Rules
 
 - `no_go` if any required evidence is missing for code changes.
 - `no_go` if any gate has `block`, `blocked`, `no_go`, `fail`, or failed command evidence.
 - `no_go` if design, security, performance, code review, test, CI, frontend, configuration, environment, or UAT evidence contains release blockers.
+- `no_go` if implementation follow-ups are declared but no evidence-gap summary or required surface-specific evidence closes them.
+- `no_go` if the evidence-gap summary does not explicitly include the declared implementation follow-up surfaces.
 - `no_go` if rollback or post-release checks are missing.
 - `conditional_go` if no blockers remain but warnings, accepted risks, unresolved non-blocking evidence gaps, or manual waivers exist.
 - `go` only when required evidence exists, all gates pass, rollback is concrete, and post-release checks are defined.
@@ -83,3 +97,5 @@ Decision values:
 - `go`
 - `conditional_go`
 - `no_go`
+
+The artifact reports bound evidence, missing evidence, warnings, blockers, accepted risks, rollback readiness, post-release readiness, and the final decision.

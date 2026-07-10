@@ -24,6 +24,7 @@ skill/framework changes
 
 - Run only open-core synthetic cases; do not depend on private repositories or overlays.
 - Validate expected schemas, decisions, blockers, and next commands.
+- Validate the implementation follow-up evidence chain from implementation-completion-gate through evidence-auto-collector, code-review-gate, and release-evidence-binder.
 - Treat changed expected behavior as requiring an explicit test fixture update.
 - Block release when synthetic cases fail unexpectedly.
 - Keep generated outputs in temporary or explicit artifact directories.

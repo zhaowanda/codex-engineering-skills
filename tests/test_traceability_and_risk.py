@@ -87,10 +87,29 @@ def test_change_risk_marks_cross_repo_database_permission_as_high_or_critical() 
         assert "integration_test" in result["evidence_required"]
 
 
+def test_change_risk_promotes_implementation_followup_evidence() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact = Path(tmp)
+        write_json(artifact / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "evidence_followups": [
+                {"surface": "mq_interaction", "required_by": "test-evidence-gate", "evidence": ["topic evidence"]},
+                {"surface": "transaction_idempotency", "required_by": "test-evidence-gate", "evidence": ["rollback evidence"]},
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner", "evidence": ["browser evidence"]},
+            ],
+        })
+        result = change_risk.classify(artifact)
+        assert result["risk_level"] in {"medium", "high", "critical"}
+        assert "mq_interaction_evidence" in result["evidence_required"]
+        assert "transaction_idempotency_evidence" in result["evidence_required"]
+        assert "frontend_acceptance" in result["evidence_required"]
+
+
 def run_all() -> None:
     test_traceability_blocks_uncovered_acceptance_and_out_of_scope_file()
     test_traceability_passes_when_acceptance_and_scope_are_covered()
     test_change_risk_marks_cross_repo_database_permission_as_high_or_critical()
+    test_change_risk_promotes_implementation_followup_evidence()
 
 
 if __name__ == "__main__":

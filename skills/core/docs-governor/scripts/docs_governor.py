@@ -5483,14 +5483,23 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
     }
 
 
-def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_url: str = "", doc_language: str = "en") -> dict[str, Any]:
+def sync(
+    docs_root: Path,
+    doc_id: str,
+    artifact_dir: Path,
+    title: str = "",
+    git_url: str = "",
+    doc_language: str = "en",
+    human_section: str = "all",
+) -> dict[str, Any]:
     docs_root = docs_root.expanduser().resolve()
     artifact_dir = artifact_dir.expanduser().resolve()
     language = normalize_doc_language(doc_language)
-    manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language)
+    human_section = human_section if human_section in {"all", "spec", "design", "test", "release"} else "all"
+    manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language) if human_section == "all" else sync_manifest_without_rewrite(docs_root, doc_id, title, language)
     inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir)
     generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id)
-    sanitized_artifacts = sanitize_artifact_tree_local_paths(artifact_dir, docs_root)
+    sanitized_artifacts = [] if human_section != "all" else sanitize_artifact_tree_local_paths(artifact_dir, docs_root)
     human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],
@@ -5498,11 +5507,35 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         "test": docs_root / manifest["human_docs"]["test"],
         "release": docs_root / manifest["human_docs"]["release"],
     }
+    selected_human_names = list(human_docs) if human_section == "all" else [human_section]
+    synced_human_docs: list[str] = []
     for name, content in human_docs.items():
+        if name not in selected_human_names:
+            continue
         human_targets[name].parent.mkdir(parents=True, exist_ok=True)
         if name == "design" and human_targets[name].exists():
             content = merge_manual_preface_sections(human_targets[name].read_text(encoding="utf-8", errors="ignore"), content)
         human_targets[name].write_text(content, encoding="utf-8")
+        synced_human_docs.append(str(human_targets[name].relative_to(docs_root)))
+
+    if human_section != "all":
+        return sanitize_for_docs({
+            "schema": "codex-docs-governor-sync-v1",
+            "decision": "pass",
+            "doc_id": doc_id,
+            "docs_root": str(docs_root),
+            "artifact_dir": str(artifact_dir),
+            "doc_language": language,
+            "human_section": human_section,
+            "manifest": str(docs_root / "indexes" / f"{doc_id}.manifest.json"),
+            "human_docs": synced_human_docs,
+            "machine_artifacts": [],
+            "raw_artifacts": [],
+            "inherited_supplemental_artifacts": inherited_supplemental_artifacts,
+            "generated_runtime_evidence": generated_runtime_evidence,
+            "sanitized_artifacts": sanitized_artifacts,
+            "blockers": [],
+        }, docs_root, artifact_dir)
 
     bundles = {
         "spec": ["spec.json"],
@@ -5538,7 +5571,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         copied_raw.append(str(dest.relative_to(docs_root)))
 
     manifest["synced_from"] = sanitize_local_paths(str(artifact_dir), docs_root, artifact_dir)
-    manifest["synced_human_docs"] = [str(path.relative_to(docs_root)) for path in human_targets.values()]
+    manifest["synced_human_docs"] = synced_human_docs
     manifest["synced_machine_artifacts"] = synced_machine
     manifest["raw_artifacts"] = copied_raw
     manifest["inherited_supplemental_artifacts"] = sanitize_for_docs(inherited_supplemental_artifacts, docs_root, artifact_dir)
@@ -5553,6 +5586,7 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         "docs_root": str(docs_root),
         "artifact_dir": str(artifact_dir),
         "doc_language": language,
+        "human_section": human_section,
         "manifest": str(docs_root / "indexes" / f"{doc_id}.manifest.json"),
         "human_docs": manifest["synced_human_docs"],
         "machine_artifacts": manifest["synced_machine_artifacts"],
@@ -5562,6 +5596,30 @@ def sync(docs_root: Path, doc_id: str, artifact_dir: Path, title: str = "", git_
         "sanitized_artifacts": sanitized_artifacts,
         "blockers": [],
     }, docs_root, artifact_dir)
+
+
+def sync_manifest_without_rewrite(docs_root: Path, doc_id: str, title: str = "", doc_language: str = "en") -> dict[str, Any]:
+    for directory in DIRS:
+        (docs_root / directory).mkdir(parents=True, exist_ok=True)
+    manifest_path = docs_root / "indexes" / f"{doc_id}.manifest.json"
+    manifest = read_json(manifest_path) if manifest_path.exists() else {}
+    if not isinstance(manifest.get("human_docs"), dict):
+        manifest["human_docs"] = {}
+    if not isinstance(manifest.get("machine_artifacts"), dict):
+        manifest["machine_artifacts"] = {}
+    manifest.setdefault("schema", "codex-docs-governor-v1")
+    manifest.setdefault("doc_id", doc_id)
+    manifest.setdefault("title", title)
+    manifest.setdefault("doc_language", normalize_doc_language(doc_language))
+    manifest["human_docs"].setdefault("spec", f"human/specs/{doc_id}.md")
+    manifest["human_docs"].setdefault("design", f"human/designs/{doc_id}.md")
+    manifest["human_docs"].setdefault("test", f"human/tests/{doc_id}.md")
+    manifest["human_docs"].setdefault("release", f"human/releases/{doc_id}.md")
+    manifest["machine_artifacts"].setdefault("spec", f"machine/specs/{doc_id}.spec.json")
+    manifest["machine_artifacts"].setdefault("design", f"machine/designs/{doc_id}.design.json")
+    manifest["machine_artifacts"].setdefault("review", f"machine/reviews/{doc_id}.review.json")
+    manifest["machine_artifacts"].setdefault("release", f"machine/releases/{doc_id}.release.json")
+    return manifest
 
 
 def configure(docs_root: Path, git_url: str = "") -> dict[str, Any]:
@@ -5680,6 +5738,8 @@ def main() -> int:
     p_sync.add_argument("--title", default="")
     p_sync.add_argument("--git-url", default="")
     p_sync.add_argument("--doc-language", choices=["en", "zh"], default="en")
+    p_sync.add_argument("--human-section", choices=["all", "spec", "design", "test", "release"], default="all")
+    p_sync.add_argument("--design-only", action="store_true")
     for cmd in ["init", "validate"]:
         p = sub.add_parser(cmd)
         p.add_argument("--docs-root", required=True)
@@ -5694,7 +5754,8 @@ def main() -> int:
     elif args.cmd == "init":
         result = init(Path(args.docs_root), args.doc_id, args.git_url, args.title, args.doc_language)
     elif args.cmd == "sync":
-        result = sync(Path(args.docs_root), args.doc_id, Path(args.artifact_dir), args.title, args.git_url, args.doc_language)
+        human_section = "design" if args.design_only else args.human_section
+        result = sync(Path(args.docs_root), args.doc_id, Path(args.artifact_dir), args.title, args.git_url, args.doc_language, human_section)
     else:
         result = validate(Path(args.docs_root), args.doc_id, args.require_git)
     print(json.dumps(result, ensure_ascii=False, indent=2))

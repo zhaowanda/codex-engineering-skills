@@ -16,6 +16,9 @@ def load_module(name: str, path: Path):
 
 
 test_design = load_module("test_design", ROOT / "skills/core/test-design-governor/scripts/test_design.py")
+spec_governor = load_module("spec_governor_for_specialized", ROOT / "skills/core/spec-governor/scripts/spec_governor.py")
+technical_design = load_module("technical_design_for_specialized", ROOT / "skills/core/technical-design-governor/scripts/technical_design.py")
+architecture_design = load_module("architecture_design_for_specialized", ROOT / "skills/core/architecture-design-governor/scripts/architecture_design.py")
 test_data = load_module("test_data", ROOT / "skills/core/test-data-governor/scripts/test_data.py")
 configuration = load_module("configuration", ROOT / "skills/core/configuration-governor/scripts/configuration.py")
 performance = load_module("performance", ROOT / "skills/core/performance-governor/scripts/performance.py")
@@ -61,6 +64,7 @@ def test_test_design_maps_acceptance_and_special_scopes() -> None:
     assert all(case.get("cleanup_expectations") for case in result["test_cases"])
     assert all(case.get("execution_path") for case in result["test_cases"] if case.get("acceptance_id"))
     assert all(case.get("assertion_points") for case in result["test_cases"] if case.get("acceptance_id"))
+    assert all(case.get("execution_required") == "must_run" for case in result["test_cases"] if case.get("acceptance_id"))
     assert all(isinstance(case.get("data_setup_strategy"), dict) for case in result["test_cases"] if case.get("test_data_refs"))
     first_case = next(case for case in result["test_cases"] if case["id"] == "TC-1")
     assert "/reports" in " ".join(first_case["execution_path"])
@@ -74,6 +78,19 @@ def test_test_design_maps_acceptance_and_special_scopes() -> None:
     assert result["frontend_scope"]
     validation = test_design.validate_design(result)
     assert validation["decision"] == "pass"
+
+
+def test_test_design_blocks_unclear_requirement_understanding() -> None:
+    spec = spec_governor.normalize("REQ-AMB-TD", "Renewal optimization", "优化续费流程，状态更新正确，功能正常。")
+    technical = technical_design.render(spec)
+    architecture = architecture_design.render(spec, technical)
+    result = test_design.render(spec, technical, architecture)
+    assert result["decision"] == "block"
+    assert result["requirements_understanding_gate"]["design_allowed"] is False
+    validation = test_design.validate_design(result)
+    assert validation["decision"] == "block"
+    sources = {item["source"] for item in validation["blockers"]}
+    assert "requirements_understanding_gate" in sources
 
 
 def test_test_design_blocks_generic_steps() -> None:
@@ -218,6 +235,34 @@ def test_test_data_governor_renders_plan_from_design() -> None:
     assert first_dataset["cleanup"][0]["owner"] == "test runner"
 
 
+def test_test_data_governor_blocks_when_source_test_design_is_blocked() -> None:
+    gate = {
+        "decision": "needs_clarification",
+        "design_allowed": False,
+        "implementation_allowed": False,
+        "blockers": [{"source": "business_flow", "message": "missing flow"}],
+    }
+    design = {
+        "schema": "codex-test-design-v1",
+        "decision": "block",
+        "doc_id": "REQ-AMB",
+        "requirements_understanding_gate": gate,
+        "test_cases": [
+            {
+                "id": "TC-1",
+                "title": "验证：模糊需求",
+                "type": "functional",
+                "test_data_refs": ["TD-TC-1"],
+                "cleanup_expectations": ["清理 TD-TC-1"],
+            }
+        ],
+    }
+    result = test_data.render(design)
+    assert result["decision"] == "block"
+    sources = {item["source"] for item in result["blockers"]}
+    assert {"test_design", "requirements_understanding_gate"}.issubset(sources)
+
+
 def test_test_data_governor_uses_case_data_setup_strategy() -> None:
     design = {
         "schema": "codex-test-design-v1",
@@ -306,11 +351,13 @@ def test_data_security_detects_sensitive_signals() -> None:
 
 def run_all() -> None:
     test_test_design_maps_acceptance_and_special_scopes()
+    test_test_design_blocks_unclear_requirement_understanding()
     test_test_design_blocks_generic_steps()
     test_test_design_blocks_placeholder_acceptance()
     test_test_design_blocks_acceptance_cases_without_execution_details()
     test_test_design_scopes_semantic_refs_per_acceptance()
     test_test_data_governor_renders_plan_from_design()
+    test_test_data_governor_blocks_when_source_test_design_is_blocked()
     test_test_data_governor_uses_case_data_setup_strategy()
     test_test_data_governor_blocks_sensitive_or_incomplete_data()
     test_configuration_detects_payment_email_database_and_blocks_missing_owners()

@@ -82,6 +82,25 @@ def test_delivery_plan_reviewer_blocks_summary_only_tasks() -> None:
     assert "task lacks executable detail" in json_dumps(result)
 
 
+def test_delivery_plan_reviewer_blocks_requirement_understanding_gate() -> None:
+    plan = expert_plan()
+    plan["source_design_gate"] = {
+        "decision": "needs_clarification",
+        "design_allowed": False,
+        "implementation_allowed": False,
+        "business_intent": "",
+        "business_flow": [],
+        "entrypoints": [],
+        "blockers": [{"source": "business_flow", "message": "missing flow"}],
+    }
+    result = delivery_plan_review.review(plan)
+    assert result["decision"] == "block"
+    assert not result["readiness_gate"]["implementation_allowed"]
+    messages = json_dumps(result)
+    assert "requirement understanding gate blocks delivery planning" in messages
+    assert "requirement understanding gate blocks implementation" in messages
+
+
 def test_delivery_plan_reviewer_flags_generic_task_notes() -> None:
     plan = expert_plan()
     plan["repo_tasks"][0]["tasks"][2]["implementation_notes"] = ["modify only allowed_files"]
@@ -111,6 +130,7 @@ def test_delivery_plan_review_cli_validate_shape() -> None:
 def run_all() -> None:
     test_delivery_plan_reviewer_blocks_shallow_plan()
     test_delivery_plan_reviewer_blocks_summary_only_tasks()
+    test_delivery_plan_reviewer_blocks_requirement_understanding_gate()
     test_delivery_plan_reviewer_flags_generic_task_notes()
     test_delivery_plan_reviewer_passes_executable_plan()
     test_delivery_plan_review_cli_validate_shape()

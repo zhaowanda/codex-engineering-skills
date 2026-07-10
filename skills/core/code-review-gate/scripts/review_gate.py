@@ -68,8 +68,29 @@ def has_execution_evidence(evidence: dict[str, dict[str, Any]], evidence_type: s
     return any(term.lower() in searchable for term in terms)
 
 
+def has_artifact_evidence(evidence: dict[str, dict[str, Any]], artifact_name: str) -> bool:
+    name = artifact_name.removesuffix(".json")
+    data = evidence.get(name, {})
+    if not data:
+        return False
+    decision = str(data.get("decision") or data.get("status") or "").lower()
+    if decision in {"block", "blocked", "fail", "failed", "no_go"}:
+        return False
+    if data.get("pass") is False:
+        return False
+    return True
+
+
+def gap_item_resolved(evidence: dict[str, dict[str, Any]], item_text: str) -> bool:
+    if ":" in item_text:
+        evidence_type, artifact_name = item_text.split(":", 1)
+        return has_artifact_evidence(evidence, artifact_name) or has_execution_evidence(evidence, evidence_type)
+    return has_artifact_evidence(evidence, item_text) or has_execution_evidence(evidence, item_text)
+
+
 def gate(artifact_dir: Path) -> dict[str, Any]:
     evidence_names = [
+        "implementation_completion_gate",
         "code_review",
         "code_design_quality",
         "write_guard_audit",
@@ -165,15 +186,34 @@ def gate(artifact_dir: Path) -> dict[str, Any]:
             active_concerns.append({"source": "configuration", "message": "configuration readiness needs review"})
         evidence_summary.append({"area": "configuration", "decision": config.get("decision")})
 
+    implementation = evidence["implementation_completion_gate"]
+    implementation_followups = as_list(implementation.get("evidence_followups")) if implementation else []
+    if implementation:
+        if implementation.get("decision") == "block":
+            active_blockers.append({"source": "implementation_completion_gate", "message": "implementation completion is blocked"})
+        evidence_summary.append({"area": "implementation_completion_gate", "decision": implementation.get("decision"), "followups": len(implementation_followups)})
+    if implementation_followups and not evidence["evidence_gap_summary"]:
+        missing_evidence.append("evidence_gap_summary.json")
+        active_concerns.append({"source": "implementation_completion_gate", "message": "implementation evidence follow-ups require evidence_gap_summary"})
+
     gap = evidence["evidence_gap_summary"]
     if gap:
         if gap.get("decision") == "block":
             active_blockers.append({"source": "evidence_gap_summary", "message": "evidence gap summary blocks review"})
+        if implementation_followups:
+            expected_surfaces = sorted({str(item.get("surface")) for item in implementation_followups if isinstance(item, dict) and item.get("surface")})
+            covered_surfaces = {
+                str(item.get("surface"))
+                for item in as_list(gap.get("implementation_followup_requirements"))
+                if isinstance(item, dict) and item.get("surface")
+            }
+            missing_surfaces = [surface for surface in expected_surfaces if surface not in covered_surfaces]
+            if missing_surfaces:
+                active_concerns.append({"source": "evidence_gap_summary", "message": "evidence gap summary does not cover implementation follow-ups", "missing_surfaces": missing_surfaces})
         unresolved: list[str] = []
         for item in as_list(gap.get("missing_evidence")):
             item_text = str(item)
-            evidence_type = item_text.split(":", 1)[1] if ":" in item_text else item_text
-            if not has_execution_evidence(evidence, evidence_type):
+            if not gap_item_resolved(evidence, item_text):
                 unresolved.append(item_text)
         if unresolved:
             missing_evidence.extend(sorted(set(unresolved)))

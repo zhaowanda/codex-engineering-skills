@@ -27,6 +27,8 @@ repository/api/config/dependency/git analysis
 - Keep real project baselines in private overlays or temporary artifacts.
 - Do not include secrets, private hostnames, customer data, or local absolute paths in shareable baselines.
 - Run baseline-quality-governor before relying on generated baselines for design.
+- Treat missing repository input, unreadable source, empty analysis artifacts, or privacy-scan hits as blockers.
+- Treat inferred modules, incomplete route/config coverage, or stale Git history as warnings that require human confirmation.
 
 ## Command
 
@@ -41,4 +43,10 @@ python3 scripts/reverse_baseline.py \
 
 The output uses schema `codex-project-baseline-v1`.
 
-The artifact reports overview, module hints, API/config/dependency references, test hints, recent change summary, risks, limitations, and follow-up items.
+Decision values:
+
+- `pass`: the baseline was generated from readable source evidence and has no blocking privacy or coverage issues.
+- `warn`: the baseline is useful but contains uncertainty, stale evidence, or incomplete module/API/config coverage.
+- `block`: source input is missing/unreadable, required analysis artifacts are absent, or privacy blockers exist.
+
+The artifact reports overview, module hints, API/config/dependency references, test hints, recent change summary, risks, limitations, warnings, blockers, and follow-up items.

@@ -61,6 +61,34 @@ def test_project_understanding_fills_repo_path_files_and_tests() -> None:
     assert not any("repo_path is required" in item for item in plan["open_gates"])
 
 
+def test_requirement_understanding_gate_keeps_delivery_plan_incomplete() -> None:
+    gate = {
+        "decision": "needs_clarification",
+        "design_allowed": False,
+        "implementation_allowed": False,
+        "business_intent": "",
+        "business_flow": [],
+        "entrypoints": [],
+        "blockers": [{"source": "business_flow", "message": "missing flow"}],
+    }
+    technical = {
+        "doc_id": "REQ-AMB",
+        "requirements_understanding_gate": gate,
+        "test_strategy": [{"case": "case", "evidence": ["pytest"]}],
+        "acceptance_mapping": [{"acceptance_id": "AC-1", "evidence_required": ["pytest"]}],
+    }
+    architecture = {
+        "doc_id": "REQ-AMB",
+        "requirements_understanding_gate": gate,
+        "repo_responsibilities": [{"repo": "web-app", "repo_path": "/workspace/web-app", "role": "modify", "responsibility": "change page"}],
+        "module_topology": [{"repo": "web-app", "module": "src/page.py", "change_type": "modify"}],
+    }
+    plan = render_delivery_plan.render_from_design("REQ-AMB", technical, architecture)
+    assert plan["decision"] == "needs_completion"
+    assert plan["source_design_gate"]["design_allowed"] is False
+    assert any("requirements_understanding_gate" in item for item in plan["open_gates"])
+
+
 def test_render_and_validate_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "delivery_plan.json"
@@ -75,6 +103,7 @@ def run_all() -> None:
     test_example_plan_is_valid()
     test_missing_repo_path_keeps_plan_incomplete()
     test_project_understanding_fills_repo_path_files_and_tests()
+    test_requirement_understanding_gate_keeps_delivery_plan_incomplete()
     test_render_and_validate_file()
 
 

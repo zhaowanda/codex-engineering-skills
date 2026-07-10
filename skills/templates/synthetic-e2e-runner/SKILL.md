@@ -24,6 +24,7 @@ open-core changes
 
 - Run only synthetic open-core scenarios; do not depend on private repositories.
 - Exercise requirement ingestion, spec, design, test design, specialist reviews, delivery plan, and delivery status inspection.
+- Exercise implementation follow-up closure across evidence-auto-collector, code-review-gate, and release-evidence-binder.
 - Treat failures as release blockers until the expected workflow or scenario fixture is corrected.
 - Write outputs to a temporary or explicit artifact directory.
 - Do not commit generated scenario outputs unless they are intentional examples.
@@ -39,4 +40,4 @@ python3 scripts/run_synthetic_e2e.py \
 
 The output uses schema `codex-synthetic-e2e-run-v1`.
 
-The artifact reports executed stages, generated artifacts, decisions, blockers, and scenario summary.
+The artifact reports executed stages, generated artifacts, decisions, blockers, and scenario summary. Required scenario cases include blocked delivery, happy design/docs path, frontend evidence path, data-migration blocked path, release blocked path, release happy path, and implementation follow-up release chain path.

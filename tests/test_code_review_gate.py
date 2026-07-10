@@ -71,11 +71,61 @@ def test_gate_blocks_write_guard_failure() -> None:
         assert any(item["source"] == "write_guard_audit" for item in result["active_blockers"])
 
 
+def test_gate_requests_changes_when_implementation_followups_lack_gap_summary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_minimum_approve_artifacts(root)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "evidence_followups": [
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner"}
+            ],
+        })
+        result = review_gate.gate(root)
+        assert result["decision"] == "request_changes"
+        assert "evidence_gap_summary.json" in result["missing_evidence"]
+        assert any(item["source"] == "implementation_completion_gate" for item in result["active_concerns"])
+
+
+def test_gate_resolves_gap_item_when_required_artifact_exists() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_minimum_approve_artifacts(root)
+        write_json(root / "frontend_acceptance.json", {"decision": "pass", "pass": True})
+        write_json(root / "evidence_gap_summary.json", {
+            "decision": "pass",
+            "missing_evidence": ["frontend_acceptance:frontend_acceptance.json"],
+        })
+        result = review_gate.gate(root)
+        assert result["decision"] == "approve"
+        assert not result["missing_evidence"]
+
+
+def test_gate_requests_changes_when_gap_summary_omits_followup_surface() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_minimum_approve_artifacts(root)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "evidence_followups": [
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner"}
+            ],
+        })
+        write_json(root / "frontend_acceptance.json", {"decision": "pass", "pass": True})
+        write_json(root / "evidence_gap_summary.json", {"decision": "pass", "missing_evidence": []})
+        result = review_gate.gate(root)
+        assert result["decision"] == "request_changes"
+        assert any(item["source"] == "evidence_gap_summary" and "missing_surfaces" in item for item in result["active_concerns"])
+
+
 def run_all() -> None:
     test_gate_approves_complete_clean_evidence()
     test_gate_blocks_active_high_design_quality_finding()
     test_gate_requests_changes_for_missing_evidence()
     test_gate_blocks_write_guard_failure()
+    test_gate_requests_changes_when_implementation_followups_lack_gap_summary()
+    test_gate_resolves_gap_item_when_required_artifact_exists()
+    test_gate_requests_changes_when_gap_summary_omits_followup_surface()
 
 
 if __name__ == "__main__":

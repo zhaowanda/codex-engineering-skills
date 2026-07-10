@@ -22,6 +22,7 @@ diff-impact-analyzer
 ## Rules
 
 - Compare required evidence from diff impact against command logs and artifact presence.
+- Read `implementation_completion_gate.json` when present and convert `evidence_followups` into concrete evidence requirements.
 - Report missing evidence conservatively; do not assume a test passed without explicit log or artifact evidence.
 - Treat failed, interrupted, or absent command logs as gaps.
 - Keep this as an evidence summary, not a replacement for test-evidence-gate or release-evidence-binder.
@@ -36,8 +37,16 @@ python3 scripts/evidence_collect.py \
   --artifact-dir artifacts/REQ-001
 ```
 
+When `artifacts/REQ-001/implementation_completion_gate.json` contains `evidence_followups`, the collector expects matching artifacts such as `test_execution_evidence.json`, `frontend_acceptance.json`, `configuration_readiness.json`, or `post_release_observation.json` depending on the declared surface.
+
 ## Output
 
 The output uses schema `codex-evidence-gap-summary-v1`.
 
-The artifact lists required evidence, found evidence, missing evidence, command-log status, and conservative review gaps.
+Decision values:
+
+- `pass`: required evidence is present and command logs show no failures.
+- `warn`: non-blocking evidence gaps or weak logs exist and require reviewer attention.
+- `block`: required evidence is missing, logs failed/interrupted, or validation artifacts cannot be found.
+
+The artifact lists required evidence, evidence-to-artifact expectations, found evidence, missing evidence, implementation follow-up requirements, command-log status, warnings, blockers, and conservative review gaps.

@@ -33,6 +33,50 @@ def run_json(root: Path, cmd: list[str]) -> dict[str, Any]:
     return {"returncode": proc.returncode, "json": data if isinstance(data, dict) else {}, "stderr": proc.stderr.strip()}
 
 
+def requirement_understanding_strict(root: Path) -> bool:
+    try:
+        spec_governor = load_module("spec_governor_for_benchmark", root / "skills/core/spec-governor/scripts/spec_governor.py")
+        ambiguous = spec_governor.normalize("REQ-BENCH-AMB", "续费优化", "优化续费流程，状态更新正确，功能正常。")
+        clear = spec_governor.normalize(
+            "REQ-BENCH-CLEAR",
+            "续费重新试算",
+            "\n".join(
+                [
+                    "业务目的: 减少运营手工核对续费状态的时间。",
+                    "流程: 运营在续费列表点击重新试算按钮，系统调用续费试算接口并刷新当前设备的试算结果。",
+                    "入口: 续费列表的重新试算按钮。",
+                    "Req: 运营可以对单个设备重新触发续费试算。",
+                    "Rule: 只有有续费管理权限的运营角色可以触发。",
+                    "AC: 给定有权限运营在续费列表点击重新试算按钮，接口返回成功后页面展示新的试算金额和试算时间。",
+                    "AC: 无权限角色看不到重新试算按钮且直接调用接口返回无权限。",
+                ]
+            ),
+        )
+        no_goal = spec_governor.normalize(
+            "REQ-BENCH-NO-GOAL",
+            "订单导出",
+            "\n".join(
+                [
+                    "入口: 订单列表导出按钮。",
+                    "流程: 运营点击订单列表导出按钮，系统调用导出接口并生成 Excel 文件。",
+                    "Req: 运营可以导出订单列表。",
+                    "AC: 给定运营点击导出按钮，系统生成包含订单号和状态的 Excel 文件。",
+                ]
+            ),
+        )
+        return (
+            ambiguous.get("design_allowed") is False
+            and ambiguous.get("requirements_understanding", {}).get("decision") == "needs_clarification"
+            and clear.get("design_allowed") is True
+            and clear.get("requirements_understanding", {}).get("level") == "expert_ready"
+            and no_goal.get("design_allowed") is False
+            and no_goal.get("requirements_understanding", {}).get("level") == "clarification_required"
+            and spec_governor.validate_spec(clear).get("decision") == "pass"
+        )
+    except Exception:
+        return False
+
+
 def report(root: Path) -> dict[str, Any]:
     skills = list((root / "skills").glob("*/*/SKILL.md"))
     scripts = list((root / "skills").glob("**/*.py"))
@@ -129,11 +173,21 @@ def report(root: Path) -> dict[str, Any]:
     forward_cases = forward["json"].get("cases", []) if isinstance(forward["json"].get("cases"), list) else []
     if forward_cases and isinstance(forward_cases[0], dict):
         forward_scenario_results = forward_cases[0].get("scenario_results", {}) if isinstance(forward_cases[0].get("scenario_results"), dict) else {}
+    quality_gates = health["json"].get("integrated_quality_gates", {}) if isinstance(health["json"].get("integrated_quality_gates"), dict) else {}
+    artifact_schema_gate = quality_gates.get("artifact_schema_inventory", {}) if isinstance(quality_gates.get("artifact_schema_inventory"), dict) else {}
+    design_template_gate = quality_gates.get("design_template_regression", {}) if isinstance(quality_gates.get("design_template_regression"), dict) else {}
+    requirement_understanding_gate = requirement_understanding_strict(root)
     blockers: list[dict[str, Any]] = []
     if privacy["returncode"] != 0:
         blockers.append({"source": "privacy_scan", "message": "privacy scan failed"})
     if health["json"].get("decision") == "block":
         blockers.append({"source": "skill_health", "message": "skill health blocked"})
+    if artifact_schema_gate.get("decision") != "pass":
+        blockers.append({"source": "artifact_schema_inventory", "message": "artifact schema inventory must pass for expert readiness"})
+    if design_template_gate.get("decision") != "pass":
+        blockers.append({"source": "design_template_regression", "message": "design template regression must pass for expert readiness"})
+    if not requirement_understanding_gate:
+        blockers.append({"source": "requirement_understanding", "message": "ambiguous requirements must block and clear business-flow requirements must pass"})
     if scenario_catalog_count and len(documented_scenarios) != scenario_catalog_count:
         blockers.append({"source": "scenario_catalog", "message": "not all scenario catalog entries are documented"})
     if scenario_catalog_count and len(matrix_rows_with_gates) != scenario_catalog_count:
@@ -182,6 +236,18 @@ def report(root: Path) -> dict[str, Any]:
             "skill_expert_readiness": health["json"].get("expert_readiness", ""),
             "skill_content_quality_average": health["json"].get("content_quality_average", 0),
             "skill_content_quality_expert_count": health["json"].get("content_quality_expert_count", 0),
+            "artifact_schema_inventory_decision": artifact_schema_gate.get("decision"),
+            "artifact_schema_warning_count": artifact_schema_gate.get("warning_count", 0),
+            "design_template_regression_decision": design_template_gate.get("decision"),
+            "requirement_understanding_strict": requirement_understanding_gate,
+            "expert_readiness_strict": (
+                health["json"].get("decision") == "pass"
+                and artifact_schema_gate.get("decision") == "pass"
+                and design_template_gate.get("decision") == "pass"
+                and requirement_understanding_gate
+                and privacy["json"].get("decision") == "pass"
+                and forward["json"].get("decision") == "pass"
+            ),
             "forward_test_decision": forward["json"].get("decision"),
             "replay_case_count": replay["json"].get("case_count", 0),
             "replay_scenario_count": replay["json"].get("scenario_count", 0),

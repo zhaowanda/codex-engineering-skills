@@ -25,6 +25,7 @@ technical_design + architecture_design
 ## Rules
 
 - Generate a `delivery_plan.json` before Git branch preparation.
+- Carry `requirements_understanding_gate` from technical/architecture design into `source_design_gate`; if `design_allowed=false` or `implementation_allowed=false`, keep the plan `needs_completion` with unresolved `open_gates`.
 - Every repository must have one role: `modify`, `read_only`, `confirm_only`, or `out_of_scope`.
 - Only `modify` repositories may be passed to `git-worktree-governor prepare-plan`.
 - Every `modify` repository must include `repo_path` before execution in a real workspace.
@@ -37,6 +38,9 @@ technical_design + architecture_design
 - Dependency edges and contract freeze points must reference repositories declared in `repo_tasks`.
 - Multiple `modify` repositories must require a cross-repo graph, gated parallel group, or serial group before execution.
 - Do not start implementation while `open_gates` has unresolved items.
+- Do not start Git preparation or edits when `source_design_gate` says requirement understanding is blocked.
+- Treat missing `repo_path`, weak file scope, unresolved dependencies, or unresolved open gates as blockers for implementation readiness.
+- Treat incomplete test, rollback, validation, or release evidence planning as warnings until the delivery-plan reviewer upgrades them to blockers.
 
 ## Commands
 
@@ -70,6 +74,12 @@ python3 scripts/render_delivery_plan.py \
 ## Output
 
 The output uses schema `codex-delivery-plan-v1`.
+
+Decision values:
+
+- `ready`: the plan has concrete repo tasks, scoped files, sequencing, validation, rollback, and no unresolved open gates.
+- `needs_revision`: the plan is structurally usable but has warnings that must be resolved before edit readiness.
+- `block`: required repository scope, dependency ordering, allowed files, or open-gate handling is missing.
 
 Key consumers:
 

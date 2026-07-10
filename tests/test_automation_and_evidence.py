@@ -65,6 +65,49 @@ def test_implementation_completion_passes_with_allowed_scope() -> None:
     result = implementation_complete.evaluate(DIFF, plan, "implemented export")
     assert result["decision"] == "pass"
     assert result["changed_files"]
+    assert {item["surface"] for item in result["evidence_followups"]} >= {
+        "api_contract",
+        "data_model",
+        "permission_data_scope",
+        "frontend_acceptance",
+        "observability",
+    }
+    assert any(item["source"] == "evidence_followup" for item in result["warnings"])
+
+
+def test_implementation_completion_blocks_unready_delivery_plan_gate() -> None:
+    gate = {"design_allowed": False, "implementation_allowed": False, "decision": "needs_clarification"}
+    plan = {
+        "decision": "needs_completion",
+        "source_design_gate": gate,
+        "open_gates": ["requirements_understanding_gate: implementation is blocked"],
+        "repo_tasks": [{"allowed_files": ["src/api", "src/page"]}],
+    }
+    result = implementation_complete.evaluate(DIFF, plan, "implemented export")
+    assert result["decision"] == "block"
+    sources = {item["source"] for item in result["blockers"]}
+    assert {"delivery_plan", "requirements_understanding_gate"}.issubset(sources)
+
+
+def test_implementation_completion_tracks_transaction_cache_and_mq_followups() -> None:
+    diff = """
+diff --git a/src/service/RenewalService.java b/src/service/RenewalService.java
+--- a/src/service/RenewalService.java
++++ b/src/service/RenewalService.java
+@@
++public void renew(Order order) {
++    renewalMapper.insert(order);
++    accountRepository.updateBalance(order.getAccountId());
++    redisTemplate.opsForValue().set("renewal:" + order.getId(), order);
++    kafkaTemplate.send("renewal-topic", order);
++}
+"""
+    plan = {"repo_tasks": [{"allowed_files": ["src/service"]}]}
+    result = implementation_complete.evaluate(diff, plan, "implemented renewal flow")
+    surfaces = {item["surface"] for item in result["evidence_followups"]}
+    assert {"data_model", "mq_interaction", "cache_consistency", "transaction_idempotency", "observability"}.issubset(surfaces)
+    tx = next(item for item in result["evidence_followups"] if item["surface"] == "transaction_idempotency")
+    assert any("rollback" in evidence for evidence in tx["evidence"])
 
 
 def test_evidence_collector_detects_missing_and_failed_logs() -> None:
@@ -78,6 +121,42 @@ def test_evidence_collector_detects_missing_and_failed_logs() -> None:
         assert result["decision"] == "block"
         assert result["missing_evidence"]
         assert result["failed_logs"]
+
+
+def test_evidence_collector_maps_implementation_followups_to_required_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "evidence_followups": [
+                {"surface": "mq_interaction", "required_by": "test-evidence-gate"},
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner"},
+                {"surface": "configuration", "required_by": "configuration-governor"},
+            ],
+        })
+        result = evidence_collect.collect({"impact_areas": [], "evidence_required": []}, [], root)
+        assert result["decision"] == "block"
+        assert "mq_interaction_evidence" in result["required_evidence"]
+        assert "frontend_acceptance:frontend_acceptance.json" in result["missing_evidence"]
+        assert "configuration_readiness:configuration_readiness.json" in result["missing_evidence"]
+
+
+def test_evidence_collector_passes_when_followup_artifacts_exist() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "evidence_followups": [
+                {"surface": "transaction_idempotency", "required_by": "test-evidence-gate"},
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner"},
+            ],
+        })
+        write_json(root / "test_execution_evidence.json", {"decision": "pass"})
+        write_json(root / "frontend_acceptance.json", {"decision": "pass", "pass": True})
+        result = evidence_collect.collect({"impact_areas": [], "evidence_required": []}, [], root)
+        assert result["decision"] == "pass"
+        assert not result["missing_evidence"]
+        assert "transaction_idempotency_evidence:test_execution_evidence.json" in result["found_evidence"]
 
 
 def test_post_change_sync_generates_report_from_git_changes() -> None:
@@ -130,6 +209,7 @@ def test_synthetic_e2e_runner_completes_core_flow() -> None:
             "data_migration_blocked_path",
             "release_readiness_blocked_path",
             "release_readiness_happy_path",
+            "release_followup_chain_path",
         }
         assert all(item["passed"] for item in result["cases"])
         assert (Path(tmp) / "blocked_case/spec.json").exists()
@@ -141,7 +221,10 @@ def run_all() -> None:
     test_diff_impact_detects_core_areas()
     test_implementation_completion_blocks_out_of_scope()
     test_implementation_completion_passes_with_allowed_scope()
+    test_implementation_completion_blocks_unready_delivery_plan_gate()
     test_evidence_collector_detects_missing_and_failed_logs()
+    test_evidence_collector_maps_implementation_followups_to_required_artifacts()
+    test_evidence_collector_passes_when_followup_artifacts_exist()
     test_post_change_sync_generates_report_from_git_changes()
     test_post_change_sync_blocks_required_docs_when_unbound()
     test_synthetic_e2e_runner_completes_core_flow()

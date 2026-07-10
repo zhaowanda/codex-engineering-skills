@@ -33,6 +33,9 @@ python3 scripts/question_governor.py \
 - Block design/implementation while required questions are open.
 - Ask focused questions only; do not ask for information already present in the spec.
 - Track owner, required flag, answer, and status.
+- Every required question must include `risk_if_unanswered` so reviewers understand why design must stop.
+- Generate categorized clarification questions for unclear business goal, business flow, actor/entrypoint, scope boundary, data rule, state transition, trigger timing, exception handling, compatibility, and acceptance evidence.
+- Convert `spec.ambiguities` and `requirements_understanding.blockers` into required clarification questions.
 - Generate expert clarification questions from impact surface and implicit constraints, including permission, data/export, API, performance, security, and configuration questions.
 - Treat required questions as closed only when they include an answer.
 

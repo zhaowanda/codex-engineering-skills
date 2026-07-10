@@ -27,6 +27,7 @@ delivery docs repository setup
 - `init` must materialize non-empty requirement-scoped human docs and machine placeholders; empty `human/` or `machine/` directories are not sufficient.
 - `sync` must copy generated delivery artifacts into the docs repository by `doc_id` so docs follow the requirement, not just the workspace.
 - `sync` must inherit existing expert supplemental artifacts from `machine/raw/<doc_id>` before rendering human docs when the current artifact directory lacks them; source-backed runtime evidence must not be lost during `--force` reruns.
+- `sync --design-only` or `sync --human-section design` must refresh only `human/designs/<doc_id>.md`; it must not rewrite specs, tests, release docs, machine bundles, raw artifacts, or manifests.
 - `sync` must synthesize `runtime_sequence_evidence.json` when it is missing and source-backed evidence exists in `spec.json`, `technical_design.json`, `project_understanding/api_surface.json`, `project_understanding/code_index.json`, and indexed source files. If those inputs are insufficient, report the reason instead of fabricating actor/API/service interactions.
 - Runtime entrypoints are not always frontend pages. Runtime evidence must model the trigger source explicitly, including frontend actions, HTTP/API callers, scheduled jobs, MQ consumers, batch jobs, hand-written/custom Task classes, or backend methods, and sequence diagrams must render the confirmed trigger source instead of defaulting to browser/frontend.
 - Keep private project docs outside the open-core repository.
@@ -71,6 +72,19 @@ python3 scripts/docs_governor.py \
   --title "Order export" \
   --doc-language en \
   --artifact-dir artifacts/REQ-001
+```
+
+Refresh only the human-readable design document without rewriting specs, tests, release docs, machine bundles, raw artifacts, or manifests:
+
+```bash
+python3 scripts/docs_governor.py \
+  sync \
+  --docs-root delivery-docs \
+  --doc-id REQ-001 \
+  --title "Order export" \
+  --doc-language en \
+  --artifact-dir artifacts/REQ-001 \
+  --design-only
 ```
 
 Validate:

@@ -27,6 +27,8 @@ implementation
 - `block` if any active blocker/high finding exists in code review, design quality, security, performance, or write audit evidence.
 - `block` if write guard audit is not ready.
 - `block` if CI failed, tests failed, frontend acceptance failed, configuration readiness is blocked, or release blockers exist.
+- `request_changes` if `implementation_completion_gate.evidence_followups` exist but `evidence_gap_summary.json` is missing.
+- `request_changes` if `evidence_gap_summary.json` does not explicitly cover every implementation follow-up surface.
 - `request_changes` if medium findings, missing evidence, unresolved evidence gaps, unknown CI commands, or incomplete performance evidence remain.
 - `approve` only when required evidence exists, active severe/medium findings are closed, and residual risks have owner and resolution.
 - This gate does not replace source-level review. It decides whether the review stage is closed.
@@ -45,6 +47,7 @@ The gate reads these files when present:
 
 - `code_review.json`
 - `code_design_quality.json`
+- `implementation_completion_gate.json`
 - `write_guard_audit.json`
 - `data_security_review.json`
 - `performance_diff_review.json`

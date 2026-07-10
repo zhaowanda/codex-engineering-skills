@@ -70,6 +70,11 @@ def test_benchmark_governor_reports_metrics() -> None:
     assert result["metrics"]["privacy_decision"] == "pass"
     assert result["metrics"]["skill_health_decision"] == "pass"
     assert result["metrics"]["skill_content_quality_average"] > 0
+    assert result["metrics"]["artifact_schema_inventory_decision"] == "pass"
+    assert result["metrics"]["artifact_schema_warning_count"] == 0
+    assert result["metrics"]["design_template_regression_decision"] == "pass"
+    assert result["metrics"]["requirement_understanding_strict"] is True
+    assert result["metrics"]["expert_readiness_strict"] is True
     assert result["metrics"]["replay_validation_decision"] == "pass"
     assert result["metrics"]["replay_case_count"] >= 4
 

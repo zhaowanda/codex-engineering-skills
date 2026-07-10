@@ -10,6 +10,17 @@ from typing import Any
 SCHEMA = "codex-change-risk-v1"
 HIGH_AREAS = {"database", "permission", "configuration", "performance"}
 CRITICAL_TERMS = ["drop table", "truncate", "delete from", "password", "secret", "private key", "auth", "authorization", "production"]
+FOLLOWUP_EVIDENCE = {
+    "api_contract": "api_contract_evidence",
+    "data_model": "data_model_evidence",
+    "mq_interaction": "mq_interaction_evidence",
+    "cache_consistency": "cache_consistency_evidence",
+    "transaction_idempotency": "transaction_idempotency_evidence",
+    "permission_data_scope": "permission_negative_test",
+    "frontend_acceptance": "frontend_acceptance",
+    "configuration": "configuration_readiness",
+    "observability": "post_release_observation",
+}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -96,6 +107,15 @@ def classify(artifact_dir: Path) -> dict[str, Any]:
     if implementation.get("decision") == "block":
         score += 20
         signals.append({"source": "implementation_completion_gate", "message": "implementation completion is blocked"})
+    implementation_followups = [item for item in as_list(implementation.get("evidence_followups")) if isinstance(item, dict)]
+    if implementation_followups:
+        score += min(30, len(implementation_followups) * 5)
+        surfaces = sorted({str(item.get("surface")) for item in implementation_followups if item.get("surface")})
+        signals.append({"source": "implementation_completion_gate", "message": "implementation evidence follow-ups declared", "surfaces": surfaces})
+        for surface in surfaces:
+            mapped = FOLLOWUP_EVIDENCE.get(surface)
+            if mapped:
+                evidence_required.add(mapped)
 
     blob = text_blob(diff_impact, plan, config, security, performance, traceability, implementation, diff_text)
     critical_hits = [term for term in CRITICAL_TERMS if term in blob]

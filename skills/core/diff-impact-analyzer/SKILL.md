@@ -40,4 +40,10 @@ python3 scripts/diff_impact.py \
 
 The output uses schema `codex-diff-impact-v1`.
 
-The artifact includes impact areas, evidence required, warnings, and review notes inferred from the diff.
+Decision values:
+
+- `pass`: the diff was parsed and impact areas/evidence requirements were produced.
+- `warn`: the diff was parsed but includes unknown file types, weak signals, or broad impact that needs manual review.
+- `block`: the diff is missing, empty, unreadable, or cannot be parsed into changed files.
+
+The artifact includes impact areas, evidence required, warnings, blockers, and review notes inferred from the diff.

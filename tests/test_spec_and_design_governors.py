@@ -51,10 +51,11 @@ def test_spec_normalize_ready_for_design() -> None:
     """
     spec = spec_governor.normalize("REQ-1", "Order export", text)
     assert spec["schema"] == "codex-spec-v1"
-    assert spec["decision"] == "ready_for_design"
+    assert spec["decision"] == "blocked"
     assert spec["acceptance_criteria"]
+    assert spec["requirements_understanding"]["level"] == "clarification_required"
     validation = spec_governor.validate_spec(spec)
-    assert validation["decision"] == "pass"
+    assert validation["decision"] == "block"
 
 
 def test_spec_inferred_acceptance_uses_requirement_language_without_template_prefix() -> None:
@@ -154,9 +155,9 @@ def test_spec_handles_one_line_request_with_inferred_acceptance() -> None:
     assert spec["acceptance_criteria"][0]["source_evidence"] == "inferred from first line"
     assert spec["source"]["line_count"] == 1
     validation = spec_governor.validate_spec(spec)
-    assert validation["decision"] == "pass"
-    assert validation["quality_level"] == "usable"
-    assert any(item["source"] == "acceptance_criteria" for item in validation["warnings"])
+    assert validation["decision"] == "block"
+    assert spec["requirements_understanding"]["level"] == "clarification_required"
+    assert any(item["source"] == "requirements_understanding" for item in validation["blockers"])
 
 
 def test_spec_handles_long_prd_without_collapsing_traceability() -> None:
@@ -245,7 +246,18 @@ def test_spec_extracts_state_transitions() -> None:
 
 
 def test_technical_and_architecture_design_render_core_sections() -> None:
-    spec = spec_governor.normalize("REQ-3", "Checkout display", "Buyer sees discount. AC: discount is visible before submit.")
+    spec = spec_governor.normalize(
+        "REQ-3",
+        "Checkout display",
+        "\n".join([
+            "业务目的: 让买家在提交订单前确认折扣明细，减少价格疑问。",
+            "流程: 买家打开结算页，系统读取定价接口返回的折扣明细并展示在订单汇总区域。",
+            "入口: 结算页订单汇总区域加载。",
+            "Req: Buyer sees discount before submitting checkout.",
+            "Rule: Pricing API remains the source of truth for discount amounts.",
+            "AC: Given buyer opens checkout, discount is visible before submit.",
+        ]),
+    )
     tech = technical_design.render(spec)
     arch = architecture_design.render(spec, tech)
     assert tech["schema"] == "codex-technical-design-v1"

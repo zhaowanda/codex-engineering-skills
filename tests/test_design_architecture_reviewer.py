@@ -10,6 +10,24 @@ design_arch_review = importlib.util.module_from_spec(spec)
 assert spec.loader
 spec.loader.exec_module(design_arch_review)
 
+SPEC_SCRIPT = Path(__file__).resolve().parents[1] / "skills/core/spec-governor/scripts/spec_governor.py"
+spec_governor_spec = importlib.util.spec_from_file_location("spec_governor_for_design_review", SPEC_SCRIPT)
+spec_governor = importlib.util.module_from_spec(spec_governor_spec)
+assert spec_governor_spec.loader
+spec_governor_spec.loader.exec_module(spec_governor)
+
+TECHNICAL_SCRIPT = Path(__file__).resolve().parents[1] / "skills/core/technical-design-governor/scripts/technical_design.py"
+technical_spec = importlib.util.spec_from_file_location("technical_design_for_design_review", TECHNICAL_SCRIPT)
+technical_design = importlib.util.module_from_spec(technical_spec)
+assert technical_spec.loader
+technical_spec.loader.exec_module(technical_design)
+
+ARCHITECTURE_SCRIPT = Path(__file__).resolve().parents[1] / "skills/core/architecture-design-governor/scripts/architecture_design.py"
+architecture_spec = importlib.util.spec_from_file_location("architecture_design_for_design_review", ARCHITECTURE_SCRIPT)
+architecture_design = importlib.util.module_from_spec(architecture_spec)
+assert architecture_spec.loader
+architecture_spec.loader.exec_module(architecture_design)
+
 
 def complete_design() -> tuple[dict, dict]:
     technical = {
@@ -116,6 +134,42 @@ def test_thin_design_blocks() -> None:
     assert not result["readiness_gate"]["implementation_allowed"]
 
 
+def test_unclear_requirement_understanding_blocks_design_review() -> None:
+    unclear_spec = spec_governor.normalize("REQ-AMB", "Ambiguous Renewal", "优化续费流程，状态更新正确，功能正常。")
+    technical = technical_design.render(unclear_spec)
+    architecture = architecture_design.render(unclear_spec, technical)
+    result = design_arch_review.review(technical, architecture)
+    assert technical["requirements_understanding_gate"]["design_allowed"] is False
+    assert architecture["requirements_understanding_gate"]["design_allowed"] is False
+    assert result["decision"] == "block"
+    assert not result["readiness_gate"]["implementation_allowed"]
+    messages = json_dumps(result)
+    assert "requirement understanding gate blocks design" in messages
+    assert "business_flow" in messages
+    assert "entrypoints" in messages
+
+
+def test_clear_requirement_understanding_gate_passes_through_designs() -> None:
+    clear_source = """
+业务目的: 减少运营手工核对续费状态的时间。
+流程: 运营在续费列表点击重新试算按钮，系统调用续费试算接口并刷新当前设备的试算结果。
+入口: 续费列表的重新试算按钮。
+Req: 运营可以对单个设备重新触发续费试算。
+Rule: 只有有续费管理权限的运营角色可以触发。
+AC: 给定有权限运营在续费列表点击重新试算按钮，接口返回成功后页面展示新的试算金额和试算时间。
+AC: 无权限角色看不到重新试算按钮且直接调用接口返回无权限。
+"""
+    clear_spec = spec_governor.normalize("REQ-CLEAR", "Renewal Requote", clear_source)
+    technical = technical_design.render(clear_spec)
+    architecture = architecture_design.render(clear_spec, technical)
+    assert clear_spec["design_allowed"] is True
+    assert technical["requirements_understanding_gate"]["design_allowed"] is True
+    assert technical["requirements_understanding_gate"]["business_intent"]
+    assert technical["requirements_understanding_gate"]["business_flow"]
+    assert technical["requirements_understanding_gate"]["entrypoints"]
+    assert architecture["requirements_understanding_gate"]["design_allowed"] is True
+
+
 def test_complete_design_passes() -> None:
     technical, architecture = complete_design()
     result = design_arch_review.review(technical, architecture)
@@ -172,6 +226,21 @@ def test_template_problem_analysis_needs_revision() -> None:
     result = design_arch_review.review(technical, architecture)
     assert result["decision"] == "needs_revision"
     assert "problem_analysis is missing" in json_dumps(result)
+
+
+def test_standalone_readability_needs_revision_without_current_state_and_proof() -> None:
+    technical, architecture = complete_design()
+    technical.pop("problem_analysis")
+    technical.pop("current_state_analysis")
+    technical.pop("acceptance_mapping")
+    technical.pop("design_traceability_matrix")
+    architecture.pop("current_architecture")
+    architecture.pop("component_boundaries")
+    result = design_arch_review.review(technical, architecture)
+    messages = json_dumps(result)
+    assert "design cannot be understood standalone" in messages
+    assert "current_state" in messages
+    assert "satisfaction_proof" in messages
 
 
 def test_template_option_decision_needs_revision() -> None:

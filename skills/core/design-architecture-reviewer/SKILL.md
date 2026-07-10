@@ -27,6 +27,7 @@ spec
 
 - Do not allow implementation when this review returns `decision=block`.
 - Do not allow implementation when `readiness_gate.implementation_allowed=false`.
+- Block designs whose technical or architecture artifact carries `requirements_understanding_gate.design_allowed=false`; requirements must have explicit business intent, concrete business flow, entrypoints/triggers, and acceptance evidence before implementation.
 - A design is not expert-ready unless requirements trace to process flow, modules, data flow, API/UI impact, tests, acceptance evidence, and selected options.
 - Require at least two technical solution options and two architecture options unless a documented waiver exists.
 - Require each technical and architecture option to include applicability, execution outline or integration/deployment impact, risk controls, validation, performance impact, and rollback detail.

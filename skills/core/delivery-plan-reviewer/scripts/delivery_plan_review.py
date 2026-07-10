@@ -86,6 +86,11 @@ def review(plan: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     if plan.get("schema") != "codex-delivery-plan-v1":
         findings.append(finding("schema", "blocker", "delivery plan schema is invalid", plan.get("schema"), "Use codex-delivery-plan-v1."))
+    source_design_gate = plan.get("source_design_gate") if isinstance(plan.get("source_design_gate"), dict) else {}
+    if source_design_gate.get("design_allowed") is False:
+        findings.append(finding("gates", "blocker", "source design requirement understanding gate blocks delivery planning", source_design_gate, "Resolve requirement clarification blockers and rerun design review before creating executable delivery tasks."))
+    if source_design_gate.get("implementation_allowed") is False:
+        findings.append(finding("gates", "blocker", "source design requirement understanding gate blocks implementation", source_design_gate, "Do not start Git preparation or edits until requirement understanding allows implementation."))
     if as_list(plan.get("open_gates")):
         findings.append(finding("gates", "blocker", "delivery plan has unresolved open gates", plan.get("open_gates"), "Resolve open_gates before Git preparation or implementation."))
 

@@ -110,6 +110,33 @@ def executed_case_data_refs(test_evidence: dict[str, Any]) -> dict[str, list[str
     return result
 
 
+def executed_case_ids(test_evidence: dict[str, Any]) -> set[str]:
+    ids: set[str] = set()
+    for item in as_list(test_evidence.get("executed_cases")) + as_list(test_evidence.get("passed_cases")) + as_list(test_evidence.get("case_results")) + as_list(test_evidence.get("manual_cases")) + as_list(test_evidence.get("automated_cases")):
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or item.get("result") or "passed").lower()
+        if status in {"skipped", "not_run", "not run", "pending", "todo"}:
+            continue
+        for key in ["id", "case_id", "test_case_id"]:
+            if item.get(key):
+                ids.add(str(item.get(key)))
+        name = str(item.get("name") or item.get("title") or "")
+        if name:
+            ids.add(name)
+    return ids
+
+
+def required_case_ids(test_design: dict[str, Any]) -> set[str]:
+    required: set[str] = set()
+    for case in as_list(test_design.get("test_cases")):
+        if not isinstance(case, dict):
+            continue
+        if case.get("execution_required") == "must_run" and case.get("id"):
+            required.add(str(case.get("id")))
+    return required
+
+
 def evaluate(
     artifact_dir: Path,
     require_frontend: bool = False,
@@ -123,6 +150,15 @@ def evaluate(
 
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
+
+    if test_design:
+        if test_design.get("decision") == "block":
+            blockers.append({"source": "test_design", "message": "test_design.json decision is block"})
+        gate = test_design.get("requirements_understanding_gate") if isinstance(test_design.get("requirements_understanding_gate"), dict) else {}
+        if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False:
+            blockers.append({"source": "requirements_understanding_gate", "message": "requirement understanding blocks test evidence acceptance", "gate": gate})
+    if test_data_plan and test_data_plan.get("decision") == "block":
+        blockers.append({"source": "test_data_plan", "message": "test_data_plan.json decision is block"})
 
     if not test_evidence:
         blockers.append({"source": "test_execution_evidence", "message": "test_execution_evidence.json is missing or invalid"})
@@ -145,6 +181,15 @@ def evaluate(
             blockers.append({"source": "test_execution_evidence", "message": "untested blockers exist", "count": len(as_list(test_evidence.get("untested_blockers")))})
         if as_list(test_evidence.get("untested_non_blockers")):
             warnings.append({"source": "test_execution_evidence", "message": "untested non-blocking cases exist", "count": len(as_list(test_evidence.get("untested_non_blockers")))})
+
+    must_run_cases = required_case_ids(test_design)
+    if must_run_cases:
+        if not test_evidence:
+            blockers.append({"source": "test_execution_evidence", "message": "must-run test cases require execution evidence", "missing_case_ids": sorted(must_run_cases)})
+        else:
+            missing_cases = sorted(must_run_cases - executed_case_ids(test_evidence))
+            if missing_cases:
+                blockers.append({"source": "test_execution_evidence", "message": "must-run test cases were not executed", "missing_case_ids": missing_cases})
 
     required_data_refs = data_refs_required(test_design)
     if required_data_refs:
@@ -212,6 +257,7 @@ def evaluate(
         "test_design_present": bool(test_design),
         "test_data_plan_present": bool(test_data_plan),
         "required_test_data_ref_count": len(data_refs_required(test_design)),
+        "must_run_case_count": len(required_case_ids(test_design)),
         "executed_case_count": executed_count,
         "failed_case_count": len(as_list(test_evidence.get("failed_cases"))) if test_evidence else 0,
         "untested_blocker_count": len(as_list(test_evidence.get("untested_blockers"))) if test_evidence else 0,

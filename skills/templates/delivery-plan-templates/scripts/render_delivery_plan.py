@@ -194,12 +194,19 @@ def narrow_allowed_files(paths: list[str]) -> list[str]:
 
 def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dict[str, Any], project_understanding: dict[str, Any] | None = None) -> dict[str, Any]:
     ctx = project_context(project_understanding or {})
+    technical_gate = technical.get("requirements_understanding_gate") if isinstance(technical.get("requirements_understanding_gate"), dict) else {}
+    architecture_gate = architecture.get("requirements_understanding_gate") if isinstance(architecture.get("requirements_understanding_gate"), dict) else {}
+    source_design_gate = architecture_gate or technical_gate
     repos = repo_responsibilities(architecture)
     topology = topology_by_repo(architecture)
     acceptance = acceptance_from_design(technical)
     tests = tests_from_design(technical)
     repo_tasks: list[dict[str, Any]] = []
     open_gates: list[str] = []
+    if source_design_gate and source_design_gate.get("design_allowed") is False:
+        open_gates.append("requirements_understanding_gate: design is blocked until requirement clarification is resolved")
+    if source_design_gate and source_design_gate.get("implementation_allowed") is False:
+        open_gates.append("requirements_understanding_gate: implementation is blocked until requirement clarification is resolved")
     for repo in repos:
         repo_name = repo["repo"]
         role = repo["role"]
@@ -259,6 +266,7 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
             "technical_design_doc_id": technical.get("doc_id", ""),
             "architecture_design_doc_id": architecture.get("doc_id", ""),
         },
+        "source_design_gate": source_design_gate,
         "repo_tasks": repo_tasks,
         "parallel_groups": [
             {

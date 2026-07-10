@@ -32,6 +32,8 @@ repository setup / release package preparation
 - Private overlays should extend generated CI with registry and private-artifact checks without publishing private data.
 - Prefer `python3 -m pytest -q` for local developer guidance; generated CI may use direct test-file execution if provider templates require no extra dependencies.
 - Treat generated files as starting templates that project maintainers can review before adoption.
+- Block generation when the requested provider is unsupported or the output path does not match the provider convention.
+- Warn when a repository lacks expected test, privacy-scan, or maintenance-check inputs; generated CI should not imply nonexistent coverage.
 
 ## Command
 
@@ -65,4 +67,10 @@ Private overlays should add their own registry, project-skill, and generated-ind
 
 The renderer writes either `.github/workflows/validate.yml` or `.gitlab-ci.yml`.
 
-Generated CI should compile Python files, run framework tests, run the privacy scan, and execute open-source maintenance checks appropriate for the selected provider.
+Decision values:
+
+- `pass`: the requested provider is supported and the template contains the expected validation jobs.
+- `warn`: the template is generated but repository inputs are incomplete and maintainers must review the missing coverage.
+- `block`: the provider, output path, or repository state prevents generating a trustworthy template.
+
+Generated CI should compile Python files, run framework tests, run the privacy scan, and execute open-source maintenance checks appropriate for the selected provider. Any warnings or blockers must be reported with the final decision.

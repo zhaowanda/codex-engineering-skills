@@ -964,7 +964,32 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     test_evidence = [f"{cmd} evidence" for cmd in ctx["test_hints"][:3]] or ["test evidence"]
     impact_areas = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
     expert_readiness_gaps = [item for item in as_list(spec.get("expert_readiness_gaps")) if isinstance(item, dict)]
-    decision_confidence = "medium" if expert_readiness_gaps or spec.get("open_questions") else "high"
+    requirements_understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
+    design_allowed = bool(spec.get("design_allowed", requirements_understanding.get("design_allowed", True)))
+    implementation_allowed = bool(spec.get("implementation_allowed", requirements_understanding.get("implementation_allowed", design_allowed)))
+    ambiguities = [item for item in as_list(spec.get("ambiguities")) if isinstance(item, dict)]
+    understanding_blockers = [item for item in as_list(requirements_understanding.get("blockers")) if isinstance(item, dict)]
+    requirements_understanding_gate = {
+        "decision": requirements_understanding.get("decision") or ("pass" if design_allowed else "needs_clarification"),
+        "design_allowed": design_allowed,
+        "implementation_allowed": implementation_allowed and design_allowed,
+        "understanding_confidence": spec.get("understanding_confidence") or requirements_understanding.get("confidence") or ("high" if design_allowed else "low"),
+        "business_intent": spec.get("business_intent") or requirements_understanding.get("business_intent") or "",
+        "business_flow": spec.get("business_flow") or requirements_understanding.get("business_flow") or [],
+        "entrypoints": spec.get("entrypoints") or requirements_understanding.get("entrypoints") or [],
+        "trigger_conditions": spec.get("trigger_conditions") or requirements_understanding.get("trigger_conditions") or [],
+        "preconditions": spec.get("preconditions") or requirements_understanding.get("preconditions") or [],
+        "postconditions": spec.get("postconditions") or requirements_understanding.get("postconditions") or [],
+        "blockers": understanding_blockers,
+        "ambiguities": ambiguities,
+        "required_action": "resolve requirement clarification questions before technical design can be treated as implementation-ready" if not design_allowed else "none",
+    }
+    if not design_allowed:
+        decision_confidence = "low"
+    elif expert_readiness_gaps or spec.get("open_questions"):
+        decision_confidence = "medium"
+    else:
+        decision_confidence = "high"
     problem = build_problem_analysis(spec, ctx, summary, breakdown, owner_file, read_first, route_refs, entrypoint_confidence)
     technical_options, comparison_matrix, score_summary, selected_solution = build_technical_options(spec, summary, owner_file, breakdown, route_refs, test_evidence, problem)
     signals = impact_signals(spec, breakdown, route_refs)
@@ -982,6 +1007,11 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             "test_file_hints": ctx["test_file_hints"],
         },
         "design_scope": spec.get("scope") or {"in_scope": [summary], "out_of_scope": [], "assumptions": [], "non_goals": []},
+        "requirements_understanding": requirements_understanding,
+        "requirements_understanding_gate": requirements_understanding_gate,
+        "business_intent": requirements_understanding_gate["business_intent"],
+        "business_flow": requirements_understanding_gate["business_flow"],
+        "entrypoints": requirements_understanding_gate["entrypoints"],
         "problem_analysis": problem,
         "current_state_analysis": build_current_state_analysis(problem, owner_module, route_refs),
         "requirement_breakdown": breakdown,
@@ -1053,7 +1083,11 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "option_comparison_matrix": comparison_matrix,
         "option_score_summary": score_summary,
         "selected_solution": selected_solution,
-        "decision_confidence": {"level": decision_confidence, "reason": "Open questions or expert readiness gaps lower confidence." if decision_confidence != "high" else "Spec has no open questions and no expert readiness gaps.", "confidence_reducers": expert_readiness_gaps},
+        "decision_confidence": {
+            "level": decision_confidence,
+            "reason": "Requirement understanding is not sufficient for design." if not design_allowed else "Open questions or expert readiness gaps lower confidence." if decision_confidence != "high" else "Spec has no open questions and no expert readiness gaps.",
+            "confidence_reducers": expert_readiness_gaps + understanding_blockers + ambiguities,
+        },
         "implementation_invariants": [
             {"invariant": "Preserve existing permission and validation behavior unless explicitly changed.", "evidence": "negative permission and regression tests"},
             {"invariant": "Keep edits inside delivery_plan.allowed_files unless design is revised.", "evidence": "edit permit and write guard audit"},
@@ -1064,6 +1098,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             {"item": "Selected option explains rejected alternatives.", "status": "ready"},
             {"item": "Rollback and compatibility are testable.", "status": "ready"},
             {"item": "Derived spec gaps are resolved or accepted before implementation.", "status": "review" if expert_readiness_gaps else "ready"},
+            {"item": "Requirement understanding allows design and implementation planning.", "status": "ready" if design_allowed else "blocked"},
         ],
         "design_traceability_matrix": [
             {

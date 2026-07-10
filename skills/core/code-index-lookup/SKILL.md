@@ -27,6 +27,8 @@ code-index-builder
 - If the index is missing, stale, or from another project, rebuild it instead of guessing.
 - Use lookup output to choose files for direct reading, not to replace source inspection.
 - Avoid exposing private project terms outside the private overlay or local working context.
+- Treat empty or weak matches as a warning that direct source search is still required.
+- Treat missing, unreadable, or schema-mismatched indexes as blockers for lookup-based planning.
 
 ## Command
 
@@ -40,4 +42,10 @@ python3 scripts/lookup_index.py \
 
 The output uses schema `codex-code-index-lookup-v1`.
 
-The artifact reports query text, ranked matches, match reasons, and lookup limitations.
+Decision values:
+
+- `pass`: the index exists, matches the expected project, and returns useful ranked hints.
+- `warn`: the index is valid but matches are weak or incomplete; continue with direct source inspection.
+- `block`: the index is missing, unreadable, stale, schema-mismatched, or from a different project.
+
+The artifact reports query text, ranked matches, match reasons, lookup limitations, warnings, blockers, and the final decision.

@@ -18,6 +18,7 @@ def load_module(name: str, path: Path):
 
 
 ingest_requirement = load_module("ingest_requirement", ROOT / "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py")
+spec_governor = load_module("spec_governor", ROOT / "skills/core/spec-governor/scripts/spec_governor.py")
 question_governor = load_module("question_governor", ROOT / "skills/core/requirement-question-governor/scripts/question_governor.py")
 capture_case = load_module("capture_case", ROOT / "skills/core/delivery-case-capture/scripts/capture_case.py")
 
@@ -66,7 +67,7 @@ def test_question_governor_blocks_required_open_questions() -> None:
 def test_question_governor_passes_closed_required_questions() -> None:
     data = {
         "schema": "codex-open-questions-v1",
-        "questions": [{"id": "Q-1", "required": True, "status": "closed", "answer": "id,status"}],
+        "questions": [{"id": "Q-1", "required": True, "status": "closed", "answer": "id,status", "risk_if_unanswered": "wrong export fields"}],
     }
     result = question_governor.validate_questions(data)
     assert result["decision"] == "pass"
@@ -105,6 +106,78 @@ def test_question_governor_blocks_closed_required_question_without_answer() -> N
     assert any("answer" in item["message"] for item in result["blockers"])
 
 
+def test_spec_blocks_ambiguous_requirement_without_real_goal_or_flow() -> None:
+    spec = spec_governor.normalize("REQ-AMB", "续费优化", "优化续费流程，状态更新正确，功能正常。")
+    validation = spec_governor.validate_spec(spec)
+    assert spec["decision"] == "blocked"
+    assert spec["design_allowed"] is False
+    assert spec["requirements_understanding"]["decision"] == "needs_clarification"
+    assert spec["requirements_understanding"]["level"] == "clarification_required"
+    assert spec["inferred_assumptions"]
+    assert validation["decision"] == "block"
+    sources = {item["source"] for item in validation["blockers"]}
+    assert "requirements_understanding" in sources
+    categories = {item["category"] for item in spec["ambiguities"]}
+    assert {"ambiguous_action", "state_transition", "acceptance"}.issubset(categories)
+
+
+def test_spec_requires_explicit_business_purpose_not_inferred_goal() -> None:
+    text = """
+    入口: 订单列表导出按钮。
+    流程: 运营点击订单列表导出按钮，系统调用导出接口并生成 Excel 文件。
+    Req: 运营可以导出订单列表。
+    AC: 给定运营点击导出按钮，系统生成包含订单号和状态的 Excel 文件。
+    """
+    spec = spec_governor.normalize("REQ-NO-GOAL", "订单导出", text)
+    assert spec["design_allowed"] is False
+    assert spec["requirements_understanding"]["level"] == "clarification_required"
+    categories = {item["category"] for item in spec["ambiguities"]}
+    assert "business_goal" in categories
+
+
+def test_spec_blocks_ambiguous_auto_processing_and_unclear_defect() -> None:
+    samples = [
+        ("REQ-AUTO", "自动处理", "支持自动处理订单异常。"),
+        ("REQ-BUG", "数据显示", "修复数据显示不正确。"),
+    ]
+    for doc_id, title, text in samples:
+        spec = spec_governor.normalize(doc_id, title, text)
+        assert spec["design_allowed"] is False
+        assert spec["requirements_understanding"]["decision"] == "needs_clarification"
+        assert spec["ambiguities"]
+
+
+def test_spec_allows_clear_goal_flow_entrypoint_and_acceptance() -> None:
+    text = """
+    业务目的: 减少运营手工核对续费状态的时间。
+    流程: 运营在续费列表点击重新试算按钮，系统调用续费试算接口并刷新当前设备的试算结果。
+    入口: 续费列表的重新试算按钮。
+    Req: 运营可以对单个设备重新触发续费试算。
+    Rule: 只有有续费管理权限的运营角色可以触发。
+    AC: 给定有权限运营在续费列表点击重新试算按钮，接口返回成功后页面展示新的试算金额和试算时间。
+    AC: 无权限角色看不到重新试算按钮且直接调用接口返回无权限。
+    """
+    spec = spec_governor.normalize("REQ-CLEAR", "续费重新试算", text)
+    validation = spec_governor.validate_spec(spec)
+    assert spec["design_allowed"] is True
+    assert spec["requirements_understanding"]["decision"] == "pass"
+    assert spec["requirements_understanding"]["level"] == "expert_ready"
+    assert spec["business_intent"]["confidence"] == "high"
+    assert spec["business_flow"]
+    assert spec["entrypoints"]
+    assert validation["decision"] == "pass"
+
+
+def test_question_governor_generates_categorized_clarification_for_ambiguous_spec() -> None:
+    spec = spec_governor.normalize("REQ-AMB-Q", "订单同步", "支持订单同步，数据同步成功。")
+    result = question_governor.generate(spec)
+    assert result["decision"] == "block"
+    categories = {item.get("category") for item in result["questions"]}
+    assert {"ambiguous_action", "ambiguous_flow", "acceptance"}.issubset(categories)
+    assert all(item.get("required") for item in result["questions"] if item.get("category") in {"ambiguous_action", "ambiguous_flow", "acceptance"})
+    assert all(item.get("risk_if_unanswered") for item in result["questions"] if item.get("required"))
+
+
 def test_delivery_case_capture_summarizes_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -135,6 +208,11 @@ def run_all() -> None:
     test_question_governor_passes_closed_required_questions()
     test_question_governor_generates_expert_questions_from_impacts()
     test_question_governor_blocks_closed_required_question_without_answer()
+    test_spec_blocks_ambiguous_requirement_without_real_goal_or_flow()
+    test_spec_requires_explicit_business_purpose_not_inferred_goal()
+    test_spec_blocks_ambiguous_auto_processing_and_unclear_defect()
+    test_spec_allows_clear_goal_flow_entrypoint_and_acceptance()
+    test_question_governor_generates_categorized_clarification_for_ambiguous_spec()
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
 

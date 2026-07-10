@@ -616,6 +616,53 @@ def test_sync_preserves_manual_design_preface_sections() -> None:
         assert "## 一、摘要" in design_doc
 
 
+def test_sync_design_only_does_not_rewrite_specs_machine_or_manifest() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-DESIGN-ONLY"
+        docs_governor.init(docs_root, doc_id, title="仅重跑设计", doc_language="zh")
+        spec_path = docs_root / "human/specs" / f"{doc_id}.md"
+        design_path = docs_root / "human/designs" / f"{doc_id}.md"
+        machine_path = docs_root / "machine/designs" / f"{doc_id}.design.json"
+        manifest_path = docs_root / "indexes" / f"{doc_id}.manifest.json"
+        spec_path.write_text("# 仅重跑设计 需求说明\n\n## 五、需求原文\n\n保留人工整理的需求原文。\n", encoding="utf-8")
+        design_path.write_text("# old design\n", encoding="utf-8")
+        machine_path.write_text("{\"schema\":\"keep-machine\"}\n", encoding="utf-8")
+        manifest_path.write_text("{\"schema\":\"keep-manifest\"}\n", encoding="utf-8")
+        before = {
+            "spec": spec_path.read_text(encoding="utf-8"),
+            "machine": machine_path.read_text(encoding="utf-8"),
+            "manifest": manifest_path.read_text(encoding="utf-8"),
+        }
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "仅重跑设计",
+                "requirement_summary": "只刷新设计文档。",
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "设计文档刷新", "type": "positive"}],
+            },
+        )
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id, "requirement_breakdown": [{"id": "BRK-1", "summary": "设计文档刷新"}]})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "仅重跑设计", doc_language="zh", human_section="design")
+
+        assert result["human_section"] == "design"
+        assert result["human_docs"] == [f"human/designs/{doc_id}.md"]
+        assert result["machine_artifacts"] == []
+        assert result["raw_artifacts"] == []
+        assert spec_path.read_text(encoding="utf-8") == before["spec"]
+        assert machine_path.read_text(encoding="utf-8") == before["machine"]
+        assert manifest_path.read_text(encoding="utf-8") == before["manifest"]
+        assert "仅重跑设计 技术设计" in design_path.read_text(encoding="utf-8")
+
+
 def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

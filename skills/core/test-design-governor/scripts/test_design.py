@@ -117,6 +117,30 @@ def values_for_breakdown(items: list[Any], fields: list[str], breakdown_id: str 
     return dict_values(rows, fields, limit=2)
 
 
+def requirements_understanding_gate(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
+    tech_gate = technical.get("requirements_understanding_gate") if isinstance(technical.get("requirements_understanding_gate"), dict) else {}
+    arch_gate = architecture.get("requirements_understanding_gate") if isinstance(architecture.get("requirements_understanding_gate"), dict) else {}
+    spec_understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
+    gate = arch_gate or tech_gate
+    if not gate and not spec_understanding and "design_allowed" not in spec and "implementation_allowed" not in spec:
+        return {}
+    design_allowed = bool(spec.get("design_allowed", gate.get("design_allowed", spec_understanding.get("design_allowed", True))))
+    implementation_allowed = bool(spec.get("implementation_allowed", gate.get("implementation_allowed", spec_understanding.get("implementation_allowed", design_allowed))))
+    return {
+        "decision": gate.get("decision") or spec_understanding.get("decision") or ("pass" if design_allowed else "needs_clarification"),
+        "design_allowed": design_allowed,
+        "implementation_allowed": implementation_allowed and design_allowed,
+        "understanding_confidence": spec.get("understanding_confidence") or gate.get("understanding_confidence") or spec_understanding.get("understanding_confidence") or spec_understanding.get("confidence") or ("high" if design_allowed else "low"),
+        "business_intent": spec.get("business_intent") or gate.get("business_intent") or spec_understanding.get("business_intent") or "",
+        "business_flow": spec.get("business_flow") or gate.get("business_flow") or spec_understanding.get("business_flow") or [],
+        "entrypoints": spec.get("entrypoints") or gate.get("entrypoints") or spec_understanding.get("entrypoints") or [],
+        "trigger_conditions": spec.get("trigger_conditions") or gate.get("trigger_conditions") or spec_understanding.get("trigger_conditions") or [],
+        "blockers": as_list(gate.get("blockers")) or as_list(spec_understanding.get("blockers")),
+        "ambiguities": as_list(gate.get("ambiguities")) or as_list(spec.get("ambiguities")),
+        "required_action": "resolve requirement clarification questions before test design can be executable" if not design_allowed else "none",
+    }
+
+
 class TestContext:
     def __init__(
         self,
@@ -324,6 +348,8 @@ def acceptance_case(case_id: str, ac_id: str, title: str, evidence: list[Any], c
         "id": case_id,
         "acceptance_id": ac_id,
         "type": "functional",
+        "execution_required": "must_run",
+        "execution_mode": "automated_or_manual",
         "title": functional_case_title(title),
         "preconditions": [f"测试数据 {data_ref(case_id)} 已创建"],
         "test_data_refs": [data_ref(case_id)],
@@ -345,6 +371,8 @@ def regression_case(case_id: str, ac_id: str, title: str, evidence: list[Any], c
         "id": case_id,
         "acceptance_id": ac_id,
         "type": "regression",
+        "execution_required": "must_run",
+        "execution_mode": "automated_or_manual",
         "title": regression_case_title(title),
         "preconditions": ["相邻既有行为可执行", f"测试数据 {data_ref(case_id)} 已创建"],
         "test_data_refs": [data_ref(case_id)],
@@ -368,6 +396,8 @@ def permission_case() -> dict[str, Any]:
         "id": case_id,
         "acceptance_id": "",
         "type": "permission",
+        "execution_required": "must_run",
+        "execution_mode": "automated_or_manual",
         "title": title,
         "preconditions": ["准备受限角色账号", f"测试数据 {data_ref(case_id)} 已创建"],
         "test_data_refs": [data_ref(case_id)],
@@ -390,6 +420,8 @@ def integration_case() -> dict[str, Any]:
         "id": case_id,
         "acceptance_id": "",
         "type": "integration",
+        "execution_required": "must_run",
+        "execution_mode": "automated_or_manual",
         "title": title,
         "preconditions": ["受影响组件已部署到同一验证环境", f"测试数据 {data_ref(case_id)} 已创建"],
         "test_data_refs": [data_ref(case_id)],
@@ -412,6 +444,8 @@ def frontend_case() -> dict[str, Any]:
         "id": case_id,
         "acceptance_id": "",
         "type": "frontend",
+        "execution_required": "must_run",
+        "execution_mode": "browser_acceptance",
         "title": title,
         "preconditions": ["前端应用已启动", f"测试数据 {data_ref(case_id)} 已创建"],
         "test_data_refs": [data_ref(case_id)],
@@ -431,6 +465,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[s
     acceptance = [item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
     requirements = [item for item in as_list(spec.get("requirements")) if isinstance(item, dict)]
     signals = text_of(spec, technical, architecture)
+    gate = requirements_understanding_gate(spec, technical, architecture)
     cases: list[dict[str, Any]] = []
     for idx, ac in enumerate(acceptance or [{"id": "AC-1", "criteria": spec.get("requirement_summary", "")}]):
         ac_id = str(ac.get("id") or f"AC-{idx + 1}")
@@ -451,6 +486,8 @@ def render(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[s
         "schema": SCHEMA,
         "doc_id": spec.get("doc_id") or technical.get("doc_id") or architecture.get("doc_id"),
         "title": spec.get("title") or technical.get("title") or architecture.get("title"),
+        "decision": "block" if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False else "pass",
+        "requirements_understanding_gate": gate,
         "requirement_count": len(requirements),
         "acceptance_count": len(acceptance),
         "test_cases": cases,
@@ -461,7 +498,9 @@ def render(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[s
         "evidence_required": sorted({e for case in cases for e in as_list(case.get("evidence_required"))}),
         "test_data_required": any(as_list(case.get("test_data_refs")) for case in cases),
         "test_data_plan_ref": "test_data_plan.json",
-        "open_risks": [],
+        "open_risks": [
+            {"source": "requirements_understanding_gate", "message": "requirement understanding is not sufficient for executable test design", "gate": gate}
+        ] if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False else [],
     }
 
 
@@ -470,6 +509,11 @@ def validate_design(data: dict[str, Any]) -> dict[str, Any]:
     warnings: list[dict[str, Any]] = []
     if data.get("schema") != SCHEMA:
         blockers.append({"source": "schema", "message": f"schema must be {SCHEMA}"})
+    gate = data.get("requirements_understanding_gate") if isinstance(data.get("requirements_understanding_gate"), dict) else {}
+    if gate.get("design_allowed") is False:
+        blockers.append({"source": "requirements_understanding_gate", "message": "requirement understanding blocks executable test design", "gate": gate})
+    if gate.get("implementation_allowed") is False:
+        blockers.append({"source": "requirements_understanding_gate", "message": "requirement understanding blocks test execution planning", "gate": gate})
     cases = [item for item in as_list(data.get("test_cases")) if isinstance(item, dict)]
     if not cases:
         blockers.append({"source": "test_cases", "message": "at least one test case is required"})
@@ -481,6 +525,10 @@ def validate_design(data: dict[str, Any]) -> dict[str, Any]:
         for key in ["id", "type", "title", "steps", "expected_result", "evidence_required"]:
             if not case.get(key):
                 blockers.append({"source": f"test_cases[{idx}].{key}", "message": f"{key} is required"})
+        if case.get("execution_required") not in {"must_run", "optional", "manual", "blocked"}:
+            blockers.append({"source": f"test_cases[{idx}].execution_required", "message": "execution_required must be must_run/optional/manual/blocked"})
+        if case.get("acceptance_id") and case.get("execution_required") != "must_run":
+            blockers.append({"source": f"test_cases[{idx}].execution_required", "message": "acceptance-mapped cases must be marked must_run"})
         if case.get("acceptance_id") and is_weak_acceptance_title(str(case.get("title") or case.get("expected_result") or "")):
             blockers.append({"source": f"test_cases[{idx}].acceptance", "message": "weak acceptance criteria such as '标准' are not executable"})
         if case.get("data_requirements") and not case.get("test_data_refs"):

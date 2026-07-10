@@ -31,12 +31,16 @@ python3 scripts/test_design.py \
 ## Rules
 
 - Every acceptance criterion needs at least one test case.
+- Carry `requirements_understanding_gate` from spec/technical/architecture design. If `design_allowed=false` or `implementation_allowed=false`, the test design artifact may be generated only as a blocked clarification draft and validation must return `decision=block`.
 - Permission-sensitive requirements need negative permission cases.
 - Cross-repo changes need integration tests.
 - UI changes need frontend/browser acceptance evidence.
 - Performance/security/config signals must be reflected in test scope.
 - Cases that need fixtures, accounts, roles, tenants, or records must declare `test_data_refs`, setup preconditions, and cleanup expectations.
+- Acceptance-mapped cases must declare `execution_required: "must_run"`; they are not advisory checklist items.
+- Cases must declare `execution_mode` so later evidence can distinguish automated, manual, browser, API, integration, or blocked execution paths.
 - Generate `test_data_plan.json` with `test-data-governor` before real execution when test data refs exist.
+- Do not treat generated test cases as executable while requirement understanding is blocked; clarify business purpose, flow, entrypoints/triggers, and acceptance criteria first.
 
 ## Output
 
@@ -47,4 +51,6 @@ Key fields:
 - `test_cases[].test_data_refs`
 - `test_cases[].data_requirements`
 - `test_cases[].cleanup_expectations`
+- `test_cases[].execution_required`
+- `test_cases[].execution_mode`
 - `test_data_plan_ref`

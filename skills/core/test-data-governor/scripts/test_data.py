@@ -66,10 +66,13 @@ def dataset_for_case(case: dict[str, Any]) -> dict[str, Any]:
 def render(test_design: dict[str, Any]) -> dict[str, Any]:
     cases = [item for item in as_list(test_design.get("test_cases")) if isinstance(item, dict)]
     datasets = [dataset_for_case(case) for case in cases]
+    gate = test_design.get("requirements_understanding_gate") if isinstance(test_design.get("requirements_understanding_gate"), dict) else {}
     result = {
         "schema": SCHEMA,
         "doc_id": test_design.get("doc_id"),
         "title": test_design.get("title"),
+        "source_test_design_decision": test_design.get("decision", ""),
+        "requirements_understanding_gate": gate,
         "test_case_count": len(cases),
         "datasets": datasets,
         "case_data_matrix": [{"case_id": case.get("id"), "dataset_ids": [dataset.get("id")]} for case, dataset in zip(cases, datasets)],
@@ -105,6 +108,11 @@ def validate_plan(data: dict[str, Any]) -> dict[str, Any]:
     warnings: list[dict[str, Any]] = []
     if data.get("schema") != SCHEMA:
         blockers.append({"source": "schema", "message": f"schema must be {SCHEMA}"})
+    if data.get("source_test_design_decision") == "block":
+        blockers.append({"source": "test_design", "message": "test data plan cannot pass while source test design is blocked"})
+    gate = data.get("requirements_understanding_gate") if isinstance(data.get("requirements_understanding_gate"), dict) else {}
+    if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False:
+        blockers.append({"source": "requirements_understanding_gate", "message": "requirement understanding blocks executable test data planning", "gate": gate})
     datasets = [item for item in as_list(data.get("datasets")) if isinstance(item, dict)]
     if not datasets:
         blockers.append({"source": "datasets", "message": "at least one dataset is required"})

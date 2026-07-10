@@ -102,6 +102,63 @@ def test_gate_passes_with_test_data_plan_and_dataset_linkage() -> None:
         assert result["evidence_summary"]["required_test_data_ref_count"] == 1
 
 
+def test_gate_blocks_missing_must_run_case_execution() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_data_linked_artifacts(root)
+        design = json.loads((root / "test_design.json").read_text(encoding="utf-8"))
+        design["test_cases"].append(
+            {
+                "id": "TC-2",
+                "title": "refund rejects invalid amount",
+                "type": "functional",
+                "execution_required": "must_run",
+                "steps": ["call refund API"],
+                "expected_result": "rejected",
+                "evidence_required": ["api test"],
+            }
+        )
+        write_json(root / "test_design.json", design)
+        result = test_evidence_gate.evaluate(root)
+        assert result["decision"] == "block"
+        assert any(item["message"] == "must-run test cases were not executed" and item["missing_case_ids"] == ["TC-2"] for item in result["blockers"])
+        assert result["evidence_summary"]["must_run_case_count"] == 1
+
+
+def test_gate_blocks_blocked_test_design_even_with_execution_evidence() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_artifacts(root)
+        gate = {"decision": "needs_clarification", "design_allowed": False, "implementation_allowed": False}
+        write_json(
+            root / "test_design.json",
+            {
+                "schema": "codex-test-design-v1",
+                "decision": "block",
+                "requirements_understanding_gate": gate,
+                "test_cases": [{"id": "TC-1", "title": "blocked design", "execution_required": "must_run"}],
+            },
+        )
+        write_json(
+            root / "test_execution_evidence.json",
+            {"executed_cases": [{"id": "TC-1", "name": "blocked design", "status": "passed"}], "failed_cases": [], "untested_blockers": []},
+        )
+        result = test_evidence_gate.evaluate(root)
+        assert result["decision"] == "block"
+        sources = {item["source"] for item in result["blockers"]}
+        assert {"test_design", "requirements_understanding_gate"}.issubset(sources)
+
+
+def test_gate_blocks_blocked_test_data_plan_without_required_refs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_artifacts(root)
+        write_json(root / "test_data_plan.json", {"schema": "codex-test-data-plan-v1", "decision": "block", "blockers": [{"message": "blocked"}]})
+        result = test_evidence_gate.evaluate(root)
+        assert result["decision"] == "block"
+        assert any(item["source"] == "test_data_plan" and "decision is block" in item["message"] for item in result["blockers"])
+
+
 def test_gate_blocks_test_data_refs_without_plan() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -210,6 +267,8 @@ def test_gate_passes_required_frontend_with_clean_evidence() -> None:
 def run_all() -> None:
     test_gate_passes_with_real_tests_and_clean_ci()
     test_gate_passes_with_test_data_plan_and_dataset_linkage()
+    test_gate_blocks_blocked_test_design_even_with_execution_evidence()
+    test_gate_blocks_blocked_test_data_plan_without_required_refs()
     test_gate_blocks_test_data_refs_without_plan()
     test_gate_blocks_missing_dataset_linkage_in_execution()
     test_gate_blocks_plan_missing_required_dataset_ref()

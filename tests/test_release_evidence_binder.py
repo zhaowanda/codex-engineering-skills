@@ -112,6 +112,84 @@ def test_bind_conditional_go_with_warnings() -> None:
         assert result["warnings"]
 
 
+def test_bind_no_go_when_implementation_followups_have_no_gap_summary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "blockers": [],
+            "evidence_followups": [
+                {"surface": "transaction_idempotency", "required_by": "test-evidence-gate", "evidence": ["rollback evidence"]}
+            ],
+        })
+        result = bind_release.bind(root)
+        assert result["decision"] == "no_go"
+        assert "evidence_gap_summary" in result["missing_evidence"]
+
+
+def test_bind_no_go_when_frontend_followup_lacks_frontend_acceptance() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "blockers": [],
+            "evidence_followups": [
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner", "evidence": ["browser evidence"]}
+            ],
+        })
+        write_json(root / "evidence_gap_summary.json", {"decision": "pass", "missing_evidence": [], "blockers": []})
+        result = bind_release.bind(root)
+        assert result["decision"] == "no_go"
+        assert "frontend_acceptance" in result["missing_evidence"]
+
+
+def test_bind_go_when_implementation_followups_are_closed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "blockers": [],
+            "evidence_followups": [
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner", "evidence": ["browser evidence"]},
+                {"surface": "transaction_idempotency", "required_by": "test-evidence-gate", "evidence": ["rollback evidence"]},
+            ],
+        })
+        write_json(root / "evidence_gap_summary.json", {
+            "decision": "pass",
+            "missing_evidence": [],
+            "blockers": [],
+            "implementation_followup_requirements": [
+                {"surface": "frontend_acceptance", "evidence": "frontend_acceptance"},
+                {"surface": "transaction_idempotency", "evidence": "transaction_idempotency_evidence"},
+            ],
+        })
+        write_json(root / "frontend_acceptance.json", {"decision": "pass", "pass": True, "blockers": []})
+        result = bind_release.bind(root)
+        assert result["decision"] == "go"
+        assert len(result["implementation_evidence_followups"]) == 2
+
+
+def test_bind_no_go_when_gap_summary_does_not_cover_followup_surfaces() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "implementation_completion_gate.json", {
+            "decision": "pass",
+            "blockers": [],
+            "evidence_followups": [
+                {"surface": "frontend_acceptance", "required_by": "frontend-acceptance-runner", "evidence": ["browser evidence"]}
+            ],
+        })
+        write_json(root / "evidence_gap_summary.json", {"decision": "pass", "missing_evidence": [], "blockers": []})
+        write_json(root / "frontend_acceptance.json", {"decision": "pass", "pass": True, "blockers": []})
+        result = bind_release.bind(root)
+        assert result["decision"] == "no_go"
+        assert any(item["source"] == "evidence_gap_summary" and "missing_surfaces" in item for item in result["blockers"])
+
+
 def test_bind_no_go_without_rollback_or_post_release_checks() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -216,6 +294,10 @@ def run_all() -> None:
     test_bind_no_go_without_post_change_report()
     test_bind_no_go_when_review_gate_blocks()
     test_bind_conditional_go_with_warnings()
+    test_bind_no_go_when_implementation_followups_have_no_gap_summary()
+    test_bind_no_go_when_frontend_followup_lacks_frontend_acceptance()
+    test_bind_go_when_implementation_followups_are_closed()
+    test_bind_no_go_when_gap_summary_does_not_cover_followup_surfaces()
     test_bind_no_go_without_rollback_or_post_release_checks()
     test_bind_no_go_when_release_policy_is_template_only()
     test_bind_applies_optional_release_policy_overlay()

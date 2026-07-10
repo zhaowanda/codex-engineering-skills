@@ -55,7 +55,7 @@ python3 scripts/frontend_acceptance.py \
   --file artifacts/review/frontend_acceptance.json
 ```
 
-## Evidence Rules
+## Rules
 
 - `pass=true` requires page load evidence and at least one DOM, screenshot, or interaction proof.
 - Console errors block pass.
@@ -73,3 +73,5 @@ Decision values:
 
 - `pass`
 - `block`
+
+The artifact reports target URL, page type, browser evidence, interaction evidence, screenshots, console/network status, warnings, blockers, and final decision.

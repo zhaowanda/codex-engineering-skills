@@ -23,6 +23,7 @@ delivery-plan-templates
 ## Rules
 
 - Block implementation if `open_gates` is not empty.
+- Block implementation if `source_design_gate.design_allowed=false` or `source_design_gate.implementation_allowed=false`; requirement clarification must be resolved and design review rerun before executable tasks are accepted.
 - Every `modify` repo must have concrete tasks, narrow `allowed_files`, `read_first`, `test_commands`, acceptance evidence, rollback steps, and risk controls.
 - Tasks should include executable phases such as read, confirm, edit, test, evidence, and rollback verification.
 - Each task must include concrete files, implementation notes, evidence, rollback check, dependencies, blockers, and exit criteria; summary-only tasks are not executable.

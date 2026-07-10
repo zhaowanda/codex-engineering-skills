@@ -32,6 +32,8 @@ spec
 - Keep detailed test cases in `test_design.json` and human test-design docs, not in technical design.
 - Include current-state analysis, code entrypoints, interface examples, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
 - Run `design-architecture-reviewer` after filling the templates.
+- Treat generated empty templates as `needs_revision` until concrete project facts replace placeholders.
+- Block implementation when options, current state, API/data/interaction details, rollback, failure paths, or acceptance proof are missing.
 
 ## Commands
 
@@ -83,3 +85,11 @@ The renderer writes:
 - `design_template_manifest.json`
 
 Empty templates are intentionally not implementation-ready. They are a structured workbench. The synthetic example should pass the design reviewer and is used as regression evidence.
+
+Decision values are produced by the downstream `design-architecture-reviewer`:
+
+- `pass`: technical and architecture designs are concrete, reviewed, and implementation-ready.
+- `needs_revision`: design sections exist but require more project facts, option depth, sequence details, or evidence.
+- `block`: required design artifacts are missing, contain placeholders, or cannot support implementation planning.
+
+Warnings and blockers from the review artifact must be resolved before delivery planning.

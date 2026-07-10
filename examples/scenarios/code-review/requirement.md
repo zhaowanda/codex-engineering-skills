@@ -1,6 +1,12 @@
 # Code Review Scenario
 
-Review an existing diff that changes API behavior, permission checks, and frontend export UI.
+Business purpose: Prevent unsafe merge of a change that affects API behavior, authorization, and user-visible export UI.
+
+Scenario: Reviewer opens the submitted diff, inspects API, permission, and frontend changes, and records blocking findings before approval.
+
+Entry: Code review gate executed on the submitted diff.
+
+Req: Review an existing diff that changes API behavior, permission checks, and frontend export UI.
 
 Acceptance criteria:
 

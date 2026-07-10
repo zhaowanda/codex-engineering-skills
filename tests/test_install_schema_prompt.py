@@ -54,9 +54,10 @@ def test_install_skills_copies_to_empty_target() -> None:
 def test_artifact_schema_inventory_has_many_schemas() -> None:
     result = artifact_schema.inventory(ROOT)
     assert result["schema"] == "codex-artifact-schema-inventory-v1"
-    assert result["decision"] in {"pass", "warn"}
+    assert result["decision"] == "pass"
     assert result["script_count"] >= 40
     assert result["schema_count"] >= 20
+    assert not result["warnings"]
 
 
 def test_prompt_pack_validates_standard_prompts() -> None:
