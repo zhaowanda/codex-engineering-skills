@@ -36,6 +36,8 @@ python3 scripts/question_governor.py \
 - Every required question must include `risk_if_unanswered` so reviewers understand why design must stop.
 - Generate categorized clarification questions for unclear business goal, business flow, actor/entrypoint, scope boundary, data rule, state transition, trigger timing, exception handling, compatibility, and acceptance evidence.
 - Convert `spec.ambiguities` and `requirements_understanding.blockers` into required clarification questions.
+- Convert weak `requirements_understanding.scorecard` dimensions into targeted clarification questions.
+- Ask for current-state implementation evidence when existing UI/API/task/MQ/manual entrypoints, data ownership, or downstream dependencies are missing.
 - Generate expert clarification questions from impact surface and implicit constraints, including permission, data/export, API, performance, security, and configuration questions.
 - Treat required questions as closed only when they include an answer.
 

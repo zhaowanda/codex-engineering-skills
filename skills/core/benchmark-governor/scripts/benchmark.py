@@ -43,6 +43,8 @@ def requirement_understanding_strict(root: Path) -> bool:
             "\n".join(
                 [
                     "业务目的: 减少运营手工核对续费状态的时间。",
+                    "成功指标: 续费状态人工核对量下降 50%。",
+                    "现状: 当前已有续费列表页面、续费试算接口和续费状态刷新逻辑。",
                     "流程: 运营在续费列表点击重新试算按钮，系统调用续费试算接口并刷新当前设备的试算结果。",
                     "入口: 续费列表的重新试算按钮。",
                     "Req: 运营可以对单个设备重新触发续费试算。",
@@ -64,13 +66,37 @@ def requirement_understanding_strict(root: Path) -> bool:
                 ]
             ),
         )
+        multi_entry = spec_governor.normalize(
+            "REQ-BENCH-MULTI-ENTRY",
+            "续费状态修复",
+            "\n".join(
+                [
+                    "业务目的: 减少运营和系统补偿续费状态不一致导致的人工排查。",
+                    "成功指标: 续费状态异常人工处理量下降 50%。",
+                    "现状: 当前已有续费列表重新试算按钮、renewal/recalculate 后端接口、renewal-status topic 消费者和夜间补偿 Task。",
+                    "流程: 运营在续费列表点击重新试算按钮，前端调用续费试算接口；后端复用试算服务并发送 renewal-status MQ；消费者刷新续费状态，夜间补偿 Task 处理超时未回调记录；无权限用户不可触发。",
+                    "入口: 续费列表重新试算按钮。",
+                    "入口: renewal-status MQ Consumer 消费续费状态消息。",
+                    "入口: 夜间续费状态补偿 Task。",
+                    "Req: 运营可以对单个设备重新触发续费试算并修复状态不一致。",
+                    "Rule: 只有续费管理权限角色可以触发前端重新试算。",
+                    "AC: 有权限运营点击重新试算按钮后，接口返回成功且页面展示新的试算金额和试算时间。",
+                    "AC: renewal-status MQ 消费失败时可以重试且不会重复更新同一条状态。",
+                    "AC: 夜间补偿 Task 只处理超时未回调记录。",
+                    "AC: 无权限角色看不到重新试算按钮且直接调用接口返回无权限。",
+                ]
+            ),
+        )
         return (
             ambiguous.get("design_allowed") is False
             and ambiguous.get("requirements_understanding", {}).get("decision") == "needs_clarification"
             and clear.get("design_allowed") is True
             and clear.get("requirements_understanding", {}).get("level") == "expert_ready"
+            and clear.get("requirements_understanding", {}).get("scorecard", {}).get("overall_score", 0) >= 80
             and no_goal.get("design_allowed") is False
             and no_goal.get("requirements_understanding", {}).get("level") == "clarification_required"
+            and multi_entry.get("business_flow_model", {}).get("supports_multiple_entrypoints") is True
+            and multi_entry.get("requirements_understanding", {}).get("level") == "expert_ready"
             and spec_governor.validate_spec(clear).get("decision") == "pass"
         )
     except Exception:

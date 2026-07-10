@@ -44,6 +44,9 @@ python3 scripts/spec_governor.py \
 - For long PRDs, preserve business rules and source evidence references.
 - Extract business objects, operations, data fields, state transitions, impact surface, implicit constraints, and negative acceptance needs.
 - Extract business intent, current business problem, expected business outcome, business flow, entrypoints, trigger conditions, preconditions, postconditions, and ambiguity records.
+- Model business flow as structured steps with actor, entrypoint, trigger, system actions, downstream effects, result, and branch signals.
+- Capture current business state evidence when available: existing UI/API/task/MQ/manual entrypoints, existing data ownership, downstream dependencies, and whether the change reuses, modifies, or adds capability.
+- Score requirement understanding across intent, flow, entrypoint, acceptance, and evidence dimensions; `expert_ready` requires all core dimensions to meet the expert threshold.
 - Convert high-risk implicit constraints into derived clarification questions and expert readiness gaps.
 - Treat fully inferred acceptance criteria as usable but not expert-ready until confirmed.
 - Do not accept weak acceptance criteria such as "功能正常", "页面展示正确", "数据同步成功", "状态更新正确", or "满足业务需求" without executable evidence rules.
@@ -58,11 +61,15 @@ Key fields:
 - `business_problem`
 - `expected_business_outcome`
 - `business_flow`
+- `business_flow_model`
 - `entrypoints`
+- `current_business_state`
 - `trigger_conditions`
 - `ambiguities`
 - `requirements_understanding`
+- `requirements_understanding.scorecard`
 - `requirements_understanding_evidence`
+- `success_metrics`
 - `confirmed_facts`
 - `inferred_assumptions`
 - `unresolved_points`

@@ -464,6 +464,11 @@ def extract_business_objectives(lines: list[str]) -> list[dict[str, str]]:
     return []
 
 
+def extract_success_metrics(lines: list[str]) -> list[dict[str, str]]:
+    metrics = extract_prefixed(lines, ("metric", "metrics", "success metric", "success criteria", "成功指标", "目标指标", "成功标准", "衡量指标"))
+    return [{"id": f"METRIC-{idx + 1}", "metric": item, "source_evidence": "input"} for idx, item in enumerate(metrics)]
+
+
 def explicit_business_intent(lines: list[str]) -> list[dict[str, str]]:
     intents = extract_prefixed(lines, ("business intent", "business purpose", "purpose", "why", "业务目的", "真实目的", "业务问题", "解决"))
     return [{"id": f"BI-{idx + 1}", "intent": item, "source_evidence": "input"} for idx, item in enumerate(intents)]
@@ -544,6 +549,43 @@ def flow_quality_issues(business_flow: list[dict[str, Any]]) -> list[dict[str, s
     return issues
 
 
+def detect_flow_branches(text: str) -> list[dict[str, str]]:
+    lower = text.lower()
+    branches: list[dict[str, str]] = []
+    branch_terms = {
+        "success": ("成功", "正常", "success", "succeed"),
+        "failure": ("失败", "异常", "报错", "failure", "failed", "error"),
+        "permission_denied": ("无权限", "未授权", "unauthorized", "permission denied"),
+        "retry": ("重试", "retry"),
+        "timeout": ("超时", "timeout"),
+        "idempotency": ("幂等", "重复请求", "duplicate", "idempotent"),
+        "compensation": ("补偿", "回滚", "rollback", "compensat"),
+    }
+    for name, terms in branch_terms.items():
+        hits = sorted({term for term in terms if term in lower or term in text})
+        if hits:
+            branches.append({"type": name, "signals": ", ".join(hits), "source_evidence": "input"})
+    return branches
+
+
+def structured_flow_step(flow_text: str, actor: str, entrypoint: str, step: int) -> dict[str, Any]:
+    fragments = [part.strip(" ，,；;。.") for part in re.split(r"[，,；;。]", flow_text) if part.strip(" ，,；;。.")]
+    action_terms = ("点击", "调用", "触发", "进入", "提交", "消费", "接收", "执行", "定时", "回调", "刷新", "返回", "生成", "导出", "发送", "写入", "读取", "click", "call", "trigger", "submit", "consume", "execute", "refresh", "return", "export", "send", "write", "read")
+    downstream_terms = ("调用", "发送", "消费", "订阅", "mq", "topic", "queue", "接口", "api", "服务", "service", "consumer")
+    system_actions = [part for part in fragments if any(term in part.lower() or term in part for term in action_terms)]
+    downstream_effects = [part for part in fragments if any(term in part.lower() or term in part for term in downstream_terms)]
+    return {
+        "step": step,
+        "actor": actor,
+        "entrypoint": entrypoint,
+        "trigger": fragments[0] if fragments else flow_text,
+        "preconditions": [],
+        "system_actions": system_actions or ([flow_text] if flow_text else []),
+        "downstream_effects": downstream_effects,
+        "result": fragments[-1] if fragments else flow_text,
+    }
+
+
 def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[str, Any]]) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     lower = text.lower()
@@ -579,29 +621,63 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
 def extract_business_flow(lines: list[str], actors: list[str], entrypoints: list[dict[str, str]], acceptance: list[dict[str, Any]], summary: str) -> list[dict[str, Any]]:
     flow_items = extract_prefixed(lines, ("business flow", "flow", "流程", "业务流程", "scenario", "场景"))
     if flow_items:
-        return [
-            {
+        result = []
+        for idx, item in enumerate(flow_items):
+            actor = actors[0] if actors else "actor to confirm"
+            entrypoint = entrypoints[0].get("trigger", item) if entrypoints else item
+            result.append({
                 "step": idx + 1,
-                "actor": actors[0] if actors else "actor to confirm",
+                "actor": actor,
                 "trigger": item,
                 "system_behavior": item,
                 "expected_outcome": item,
+                "structured_step": structured_flow_step(item, actor, entrypoint, idx + 1),
+                "branches": detect_flow_branches(item),
                 "source_evidence": "input",
                 "confidence": "high",
-            }
-            for idx, item in enumerate(flow_items)
-        ]
+            })
+        return result
     if entrypoints and acceptance:
+        actor = actors[0] if actors else "actor to confirm"
+        trigger = entrypoints[0].get("trigger", "actor performs requested operation")
         return [{
             "step": 1,
-            "actor": actors[0] if actors else "actor to confirm",
-            "trigger": entrypoints[0].get("trigger", "actor performs requested operation"),
+            "actor": actor,
+            "trigger": trigger,
             "system_behavior": summary,
             "expected_outcome": str(acceptance[0].get("criteria") or summary),
+            "structured_step": structured_flow_step(f"{trigger} {summary} {acceptance[0].get('criteria') or summary}", actor, trigger, 1),
+            "branches": detect_flow_branches(str(acceptance[0].get("criteria") or "")),
             "source_evidence": "inferred from entrypoint and acceptance",
             "confidence": "medium",
         }]
     return []
+
+
+def extract_current_business_state(text: str, lines: list[str], entrypoints: list[dict[str, str]], impact_surface: list[dict[str, Any]]) -> dict[str, Any]:
+    current_items = extract_prefixed(lines, ("current", "current state", "as is", "现状", "当前", "已有能力", "已有入口", "已有接口", "已有任务", "已有consumer", "已有消费者"))
+    lower = text.lower()
+    change_type = "unknown"
+    if any(term in lower or term in text for term in ["复用", "reuse", "existing"]):
+        change_type = "reuse_existing"
+    if any(term in lower or term in text for term in ["改造", "调整", "优化", "modify", "change", "enhance"]):
+        change_type = "modify_existing"
+    if any(term in lower or term in text for term in ["新增", "新建", "add", "create", "new "]):
+        change_type = "new_capability"
+    evidence_gaps: list[dict[str, str]] = []
+    if not current_items and impact_surface:
+        evidence_gaps.append({
+            "source": "current_business_state",
+            "message": "Current entrypoints, APIs, jobs, consumers, data ownership, or downstream dependencies were not explicitly described.",
+            "severity": "medium",
+        })
+    return {
+        "summary": current_items[0] if current_items else "",
+        "known_current_facts": [{"id": f"CUR-{idx + 1}", "fact": item, "source_evidence": "input"} for idx, item in enumerate(current_items)],
+        "existing_entrypoints": [item for item in entrypoints if isinstance(item, dict) and item.get("confidence") == "high"],
+        "change_type": change_type,
+        "evidence_gaps": evidence_gaps,
+    }
 
 
 def weak_acceptance_reason(criteria: str) -> str:
@@ -613,6 +689,33 @@ def weak_acceptance_reason(criteria: str) -> str:
     if len(criteria.strip()) <= 4:
         return "acceptance is too short to execute"
     return ""
+
+
+def ambiguous_term_context_resolved(
+    term: str,
+    category: str,
+    acceptance: list[dict[str, Any]],
+    intent: dict[str, Any],
+    business_flow: list[dict[str, Any]],
+    entrypoints: list[dict[str, str]],
+) -> bool:
+    if category in {"ambiguous_scope", "ambiguous_rule"}:
+        return False
+    has_intent = intent.get("confidence") == "high"
+    has_entrypoint = any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict))
+    has_flow = bool(business_flow) and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict))
+    executable_acceptance = any(
+        isinstance(item, dict) and not weak_acceptance_reason(str(item.get("criteria") or ""))
+        for item in acceptance
+    )
+    branch_context = any(
+        item.get("branches")
+        for item in business_flow
+        if isinstance(item, dict)
+    )
+    if category in {"ambiguous_action", "ambiguous_defect", "ambiguous_exception", "ambiguous_flow", "ambiguous_state"}:
+        return bool(has_intent and has_entrypoint and has_flow and executable_acceptance and (branch_context or category != "ambiguous_exception"))
+    return False
 
 
 def detect_ambiguities(
@@ -637,7 +740,8 @@ def detect_ambiguities(
 
     for term, category in AMBIGUOUS_TERMS.items():
         if term.lower() in lower or term in text:
-            add("ambiguous_term", category, f"Requirement uses ambiguous term '{term}' and needs concrete business meaning.")
+            required = not ambiguous_term_context_resolved(term, category, acceptance, intent, business_flow, entrypoints)
+            add("ambiguous_term", category, f"Requirement uses ambiguous term '{term}' and needs concrete business meaning.", required)
     if not str(intent.get("intent") or "").strip():
         add("business_intent", "business_goal", "Business intent is missing; cannot tell what outcome the requirement optimizes.")
     elif intent.get("confidence") != "high":
@@ -662,22 +766,95 @@ def detect_ambiguities(
     return ambiguities
 
 
-def understanding_decision(ambiguities: list[dict[str, str]], acceptance: list[dict[str, Any]], intent: dict[str, Any], business_flow: list[dict[str, Any]], entrypoints: list[dict[str, str]]) -> dict[str, Any]:
+def requirement_understanding_scorecard(
+    ambiguities: list[dict[str, str]],
+    acceptance: list[dict[str, Any]],
+    intent: dict[str, Any],
+    business_flow: list[dict[str, Any]],
+    entrypoints: list[dict[str, str]],
+    current_state: dict[str, Any],
+    success_metrics: list[dict[str, str]],
+) -> dict[str, Any]:
+    required_ambiguities = [item for item in ambiguities if item.get("required") is True]
+    high_confidence_flow = bool(business_flow) and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict))
+    structured_steps = [
+        item.get("structured_step")
+        for item in business_flow
+        if isinstance(item, dict) and isinstance(item.get("structured_step"), dict)
+    ]
+    high_confidence_entrypoint = any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict))
+    inferred_acceptance = bool(acceptance) and all(not str(item.get("source_evidence")).startswith("input") for item in acceptance)
+    executable_acceptance = [
+        item for item in acceptance
+        if isinstance(item, dict) and not weak_acceptance_reason(str(item.get("criteria") or ""))
+    ]
+    current_gaps = as_list(current_state.get("evidence_gaps") if isinstance(current_state, dict) else [])
+
+    intent_score = 90 if intent.get("confidence") == "high" else 55 if intent.get("intent") else 20
+    if required_ambiguities:
+        intent_score = min(intent_score, 60)
+    if success_metrics:
+        intent_score = min(100, intent_score + 5)
+
+    flow_score = 85 if high_confidence_flow else 45 if business_flow else 15
+    if structured_steps and all(item.get("system_actions") for item in structured_steps if isinstance(item, dict)):
+        flow_score = min(100, flow_score + 5)
+    if any(item.get("branches") for item in business_flow if isinstance(item, dict)):
+        flow_score = min(100, flow_score + 5)
+
+    entrypoint_score = 90 if high_confidence_entrypoint else 45 if entrypoints else 10
+    acceptance_score = 85 if executable_acceptance and not inferred_acceptance else 50 if acceptance else 10
+    if any(item.get("type") == "negative" for item in acceptance if isinstance(item, dict)):
+        acceptance_score = min(100, acceptance_score + 5)
+
+    evidence_score = 90 if not current_gaps else 80
+    if current_state.get("known_current_facts") if isinstance(current_state, dict) else False:
+        evidence_score = min(100, evidence_score + 10)
+    if required_ambiguities:
+        evidence_score = min(evidence_score, 60)
+
+    dimensions = {
+        "intent_score": intent_score,
+        "flow_score": flow_score,
+        "entrypoint_score": entrypoint_score,
+        "acceptance_score": acceptance_score,
+        "evidence_score": evidence_score,
+    }
+    overall = round(sum(dimensions.values()) / len(dimensions))
+    weak_dimensions = [name for name, score in dimensions.items() if score < 80]
+    return {
+        "overall_score": overall,
+        "dimensions": dimensions,
+        "weak_dimensions": weak_dimensions,
+        "expert_threshold": 80,
+    }
+
+
+def understanding_decision(
+    ambiguities: list[dict[str, str]],
+    acceptance: list[dict[str, Any]],
+    intent: dict[str, Any],
+    business_flow: list[dict[str, Any]],
+    entrypoints: list[dict[str, str]],
+    current_state: dict[str, Any],
+    success_metrics: list[dict[str, str]],
+) -> dict[str, Any]:
     required_ambiguities = [item for item in ambiguities if item.get("required") is True]
     inferred_acceptance = bool(acceptance) and all(not str(item.get("source_evidence")).startswith("input") for item in acceptance)
     high_confidence_flow = bool(business_flow) and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict))
     high_confidence_entrypoint = any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict))
+    scorecard = requirement_understanding_scorecard(ambiguities, acceptance, intent, business_flow, entrypoints, current_state, success_metrics)
     confidence = "high"
     if required_ambiguities:
         confidence = "low"
-    elif inferred_acceptance or str(intent.get("confidence")) != "high" or not high_confidence_flow or not high_confidence_entrypoint:
+    elif inferred_acceptance or str(intent.get("confidence")) != "high" or not high_confidence_flow or not high_confidence_entrypoint or scorecard["weak_dimensions"]:
         confidence = "medium"
     design_allowed = not required_ambiguities
     if not str(intent.get("intent") or "").strip():
         level = "insufficient_context"
     elif not design_allowed:
         level = "clarification_required"
-    elif confidence == "high":
+    elif confidence == "high" and not scorecard["weak_dimensions"]:
         level = "expert_ready"
     else:
         level = "clarification_required"
@@ -687,6 +864,9 @@ def understanding_decision(ambiguities: list[dict[str, str]], acceptance: list[d
         "design_allowed": design_allowed,
         "implementation_allowed": False if required_ambiguities or inferred_acceptance else True,
         "understanding_confidence": confidence,
+        "scorecard": scorecard,
+        "overall_score": scorecard["overall_score"],
+        "weak_dimensions": scorecard["weak_dimensions"],
         "blockers": required_ambiguities,
         "warnings": [{"source": "acceptance_criteria", "message": "Acceptance is inferred and must be confirmed before implementation."}] if inferred_acceptance else [],
     }
@@ -738,12 +918,14 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
     state_transitions = extract_state_transitions(lines)
     personas = extract_personas(sorted(set(actors)))
     objectives = extract_business_objectives(lines)
+    success_metrics = extract_success_metrics(lines)
     intent = infer_business_intent(summary, objectives, requirements, operations, business_objects)
     explicit_intents = explicit_business_intent(lines)
     if explicit_intents:
         intent = {"intent": explicit_intents[0]["intent"], "source_evidence": "input", "confidence": "high", "inference": "explicit_business_intent"}
     entrypoints = extract_entrypoints(text, lines, impact_surface)
     business_flow = extract_business_flow(lines, sorted(set(actors)), entrypoints, acceptance, summary)
+    current_business_state = extract_current_business_state(text, lines, entrypoints, impact_surface)
     scenarios = extract_user_scenarios(lines, sorted(set(actors)))
     negative_acceptance = [item for item in acceptance if item.get("type") == "negative"]
     rule_conflicts = detect_rule_conflicts(rules)
@@ -752,7 +934,7 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
     derived_constraint_questions = constraint_questions(implicit_constraints, questions)
     readiness_gaps = expert_readiness_gaps(impact_surface, acceptance, objectives, scenarios, risks, compatibility_constraints)
     ambiguities = detect_ambiguities(text, acceptance, intent, business_flow, entrypoints, state_transitions)
-    requirements_understanding = understanding_decision(ambiguities, acceptance, intent, business_flow, entrypoints)
+    requirements_understanding = understanding_decision(ambiguities, acceptance, intent, business_flow, entrypoints, current_business_state, success_metrics)
     understanding_evidence = fact_assumption_split(intent, business_flow, entrypoints, acceptance, assumptions)
     decision_blocked = bool(questions or rule_conflicts or not requirements_understanding["design_allowed"])
     return {
@@ -765,8 +947,15 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
         "business_problem": explicit_intents[0]["intent"] if explicit_intents else intent.get("intent", ""),
         "expected_business_outcome": intent.get("intent", ""),
         "business_flow": business_flow,
+        "business_flow_model": {
+            "steps": [item.get("structured_step") for item in business_flow if isinstance(item, dict) and item.get("structured_step")],
+            "branches": [branch for item in business_flow if isinstance(item, dict) for branch in as_list(item.get("branches"))] + detect_flow_branches(text),
+            "entrypoint_count": len(entrypoints),
+            "supports_multiple_entrypoints": len(entrypoints) > 1,
+        },
         "entrypoints": entrypoints,
         "trigger_conditions": [item.get("trigger") for item in entrypoints if isinstance(item, dict) and item.get("trigger")],
+        "current_business_state": current_business_state,
         "preconditions": extract_prefixed(lines, ("precondition", "preconditions", "前置条件")),
         "postconditions": [str(item.get("expected_outcome")) for item in business_flow if isinstance(item, dict) and item.get("expected_outcome")],
         "ambiguities": ambiguities,
@@ -790,6 +979,7 @@ def normalize(doc_id: str, title: str, text: str) -> dict[str, Any]:
         "personas": personas,
         "user_scenarios": scenarios,
         "business_objectives": objectives,
+        "success_metrics": success_metrics,
         "business_objects": business_objects,
         "operations": operations,
         "data_fields": data_fields,

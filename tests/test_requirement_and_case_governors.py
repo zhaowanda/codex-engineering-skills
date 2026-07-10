@@ -168,6 +168,34 @@ def test_spec_allows_clear_goal_flow_entrypoint_and_acceptance() -> None:
     assert validation["decision"] == "pass"
 
 
+def test_spec_models_multi_entry_business_flow_and_scores() -> None:
+    text = """
+    业务目的: 减少运营和系统补偿续费状态不一致导致的人工排查。
+    成功指标: 续费状态异常人工处理量下降 50%。
+    现状: 当前已有续费列表重新试算按钮、renewal/recalculate 后端接口、renewal-status topic 消费者和夜间补偿 Task。
+    流程: 运营在续费列表点击重新试算按钮，前端调用续费试算接口；后端复用试算服务并发送 renewal-status MQ；消费者刷新续费状态，夜间补偿 Task 处理超时未回调记录；无权限用户不可触发。
+    入口: 续费列表重新试算按钮。
+    入口: renewal-status MQ Consumer 消费续费状态消息。
+    入口: 夜间续费状态补偿 Task。
+    Req: 运营可以对单个设备重新触发续费试算并修复状态不一致。
+    Rule: 只有续费管理权限角色可以触发前端重新试算。
+    AC: 有权限运营点击重新试算按钮后，接口返回成功且页面展示新的试算金额和试算时间。
+    AC: renewal-status MQ 消费失败时可以重试且不会重复更新同一条状态。
+    AC: 夜间补偿 Task 只处理超时未回调记录。
+    AC: 无权限角色看不到重新试算按钮且直接调用接口返回无权限。
+    """
+    spec = spec_governor.normalize("REQ-MULTI-ENTRY", "续费状态修复", text)
+    assert spec["design_allowed"] is True
+    assert spec["requirements_understanding"]["level"] == "expert_ready"
+    assert spec["requirements_understanding"]["scorecard"]["dimensions"]["flow_score"] >= 90
+    assert spec["business_flow_model"]["supports_multiple_entrypoints"] is True
+    assert len(spec["entrypoints"]) >= 3
+    branches = {item["type"] for item in spec["business_flow_model"]["branches"]}
+    assert {"permission_denied", "retry", "timeout"}.issubset(branches)
+    assert spec["current_business_state"]["known_current_facts"]
+    assert spec["success_metrics"]
+
+
 def test_question_governor_generates_categorized_clarification_for_ambiguous_spec() -> None:
     spec = spec_governor.normalize("REQ-AMB-Q", "订单同步", "支持订单同步，数据同步成功。")
     result = question_governor.generate(spec)
@@ -175,6 +203,14 @@ def test_question_governor_generates_categorized_clarification_for_ambiguous_spe
     categories = {item.get("category") for item in result["questions"]}
     assert {"ambiguous_action", "ambiguous_flow", "acceptance"}.issubset(categories)
     assert all(item.get("required") for item in result["questions"] if item.get("category") in {"ambiguous_action", "ambiguous_flow", "acceptance"})
+    assert all(item.get("risk_if_unanswered") for item in result["questions"] if item.get("required"))
+
+
+def test_question_governor_asks_from_weak_understanding_dimensions() -> None:
+    spec = spec_governor.normalize("REQ-WEAK-SCORE", "订单导出", "Goal: reduce support work.\nReq: Admin exports orders.\nAC: exported file works.")
+    result = question_governor.generate(spec)
+    assert result["decision"] == "block"
+    assert any(item.get("source", "").startswith("requirements_understanding.") for item in result["questions"])
     assert all(item.get("risk_if_unanswered") for item in result["questions"] if item.get("required"))
 
 
@@ -212,7 +248,9 @@ def run_all() -> None:
     test_spec_requires_explicit_business_purpose_not_inferred_goal()
     test_spec_blocks_ambiguous_auto_processing_and_unclear_defect()
     test_spec_allows_clear_goal_flow_entrypoint_and_acceptance()
+    test_spec_models_multi_entry_business_flow_and_scores()
     test_question_governor_generates_categorized_clarification_for_ambiguous_spec()
+    test_question_governor_asks_from_weak_understanding_dimensions()
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
 

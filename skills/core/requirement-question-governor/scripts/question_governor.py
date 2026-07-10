@@ -52,6 +52,8 @@ def risk_for_category(category: str) -> str:
         "performance": "Without thresholds, performance risk cannot be tested or accepted.",
         "security": "Without sensitive-field handling, masking, audit, and retention requirements may be missed.",
         "configuration": "Without environment defaults and rollback rules, release behavior can differ across environments.",
+        "current_business_state": "Without current-state evidence, design may invent new APIs, jobs, consumers, or data ownership instead of reusing or safely changing existing behavior.",
+        "understanding_score": "Without closing weak understanding dimensions, the downstream design can look complete while still missing the real business intent or flow.",
     }.get(category, "Without this clarification, design and implementation would rely on unapproved assumptions.")
 
 
@@ -116,6 +118,30 @@ def generate(spec: dict[str, Any]) -> dict[str, Any]:
             "ambiguous_state": "Which state should be updated, when, by whom, and what downstream effects are expected?",
         }.get(category, f"Clarify requirement ambiguity: {message}")
         add_question(questions, question_text, "product/engineering", True, f"ambiguity.{ambiguity.get('source', category)}", category, risk_for_category(category))
+    scorecard = understanding.get("scorecard") if isinstance(understanding.get("scorecard"), dict) else {}
+    weak_dimensions = as_list(scorecard.get("weak_dimensions")) + as_list(understanding.get("weak_dimensions"))
+    score_questions = {
+        "intent_score": "What real business purpose, current pain point, target users, and measurable success signal should this requirement satisfy?",
+        "flow_score": "What are the complete success, failure, permission, retry, timeout, idempotency, and compensation branches in the business flow?",
+        "entrypoint_score": "Which exact entrypoints trigger the change, including frontend actions, backend APIs, scheduled jobs, MQ consumers, manual tasks, or external callbacks?",
+        "acceptance_score": "Which executable positive and negative acceptance cases prove every business branch is satisfied?",
+        "evidence_score": "Which current-state evidence proves the existing entrypoints, APIs, tasks, consumers, data ownership, and downstream dependencies?",
+    }
+    for dimension in sorted({str(item) for item in weak_dimensions if item}):
+        question_text = score_questions.get(dimension)
+        if question_text:
+            add_question(questions, question_text, "product/engineering", True, f"requirements_understanding.{dimension}", "understanding_score")
+    current_state = spec.get("current_business_state") if isinstance(spec.get("current_business_state"), dict) else {}
+    for gap in as_list(current_state.get("evidence_gaps")):
+        if isinstance(gap, dict) and gap.get("message"):
+            add_question(
+                questions,
+                "What current implementation evidence describes the existing entrypoints, APIs, jobs, consumers, data ownership, and downstream dependencies?",
+                "engineering",
+                False,
+                "current_business_state.evidence_gaps",
+                "current_business_state",
+            )
     if not as_list(spec.get("acceptance_criteria")):
         add_question(questions, "What are the acceptance criteria and evidence required?", "product", True, "missing.acceptance_criteria", "acceptance")
     if as_list(spec.get("acceptance_criteria")) and all(str(item.get("source_evidence")) != "input" for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)):
