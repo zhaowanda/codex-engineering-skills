@@ -4,21 +4,36 @@ This assessment records the current quality level, orchestration fit, and remain
 
 ## Summary
 
-Current level: **strong structured framework; end-to-end orchestration is under active calibration**.
+Current level: **advanced framework with structurally validated orchestration; expert status awaits real-project calibration**.
+
+The health report separates skill contract quality, DAG integrity, gate semantics, synthetic path reality, and real-project calibration. Static skill quality no longer makes the whole framework `expert`; at least one privacy-reviewed anonymized real-project replay is required for that level.
 
 The repository has a coherent delivery framework rather than a loose prompt collection. Skills are grouped by lifecycle stage, most commands produce machine-readable artifacts, and the main gates expose `decision`, `blockers`, and readiness fields. The unified CLI, workflow profiles, scenario catalog, forward tests, privacy scan, and health checks make the system operable as a repeatable workflow.
 
-The main remaining risk is lifecycle calibration: every profile must keep design artifacts, implementation evidence, and release evidence in their correct phases. Private overlays, project-specific skills, code indexes, baseline docs, and team release policies remain necessary before complex production changes.
+The main remaining risk is real-project calibration. The lifecycle now has a phase-ordered DAG, explicit dependencies, conditional specialty stages, stale-input detection, and executable implementation/release happy paths. Private overlays, project-specific skills, code indexes, baseline docs, and team release policies remain necessary before complex production changes.
+
+## Expert Assessment Model
+
+`skill_health` reports five independent framework dimensions:
+
+- `skill_contract_quality`: per-skill documentation, scripts, and direct test contract quality.
+- `dag_integrity`: lifecycle phases, dependencies, cycles, artifact uniqueness, and profile-to-stage registration.
+- `gate_semantics`: required gates accept only non-blocking decisions and enforce declared readiness fields.
+- `happy_blocked_path_reality`: forward tests prove both blocking behavior and genuine implementation/release readiness.
+- `real_project_calibration`: privacy-reviewed anonymized real-project replay evidence, kept distinct from synthetic fixtures.
+
+The whole framework is `expert` only when its weighted score is at least 90 and at least one validated replay declares `source_type=anonymized_real_project`. High static skill scores or synthetic happy paths alone cannot award framework-level expert status.
 
 ## Verified Baseline
 
-- `skill_health`: pass, 75 skills, 75 expert-level scores.
-- `benchmark`: pass, 75 skills, 77 scripts, 115 schemas, 6 prompts, 8 documented and forward-tested scenarios, 4 validated replay cases.
-- `pytest`: pass, 249 tests.
+- `skill_health`: pass, 84 skills, 84 expert-level skill-contract scores; framework score 88 (`advanced`).
+- Framework dimensions: skill contract quality 100, DAG integrity 100, gate semantics 100, happy/blocked path reality 100, real-project calibration 40.
+- `benchmark`: pass, 84 skills, 88 scripts, 130 schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated replay cases.
+- `pytest`: pass, 383 tests.
 - `compileall`: pass for `scripts`, `skills`, and `tests`.
 - `privacy_scan`: pass, no hits.
-- `replay_validation`: pass for backend API, frontend UI, data/config, and release readiness replay skeletons.
-- `forward_test`: pass for one-line request, long PRD, bugfix, frontend change, cross-repo API, data migration, release readiness, and code review.
+- `forward_test`: pass for all 8 scenarios and all 7 synthetic blocked/happy-path cases, including genuine implementation and release readiness.
+- Real-project replay count: 0; framework-level expert status remains intentionally unavailable.
 
 ## Orchestration Assessment
 

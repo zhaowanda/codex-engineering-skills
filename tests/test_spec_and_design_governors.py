@@ -38,6 +38,27 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def write_bound_questions(root: Path) -> None:
+    spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
+    write_json(root / "open_questions.json", {
+        "decision": "pass",
+        "spec_digest": delivery_runner.canonical_artifact_digest(spec),
+    })
+
+
+def write_bound_design_review(root: Path, implementation_allowed: bool = True) -> None:
+    technical = json.loads((root / "technical_design.json").read_text(encoding="utf-8"))
+    architecture = json.loads((root / "architecture_design.json").read_text(encoding="utf-8"))
+    write_json(root / "design_architecture_review.json", {
+        "decision": "pass",
+        "readiness_gate": {"implementation_allowed": implementation_allowed},
+        "input_digests": {
+            "technical_design.json": delivery_runner.canonical_artifact_digest(technical),
+            "architecture_design.json": delivery_runner.canonical_artifact_digest(architecture),
+        },
+    })
+
+
 def make_docs_repo(root: Path, doc_id: str) -> Path:
     docs_root = root / "delivery-docs"
     docs_root.mkdir()
@@ -544,9 +565,9 @@ def test_delivery_runner_reports_next_stage() -> None:
         assert status["primary_next_action"]["action_type"] == "fix_blocker"
         assert status["can_implement"] is False
 
-        spec = spec_governor.normalize("REQ-4", "Checkout display", "Buyer sees discount. AC: discount is visible.")
+        spec = {"schema": "codex-spec-v1", "doc_id": "REQ-4", "decision": "pass"}
         write_json(root / "spec.json", spec)
-        write_json(root / "open_questions.json", {"decision": "pass"})
+        write_bound_questions(root)
         status = delivery_runner.inspect(root)
         assert status["next_stage"] == "domain_model_design"
         assert "domain_model.py" in status["next_command"]
@@ -573,7 +594,8 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
             write_json(root / f"{name}.json", {"decision": "pass"})
         write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
         write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
-        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_bound_questions(root)
+        write_bound_design_review(root)
         write_json(root / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True})
         write_json(root / "auto_run_summary.json", {
             "doc_id": "REQ-1",
@@ -594,6 +616,8 @@ def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None
         root = Path(tmp)
         for name in ["spec", "open_questions", "domain_model_design", "architecture_framing", "technical_design", "architecture_design", "delivery_plan", "design_architecture_review"]:
             write_json(root / f"{name}.json", {"decision": "pass"})
+        write_bound_questions(root)
+        write_bound_design_review(root)
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is False
         assert status["next_stage"] == "test_design"
@@ -618,7 +642,8 @@ def test_delivery_runner_blocks_when_profile_gate_readiness_fails() -> None:
             },
         })
         write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": False}})
-        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_bound_questions(root)
+        write_bound_design_review(root)
         status = delivery_runner.inspect(root, profile_name="small_feature")
         assert status["can_implement"] is False
         assert any(item["source"] == "profile_gate.delivery_plan_review.json" for item in status["blockers"])
@@ -631,7 +656,8 @@ def test_delivery_runner_requires_docs_and_fresh_git_before_implementation() -> 
             write_json(root / f"{name}.json", {"decision": "pass"})
         write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
         write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
-        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_bound_questions(root)
+        write_bound_design_review(root)
         write_json(root / "git_worktree_evidence.json", {"decision": "ready"})
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is False
@@ -649,7 +675,8 @@ def test_delivery_runner_blocks_when_docs_quality_not_pass() -> None:
         write_json(root / "docs_quality.json", {"decision": "warn", "warnings": [{"source": "depth"}]})
         write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
         write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
-        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_bound_questions(root)
+        write_bound_design_review(root)
         write_json(root / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True})
         write_json(root / "auto_run_summary.json", {
             "doc_id": "REQ-1",
@@ -685,7 +712,8 @@ def test_delivery_runner_skips_conditional_cross_repo_stage_for_small_feature() 
             write_json(root / f"{name}.json", {"decision": "pass"})
         write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
         write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
-        write_json(root / "design_architecture_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
+        write_bound_questions(root)
+        write_bound_design_review(root)
         write_json(root / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True})
         write_json(root / "auto_run_summary.json", {
             "doc_id": "REQ-1",

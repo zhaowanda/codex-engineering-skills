@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -56,6 +57,65 @@ def resolve_required_questions(out_dir: Path) -> None:
             question["answer"] = "Confirmed by the synthetic product owner."
     data["decision"] = "pass"
     write_json(path, data)
+
+
+def canonical_digest(data: dict[str, Any]) -> str:
+    def strip_volatile(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: strip_volatile(item) for key, item in sorted(value.items()) if key not in {"generated_at", "updated_at"}}
+        if isinstance(value, list):
+            return [strip_volatile(item) for item in value]
+        return value
+
+    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def write_preimplementation_happy_evidence(out_dir: Path) -> None:
+    spec = json.loads((out_dir / "spec.json").read_text(encoding="utf-8"))
+    questions = json.loads((out_dir / "open_questions.json").read_text(encoding="utf-8"))
+    questions["spec_digest"] = canonical_digest(spec)
+    questions["decision"] = "pass"
+    write_json(out_dir / "open_questions.json", questions)
+    for artifact in [
+        "domain_model_design.json",
+        "architecture_framing.json",
+        "test_design.json",
+        "test_data_plan.json",
+        "traceability_matrix.json",
+        "docs_quality.json",
+    ]:
+        write_json(out_dir / artifact, {"decision": "pass", "blockers": []})
+    technical = json.loads((out_dir / "technical_design.json").read_text(encoding="utf-8"))
+    architecture = json.loads((out_dir / "architecture_design.json").read_text(encoding="utf-8"))
+    review_inputs = {
+        "technical_design.json": technical,
+        "architecture_design.json": architecture,
+    }
+    for artifact in [
+        "ui_ue_design.json",
+        "ui_ue_review.json",
+        "api_contract_design.json",
+        "data_model_design.json",
+        "observability_design.json",
+        "configuration_readiness.json",
+        "data_security_review.json",
+        "performance_review.json",
+        "cross_repo_readiness.json",
+    ]:
+        path = out_dir / artifact
+        if path.exists():
+            review_inputs[artifact] = json.loads(path.read_text(encoding="utf-8"))
+    write_json(out_dir / "design_architecture_review.json", {
+        "decision": "pass",
+        "blockers": [],
+        "readiness_gate": {"implementation_allowed": True},
+        "input_digests": {name: canonical_digest(data) for name, data in review_inputs.items()},
+    })
+    write_json(out_dir / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-SYN-HAPPY", "blockers": []})
+    write_json(out_dir / "delivery_plan_review.json", {"decision": "pass", "blockers": [], "readiness_gate": {"implementation_allowed": True}})
+    write_json(out_dir / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True, "branch": "feature/REQ-SYN-HAPPY"})
+    write_json(out_dir / "edit_permit.json", {"decision": "ready", "doc_id": "REQ-SYN-HAPPY", "branch": "feature/REQ-SYN-HAPPY"})
 
 
 def write_release_governance_examples(out_dir: Path) -> None:
@@ -114,6 +174,11 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "implementation_completion_gate.json", {"decision": "pass", "blockers": []})
     write_json(out_dir / "post_change_implementation_report.json", {"schema": "codex-post-change-implementation-report-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"]})
     write_json(out_dir / "write_guard_audit.json", {"decision": "ready", "blockers": []})
+    write_json(out_dir / "diff_impact.json", {"decision": "pass", "impact_areas": [], "blockers": []})
+    write_json(out_dir / "post_implementation_traceability_matrix.json", {"decision": "pass", "blockers": []})
+    write_json(out_dir / "change_risk.json", {"decision": "pass", "risk_level": "low", "blockers": []})
+    write_json(out_dir / "evidence_gap_summary.json", {"decision": "pass", "missing_evidence": [], "blockers": []})
+    write_json(out_dir / "code_design_quality.json", {"decision": "pass", "findings": [], "blockers": []})
     write_json(out_dir / "code_review_gate.json", {"decision": "approve", "active_blockers": [], "active_concerns": []})
     write_json(out_dir / "test_evidence_gate.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(out_dir / "ci_execution_evidence.json", {"failed_commands": [], "unknown_commands": [], "executed_commands": [{"command": "pytest", "status": "passed"}]})
@@ -255,6 +320,22 @@ def run(out_dir: Path) -> dict[str, Any]:
         ],
     )
     steps.append(happy_resolved_step)
+    write_preimplementation_happy_evidence(happy_dir)
+    happy_ready_step = run_json_step(
+        "happy_path_delivery_ready",
+        [
+            "python3",
+            "skills/core/delivery-runner/scripts/delivery_runner.py",
+            "inspect",
+            "--artifact-dir",
+            str(happy_dir),
+            "--profile",
+            "small_feature",
+            "--out",
+            str(happy_dir / "implementation_ready_status.json"),
+        ],
+    )
+    steps.append(happy_ready_step)
     frontend_step = run_json_step(
         "frontend_profile_auto",
         ["python3", "scripts/codex_eng.py", "auto", "--input", str(req), "--doc-id", "REQ-SYN-FE", "--profile", "frontend_change", "--out", str(frontend_dir), "--docs-root", str(frontend_docs)],
@@ -285,6 +366,21 @@ def run(out_dir: Path) -> dict[str, Any]:
         ["python3", "skills/core/release-evidence-binder/scripts/bind_release.py", "--artifact-dir", str(release_happy_dir), "--out", str(release_happy_dir / "release_gate.json")],
     )
     steps.append(release_happy_step)
+    release_ready_step = run_json_step(
+        "release_happy_delivery_ready",
+        [
+            "python3",
+            "skills/core/delivery-runner/scripts/delivery_runner.py",
+            "inspect",
+            "--artifact-dir",
+            str(release_happy_dir),
+            "--profile",
+            "release_readiness",
+            "--out",
+            str(release_happy_dir / "release_ready_status.json"),
+        ],
+    )
+    steps.append(release_ready_step)
     write_release_followup_chain_evidence(release_followup_dir)
     release_followup_collect = run_json_step(
         "release_followup_collect",
@@ -302,7 +398,9 @@ def run(out_dir: Path) -> dict[str, Any]:
     )
     steps.append(release_followup_binder)
     happy_summary = json.loads((happy_dir / "auto_run_summary.json").read_text(encoding="utf-8")) if (happy_dir / "auto_run_summary.json").exists() else {}
+    happy_ready_status = json.loads((happy_dir / "implementation_ready_status.json").read_text(encoding="utf-8")) if (happy_dir / "implementation_ready_status.json").exists() else {}
     data_summary = json.loads((data_dir / "auto_run_summary.json").read_text(encoding="utf-8")) if (data_dir / "auto_run_summary.json").exists() else {}
+    release_ready_status = json.loads((release_happy_dir / "release_ready_status.json").read_text(encoding="utf-8")) if (release_happy_dir / "release_ready_status.json").exists() else {}
     blocked_case = {
         "case": "blocked_case",
         "passed": blocked_inspect.get("returncode") != 0 and blocked_inspect.get("schema") == ("codex-" + "delivery-runner-status-v1"),
@@ -314,13 +412,16 @@ def run(out_dir: Path) -> dict[str, Any]:
         "passed": (
             happy_step.get("returncode") == 0
             and happy_resolved_step.get("returncode") == 0
+            and happy_ready_step.get("returncode") == 0
             and (happy_dir / "open_questions.json").exists()
             and json.loads((happy_dir / "open_questions.json").read_text(encoding="utf-8")).get("decision") == "pass"
-            and happy_summary.get("can_implement") is False
-            and not any(gap.get("artifact") == "open_questions.json" for gap in happy_summary.get("profile_gate_gaps", []))
+            and happy_ready_status.get("can_implement") is True
+            and happy_ready_status.get("next_stage") == "implementation"
+            and happy_ready_status.get("next_action_type") == "ready_to_implement"
+            and not happy_ready_status.get("blockers")
         ),
-        "decision": happy_summary.get("decision", ""),
-        "reason": "a generated clarification artifact can be resolved and preserved across a forced design regeneration; remaining source-scope gates still prevent implementation",
+        "decision": "pass" if happy_ready_status.get("can_implement") is True else "block",
+        "reason": "resolved questions plus complete design, plan, docs, Git, and edit-permit evidence reach can_implement=true",
     }
     frontend_case = {
         "case": "frontend_happy_path",
@@ -346,7 +447,14 @@ def run(out_dir: Path) -> dict[str, Any]:
     }
     release_happy_case = {
         "case": "release_readiness_happy_path",
-        "passed": release_happy_step.get("returncode") == 0 and release_happy_step.get("decision") == "go",
+        "passed": (
+            release_happy_step.get("returncode") == 0
+            and release_happy_step.get("decision") == "go"
+            and release_ready_step.get("returncode") == 0
+            and release_ready_status.get("can_release") is True
+            and release_ready_status.get("next_action_type") == "ready_to_release"
+            and not release_ready_status.get("blockers")
+        ),
         "decision": release_happy_step.get("decision", ""),
         "reason": "release binder approves complete clean synthetic evidence",
     }

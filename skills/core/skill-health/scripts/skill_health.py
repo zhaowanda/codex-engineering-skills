@@ -35,7 +35,10 @@ VALID_STAGES = {
 }
 GATE_MATURITY = {"expert-gate", "advisory-review"}
 PROFILE_SCHEMA = "codex-workflow-profiles-v1"
-STAGE_SCHEMA = "codex-workflow-stages-v1"
+STAGE_SCHEMA = "codex-workflow-stages-v2"
+# Retained in the public schema inventory so v1 consumers receive an explicit
+# migration contract instead of an unannounced schema removal.
+DEPRECATED_STAGE_SCHEMAS = {"codex-workflow-stages-v1"}
 
 
 def artifact_schema_inventory(root: Path) -> dict[str, Any]:
@@ -125,7 +128,11 @@ def parse_frontmatter(text: str) -> dict[str, str]:
 
 
 def parse_scalar(value: str) -> Any:
-    value = value.strip().strip('"').strip("'")
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        return [] if not inner else [parse_scalar(item) for item in inner.split(",")]
+    value = value.strip('"').strip("'")
     if value.lower() == "true":
         return True
     if value.lower() == "false":
@@ -383,6 +390,10 @@ def check(root: Path) -> dict[str, Any]:
                     blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required gate artifact must be listed in expected_artifacts", "artifact": artifact_name})
                 if "accepted_decisions" in gate and not as_list(gate.get("accepted_decisions")):
                     blockers.append({"source": f"workflow_profile.{profile_name}", "message": "accepted_decisions must not be empty", "artifact": artifact_name})
+                blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "needs_review", "needs_evidence", "no_go", "request_changes"}
+                invalid_accepted = blocking_decisions & {str(item) for item in as_list(gate.get("accepted_decisions"))}
+                if invalid_accepted:
+                    blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required gate must not accept blocking decisions", "artifact": artifact_name, "invalid_decisions": sorted(invalid_accepted)})
                 if bool(gate.get("readiness_path")) != ("readiness_value" in gate):
                     blockers.append({"source": f"workflow_profile.{profile_name}", "message": "readiness_path and readiness_value must be declared together", "artifact": artifact_name})
             if profile_name == "release_readiness" and "release-evidence-binder" not in required:
@@ -399,9 +410,15 @@ def check(root: Path) -> dict[str, Any]:
         stages_doc = load_restricted_yaml(stage_path)
         if stages_doc.get("schema") != STAGE_SCHEMA:
             blockers.append({"source": "config/workflow-stages.example.yaml", "message": f"stage schema must be {STAGE_SCHEMA}"})
+        phase_order = [str(item) for item in as_list(stages_doc.get("phase_order"))]
+        phase_rank = {phase: idx for idx, phase in enumerate(phase_order)}
+        if not phase_order:
+            blockers.append({"source": "config/workflow-stages.example.yaml", "message": "phase_order is required"})
         seen_stages: set[str] = set()
         seen_artifacts: set[str] = set()
-        for stage in stages_doc.get("stages", []) if isinstance(stages_doc.get("stages"), list) else []:
+        stage_entries = stages_doc.get("stages", []) if isinstance(stages_doc.get("stages"), list) else []
+        stage_by_name = {str(item.get("name")): item for item in stage_entries if isinstance(item, dict) and item.get("name")}
+        for stage in stage_entries:
             if not isinstance(stage, dict):
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage entries must be objects"})
                 continue
@@ -409,16 +426,74 @@ def check(root: Path) -> dict[str, Any]:
             artifact_name = str(stage.get("artifact") or "")
             if not name or not artifact_name:
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage name and artifact are required"})
+            phase = str(stage.get("phase") or "")
+            if phase not in phase_rank:
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage phase is missing or unknown", "stage": name, "phase": phase})
+            if not isinstance(stage.get("depends_on"), list):
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage depends_on must be a list", "stage": name})
             if name in seen_stages:
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "duplicate stage name", "stage": name})
             if artifact_name in seen_artifacts:
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "duplicate stage artifact", "artifact": artifact_name})
             seen_stages.add(name)
             seen_artifacts.add(artifact_name)
+        for name, stage in stage_by_name.items():
+            for dependency in [str(item) for item in as_list(stage.get("depends_on"))]:
+                if dependency not in stage_by_name:
+                    blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage dependency does not exist", "stage": name, "dependency": dependency})
+                    continue
+                current_phase = str(stage.get("phase") or "")
+                dependency_phase = str(stage_by_name[dependency].get("phase") or "")
+                if current_phase in phase_rank and dependency_phase in phase_rank and phase_rank[dependency_phase] > phase_rank[current_phase]:
+                    blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage dependency points to a later phase", "stage": name, "dependency": dependency})
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(stage_name: str) -> None:
+            if stage_name in visiting:
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "workflow stage graph contains a cycle", "stage": stage_name})
+                return
+            if stage_name in visited:
+                return
+            visiting.add(stage_name)
+            for dependency in [str(item) for item in as_list(stage_by_name.get(stage_name, {}).get("depends_on"))]:
+                if dependency in stage_by_name:
+                    visit(dependency)
+            visiting.remove(stage_name)
+            visited.add(stage_name)
+
+        for stage_name in stage_by_name:
+            visit(stage_name)
+        if profile_path.exists():
+            for profile in profiles.get("profiles", []) if isinstance(profiles.get("profiles"), list) else []:
+                for gate in as_list(profile.get("required_gate_artifacts")):
+                    artifact_name = str(gate.get("artifact") or "") if isinstance(gate, dict) else ""
+                    if artifact_name and artifact_name not in seen_artifacts:
+                        blockers.append({"source": f"workflow_profile.{profile.get('name')}", "message": "required gate artifact is not registered in workflow stages", "artifact": artifact_name})
     expert_level_count = sum(1 for item in expert_scores if item["level"] == "expert")
     advanced_or_better_count = sum(1 for item in expert_scores if item["level"] in {"expert", "advanced"})
     content_quality_scores = [int(item.get("content_quality", {}).get("score") or 0) for item in expert_scores]
     content_quality_average = round(sum(content_quality_scores) / len(content_quality_scores), 2) if content_quality_scores else 0
+    stage_blockers = [item for item in blockers if item.get("source") == "config/workflow-stages.example.yaml"]
+    gate_blockers = [item for item in blockers if str(item.get("source") or "").startswith("workflow_profile.")]
+    synthetic_source = (root / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py").read_text(encoding="utf-8") if (root / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py").exists() else ""
+    real_replay_count = 0
+    for replay_path in (root / "examples/replay-cases").glob("*.json") if (root / "examples/replay-cases").exists() else []:
+        try:
+            replay = json.loads(replay_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(replay, dict) and replay.get("source_type") == "anonymized_real_project":
+            real_replay_count += 1
+    framework_dimensions = {
+        "skill_contract_quality": round(100 * expert_level_count / len(skills), 2) if skills else 0,
+        "dag_integrity": 100 if not stage_blockers else 0,
+        "gate_semantics": 100 if not gate_blockers else 0,
+        "happy_blocked_path_reality": 100 if 'happy_ready_status.get("can_implement") is True' in synthetic_source and 'release_ready_status.get("can_release") is True' in synthetic_source else 0,
+        "real_project_calibration": 100 if real_replay_count else 40,
+    }
+    framework_overall = round(sum(framework_dimensions.values()) / len(framework_dimensions), 2)
+    framework_level = "expert" if framework_overall >= 90 and framework_dimensions["real_project_calibration"] >= 80 else "advanced" if framework_overall >= 80 else "mixed"
     return {
         "schema": "codex-skill-health-v1",
         "decision": "block" if blockers else "warn" if warnings else "pass",
@@ -427,7 +502,14 @@ def check(root: Path) -> dict[str, Any]:
         "advanced_or_better_count": advanced_or_better_count,
         "content_quality_average": content_quality_average,
         "content_quality_expert_count": sum(1 for score in content_quality_scores if score >= 80),
-        "expert_readiness": "expert" if expert_level_count == len(skills) else "advanced" if advanced_or_better_count == len(skills) else "mixed",
+        "expert_readiness": framework_level,
+        "framework_expert_assessment": {
+            "overall_score": framework_overall,
+            "level": framework_level,
+            "dimensions": framework_dimensions,
+            "real_project_replay_count": real_replay_count,
+            "expert_rule": "expert requires overall>=90 and at least one anonymized real-project replay",
+        },
         "integrated_quality_gates": {
             "artifact_schema_inventory": {
                 "decision": schema_inventory.get("decision"),

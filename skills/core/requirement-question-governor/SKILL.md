@@ -25,7 +25,8 @@ Validate answers:
 ```bash
 python3 scripts/question_governor.py \
   validate \
-  --file artifacts/REQ-001/open_questions.json
+  --file artifacts/REQ-001/open_questions.json \
+  --spec artifacts/REQ-001/spec.json
 ```
 
 ## Rules
@@ -41,7 +42,12 @@ python3 scripts/question_governor.py \
 - Ask decision-level questions for missing business closure, state machine, retry/idempotency/timeout/compensation, dependency chain, and repository/service ownership.
 - Generate expert clarification questions from impact surface and implicit constraints, including permission, data/export, API, performance, security, and configuration questions.
 - Treat required questions as closed only when they include an answer.
+- Bind every generated artifact to the canonical current spec through `spec_digest` and `spec_schema`; validation with `--spec` blocks stale question sets.
+- Derive stable question IDs from the question source, category, and text so regeneration can carry answers forward without relying on list position.
+- Regenerate and merge instead of skipping an existing artifact. Preserve prior answers and append `answer_provenance` when the same stable question remains applicable.
+- Retain questions that disappear from the current spec as `status=obsolete`, set `required=false`, and preserve their history without allowing them to block the current decision.
+- Never carry an answer to a materially changed question with a different stable ID; require a new answer instead.
 
 ## Output
 
-The output uses schema `codex-open-questions-v1`.
+The output uses schema `codex-open-questions-v1` and includes `spec_schema`, `spec_digest`, `generated_at`, stable question IDs, and answer provenance where answers were carried forward.

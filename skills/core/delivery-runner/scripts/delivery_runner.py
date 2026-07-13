@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -162,6 +163,26 @@ def selected_profile(artifact_dir: Path, profile_name: str | None = None) -> dic
         return {"name": profile_name or "", "expected_artifacts": [], "required_skills": []}
 
 
+def detected_impacts(artifact_dir: Path) -> set[str]:
+    impacts: set[str] = set()
+    spec = load_json(artifact_dir / "spec.json")
+    for item in spec.get("impact_surface", []) if isinstance(spec.get("impact_surface"), list) else []:
+        if isinstance(item, dict) and item.get("area"):
+            impacts.add(str(item["area"]))
+    diff = load_json(artifact_dir / "diff_impact.json")
+    for item in diff.get("impact_areas", []) if isinstance(diff.get("impact_areas"), list) else []:
+        impacts.add(str(item.get("area") if isinstance(item, dict) else item))
+    return impacts
+
+
+def stage_applies(stage: dict[str, Any], profile_skills: set[str], impacts: set[str]) -> bool:
+    conditional_skill = str(stage.get("conditional_skill") or "")
+    if conditional_skill and conditional_skill not in profile_skills:
+        return False
+    conditional_impacts = {str(item) for item in stage.get("conditional_impacts", [])} if isinstance(stage.get("conditional_impacts"), list) else set()
+    return not conditional_impacts or bool(conditional_impacts & impacts)
+
+
 def missing_profile_artifacts(profile: dict[str, Any], artifact_dir: Path) -> list[str]:
     items = profile.get("expected_artifacts", [])
     if not isinstance(items, list):
@@ -176,6 +197,18 @@ def nested_value(data: dict[str, Any], path: str) -> Any:
             return None
         current = current.get(part)
     return current
+
+
+def canonical_artifact_digest(data: dict[str, Any]) -> str:
+    def strip_volatile(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: strip_volatile(item) for key, item in sorted(value.items()) if key not in {"generated_at", "updated_at"}}
+        if isinstance(value, list):
+            return [strip_volatile(item) for item in value]
+        return value
+
+    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[dict[str, Any]]:
@@ -208,6 +241,14 @@ def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[d
             actual = nested_value(data, readiness_path)
             if actual != expected:
                 blockers.append({"source": f"profile_gate.{artifact_name}", "message": f"{readiness_path} is not {expected}", "actual": actual})
+        digest_source = str(gate.get("digest_source") or "")
+        digest_path = str(gate.get("digest_path") or "")
+        if digest_source and digest_path:
+            source_data = load_json(artifact_dir / digest_source)
+            actual_digest = nested_value(data, digest_path)
+            expected_digest = canonical_artifact_digest(source_data) if source_data else ""
+            if not expected_digest or actual_digest != expected_digest:
+                blockers.append({"source": f"profile_gate.{artifact_name}", "message": f"{digest_path} does not match current {digest_source}"})
     return blockers
 
 
@@ -278,9 +319,10 @@ def primary_next_action(
 def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
     profile = selected_profile(artifact_dir, profile_name)
     profile_skills = {str(item) for item in profile.get("required_skills", [])} if isinstance(profile.get("required_skills"), list) else set()
+    impacts = detected_impacts(artifact_dir)
     stages = [
         stage for stage in load_stage_registry()
-        if not stage.get("conditional_skill") or str(stage.get("conditional_skill")) in profile_skills
+        if stage_applies(stage, profile_skills, impacts)
     ]
     if profile.get("profile_stage_mode") == "release_only":
         stages = [stage for stage in stages if stage.get("release_required")]
@@ -299,16 +341,46 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
                 blockers.append({"source": name, "message": f"{key} present", "count": len(data.get(key) if isinstance(data.get(key), list) else [data.get(key)])})
         if data.get("decision") in {"block", "blocked", "no_go", "fail", "failed", "request_changes", "needs_revision"}:
             blockers.append({"source": name, "message": f"blocking decision: {data.get('decision')}"})
+    for stage in stages:
+        name = str(stage["name"])
+        data = artifacts.get(name, {})
+        input_artifacts = [str(item) for item in stage.get("input_artifacts", [])] if isinstance(stage.get("input_artifacts"), list) else []
+        if not data or not input_artifacts:
+            continue
+        recorded = data.get("input_digests") if isinstance(data.get("input_digests"), dict) else {}
+        stale_inputs = []
+        for artifact_name in input_artifacts:
+            source = load_json(artifact_dir / artifact_name)
+            if source and recorded.get(artifact_name) != canonical_artifact_digest(source):
+                stale_inputs.append(artifact_name)
+            elif not source and artifact_name in recorded:
+                stale_inputs.append(artifact_name)
+        if stale_inputs:
+            if name in completed:
+                completed.remove(name)
+            blockers.append({"source": name, "message": "stage artifact is stale for current inputs", "stale_inputs": stale_inputs})
+    selected_names = {str(stage["name"]) for stage in stages}
+    for stage in stages:
+        name = str(stage["name"])
+        if not artifacts.get(name):
+            continue
+        missing_dependencies = [
+            str(dep) for dep in stage.get("depends_on", [])
+            if str(dep) in selected_names and str(dep) not in completed
+        ]
+        if missing_dependencies:
+            blockers.append({"source": name, "message": "stage completed before required dependencies", "missing_dependencies": missing_dependencies})
     if state.get("blockers"):
         blockers.append({"source": "delivery_state", "message": "delivery state has blockers", "count": len(state.get("blockers", []))})
-    docs_status = docs_readiness(artifact_dir)
-    if docs_status.get("decision") != "pass":
+    release_only = profile.get("profile_stage_mode") == "release_only"
+    docs_status = {"decision": "not_applicable", "blockers": []} if release_only else docs_readiness(artifact_dir)
+    if not release_only and docs_status.get("decision") != "pass":
         blockers.extend(docs_status.get("blockers", []))
     docs_quality = artifacts.get("docs_quality", {})
     if docs_quality and str(docs_quality.get("decision") or "") not in {"pass", "ready"}:
         blockers.append({"source": "docs_quality", "message": "human documentation quality decision is not pass/ready"})
-    git_status = git_edit_readiness(artifact_dir, artifacts.get("git", {}))
-    if git_status.get("decision") != "ready":
+    git_status = {"decision": "not_applicable", "blockers": []} if release_only else git_edit_readiness(artifact_dir, artifacts.get("git", {}))
+    if not release_only and git_status.get("decision") != "ready":
         blockers.extend(git_status.get("blockers", []))
     blockers.extend(profile_gate_blockers(profile, artifact_dir))
     next_required_actions = profile_next_actions(profile, artifact_dir)
@@ -342,6 +414,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "missing_artifacts": missing,
         "blockers": blockers,
         "workflow_profile": profile,
+        "detected_impacts": sorted(impacts),
         "docs_readiness": docs_status,
         "git_edit_readiness": git_status,
         "profile_missing_artifacts": profile_missing,

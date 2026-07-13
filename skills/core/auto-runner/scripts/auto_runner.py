@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -206,7 +207,11 @@ def run_docs_quality(docs_root: Path | None, docs_sync: dict[str, Any], out: Pat
 
 
 def parse_scalar(value: str) -> Any:
-    value = value.strip().strip('"').strip("'")
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        return [] if not inner else [parse_scalar(item) for item in inner.split(",")]
+    value = value.strip('"').strip("'")
     if value.lower() == "true":
         return True
     if value.lower() == "false":
@@ -630,6 +635,18 @@ def nested_value(data: dict[str, Any], path: str) -> Any:
     return current
 
 
+def canonical_artifact_digest(data: dict[str, Any]) -> str:
+    def strip_volatile(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: strip_volatile(item) for key, item in sorted(value.items()) if key not in {"generated_at", "updated_at"}}
+        if isinstance(value, list):
+            return [strip_volatile(item) for item in value]
+        return value
+
+    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def profile_gate_gaps(profile: dict[str, Any], out: Path) -> list[dict[str, Any]]:
     gaps: list[dict[str, Any]] = []
     for gate in as_list(profile.get("required_gate_artifacts")):
@@ -653,6 +670,14 @@ def profile_gate_gaps(profile: dict[str, Any], out: Path) -> list[dict[str, Any]
         readiness_path = str(gate.get("readiness_path") or "")
         if readiness_path and nested_value(data, readiness_path) != gate.get("readiness_value"):
             gaps.append({"artifact": artifact_name, "message": f"{readiness_path} is not {gate.get('readiness_value')}"})
+        digest_source = str(gate.get("digest_source") or "")
+        digest_path = str(gate.get("digest_path") or "")
+        if digest_source and digest_path:
+            source_data = read_json(out / digest_source)
+            actual_digest = nested_value(data, digest_path)
+            expected_digest = canonical_artifact_digest(source_data) if source_data else ""
+            if not expected_digest or actual_digest != expected_digest:
+                gaps.append({"artifact": artifact_name, "message": f"{digest_path} does not match current {digest_source}"})
     return gaps
 
 
@@ -921,7 +946,7 @@ def run_requirement_questions(
             "--out",
             str(questions),
         ],
-        False,
+        True,
         generated,
         skipped,
         steps,
@@ -1379,20 +1404,35 @@ def run(
     run_design_assurance_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
     design_review = out / "design_architecture_review.json"
+    design_review_command = [
+        "python3",
+        "skills/core/design-architecture-reviewer/scripts/design_arch_review.py",
+        "review",
+        "--technical-design",
+        str(technical),
+        "--architecture-design",
+        str(architecture),
+        "--out",
+        str(design_review),
+    ]
+    for argument, artifact_name in [
+        ("--ui-ue-design", "ui_ue_design.json"),
+        ("--ui-ue-review", "ui_ue_review.json"),
+        ("--api-contract-design", "api_contract_design.json"),
+        ("--data-model-design", "data_model_design.json"),
+        ("--observability-design", "observability_design.json"),
+        ("--configuration-readiness", "configuration_readiness.json"),
+        ("--data-security-review", "data_security_review.json"),
+        ("--performance-review", "performance_review.json"),
+        ("--cross-repo-readiness", "cross_repo_readiness.json"),
+    ]:
+        artifact = out / artifact_name
+        if artifact.exists():
+            design_review_command.extend([argument, str(artifact)])
     run_if_needed(
         "design_review",
         design_review,
-        [
-            "python3",
-            "skills/core/design-architecture-reviewer/scripts/design_arch_review.py",
-            "review",
-            "--technical-design",
-            str(technical),
-            "--architecture-design",
-            str(architecture),
-            "--out",
-            str(design_review),
-        ],
+        design_review_command,
         force,
         generated,
         skipped,
@@ -1467,6 +1507,20 @@ def run(
     )
 
     run_pre_review_planning_steps(selected_profile, out, spec, delivery_plan, force, generated, skipped, steps)
+
+    cross_repo_readiness = out / "cross_repo_readiness.json"
+    if cross_repo_readiness.exists():
+        final_design_review_command = list(design_review_command)
+        final_design_review_command.extend(["--cross-repo-readiness", str(cross_repo_readiness)])
+        run_if_needed(
+            "design_review_after_cross_repo",
+            design_review,
+            final_design_review_command,
+            True,
+            generated,
+            skipped,
+            steps,
+        )
 
     if profile_requires(selected_profile, "traceability-governor"):
         run_initial_traceability(out, force, generated, skipped, steps)

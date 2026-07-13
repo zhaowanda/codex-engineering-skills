@@ -579,6 +579,19 @@ def test_cross_repo_planning_runs_before_delivery_plan_review() -> None:
         assert (out / "cross_repo_readiness.json").exists()
 
 
+def test_cross_repo_readiness_is_aggregated_by_final_design_review() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "api.md"
+        req.write_text("Req: Add API contract. AC: existing consumer remains compatible.", encoding="utf-8")
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-CROSS-REVIEW", out=out, profile="cross_repo_api")
+        step_names = [item.get("name") for item in result["steps"]]
+        assert "design_review_after_cross_repo" in step_names
+        review = json.loads((out / "design_architecture_review.json").read_text(encoding="utf-8"))
+        assert "cross_repo_readiness.json" in review["input_digests"]
+
+
 def test_auto_runner_generates_specialty_design_before_technical_design() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

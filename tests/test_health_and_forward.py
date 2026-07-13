@@ -77,6 +77,10 @@ def test_skill_health_runs_on_repo() -> None:
     assert result["skill_count"] > 10
     assert result["advanced_or_better_count"] > 0
     assert result["expert_readiness"] in {"expert", "advanced", "mixed"}
+    assert result["framework_expert_assessment"]["dimensions"]["dag_integrity"] == 100
+    assert result["framework_expert_assessment"]["dimensions"]["gate_semantics"] == 100
+    assert result["framework_expert_assessment"]["dimensions"]["happy_blocked_path_reality"] == 100
+    assert result["framework_expert_assessment"]["level"] == "advanced"
     assert len(result["skill_scores"]) == result["skill_count"]
     assert {"skill", "score", "level", "dimensions"}.issubset(result["skill_scores"][0])
     assert "content_quality" in result["skill_scores"][0]
@@ -172,7 +176,7 @@ def test_workflow_profiles_reference_existing_skills() -> None:
     release = next(item for item in profiles["profiles"] if item["name"] == "release_readiness")
     assert "release-evidence-binder" in release["required_skills"]
     stages = skill_health.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")
-    assert stages["schema"] == "codex-workflow-stages-v1"
+    assert stages["schema"] == "codex-workflow-stages-v2"
     assert {"spec", "delivery_plan_review", "edit_permit", "release"}.issubset({item["name"] for item in stages["stages"]})
 
 
@@ -191,19 +195,23 @@ def test_workflow_profiles_follow_canonical_design_order() -> None:
         "data-model-governor",
         "observability-design-governor",
         "technical-design-governor",
-        "architecture-design-governor",
         "frontend-implementation-planner",
+        "architecture-design-governor",
         "design-architecture-reviewer",
         "test-design-governor",
         "test-data-governor",
         "delivery-plan-templates",
         "cross-repo-planner",
-        "traceability-governor",
         "delivery-plan-reviewer",
         "git-worktree-governor",
         "edit-readiness-governor",
         "implementation-completion-gate",
         "post-change-skill-sync",
+        "workspace-write-guard",
+        "diff-impact-analyzer",
+        "change-risk-governor",
+        "evidence-auto-collector",
+        "code-design-quality-reviewer",
         "code-review-gate",
         "frontend-acceptance-runner",
         "test-evidence-gate",
@@ -248,6 +256,11 @@ def test_workflow_stage_registry_uses_pre_technical_design_order() -> None:
         "post_implementation_traceability",
     ]
     assert [name for name in names if name in expected] == expected
+    assert all(item.get("phase") for item in stages)
+    assert all(isinstance(item.get("depends_on"), list) for item in stages)
+    artifacts = {item["artifact"] for item in stages}
+    profiles = skill_health.load_restricted_yaml(ROOT / "config/workflow-profiles.example.yaml")["profiles"]
+    assert all(gate["artifact"] in artifacts for profile in profiles for gate in profile["required_gate_artifacts"])
 
 
 def test_workflow_docs_describe_current_order() -> None:
