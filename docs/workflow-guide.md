@@ -4,8 +4,8 @@
 
 ```text
 requirement source
--> project-understanding-runner when existing repositories or legacy code must be understood
 -> requirement-document-ingestor
+-> project-understanding-runner when existing repositories or legacy code must be understood
 -> spec-governor
 -> requirement-question-governor (required questions block design approval and implementation)
 -> domain-model-governor
@@ -13,27 +13,31 @@ requirement source
 -> UI/API/data/observability specialty design governors as applicable
 -> technical-design-governor
 -> architecture-design-governor
+-> configuration/performance/data-security design governors as applicable
 -> design-architecture-reviewer
 -> test-design-governor
 -> test-data-governor
--> configuration/performance/data-security design governors
--> delivery-plan-templates
--> cross-repo-planner before delivery plan review when more than one repository or contract boundary is involved
+-> delivery-plan-templates draft when more than one repository or contract boundary is involved
+-> cross-repo-planner when applicable
+-> design-architecture-reviewer with cross-repo readiness
+-> final test design / test data / delivery plan
 -> traceability-governor initial pass after delivery_plan exists to prove requirement/design/test/task coverage
 -> delivery-plan-reviewer
 -> git-worktree-governor
 -> edit-readiness-governor
+-> workspace-write-guard snapshot
 -> implementation
 -> implementation-completion-gate
+-> post-change-skill-sync
+-> workspace-write-guard audit
 -> diff-impact-analyzer
 -> traceability-governor post-implementation pass to bind requirements to diff, tests, and release evidence
 -> change-risk-governor
 -> evidence-auto-collector
--> workspace-write-guard
 -> code-design-quality-reviewer
--> code-review-gate
 -> frontend-acceptance-runner when UI changed
 -> test-evidence-gate
+-> code-review-gate aggregate approval
 -> environment-promotion-governor
 -> uat-acceptance-governor
 -> release-change-governor
@@ -60,11 +64,13 @@ requirement-document-ingestor
 -> specialty design governors as applicable
 -> technical-design-governor
 -> architecture-design-governor
+-> configuration/performance/data-security design governors as applicable
 -> design-architecture-reviewer
 -> test-design-governor
 -> test-data-governor
--> delivery-plan-templates
--> cross-repo-planner before delivery-plan-reviewer when repository order or contract compatibility can change the plan
+-> delivery plan draft and cross-repo readiness when repository order or contract compatibility can change the plan
+-> final design review with cross-repo readiness
+-> final test design, test data, and delivery plan
 -> traceability-governor initial pass
 -> delivery-plan-reviewer
 ```
@@ -78,11 +84,15 @@ requirement-document-ingestor
 | `frontend_change` | Standard design-first profile plus pre-technical `ui-ue-design-governor`, `ui-ue-reviewer`, and `frontend-implementation-planner`. Real `frontend-acceptance-runner -> test-evidence-gate` evidence is collected after implementation, before release. UI/UE design must name concrete user entry surfaces and cover loading, empty, success, validation error, permission denied, and dependency error states. |
 | `cross_repo_api` | API/cross-repo contract profile with project understanding, pre-technical API/observability design, delivery plan, cross-repo execution graph/readiness before delivery plan review, initial traceability, and release evidence gates. |
 | `data_migration` | Standard design-first profile plus configuration, security, and performance design gates before design approval; release gates run only after implementation evidence exists. |
-| `release_readiness` | `implementation-completion-gate -> post-change-skill-sync -> code-review-gate -> frontend-acceptance-runner when UI changed -> test-evidence-gate -> post-implementation traceability -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
+| `release_readiness` | `implementation-completion-gate -> post-change-skill-sync -> workspace-write-guard audit -> diff-impact-analyzer -> change-risk-governor -> evidence-auto-collector -> code-design-quality-reviewer -> frontend-acceptance-runner when UI changed -> test-evidence-gate -> post-implementation traceability -> code-review-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
 
-Profiles are machine-validated contracts, not only documentation. Each profile declares required skills, expected artifacts, required gate artifacts, accepted decisions, and readiness fields. Stage order and next commands are defined in `config/workflow-stages.example.yaml`.
+Profiles use schema `codex-workflow-profiles-v2` and select scenario skills and impacts; they do not define execution order. Stage order, schemas, required fields, decisions, dependencies, lineage inputs, conditional skills, conditional impacts, and next commands are defined by the `codex-workflow-stages-v3` registry in `config/workflow-stages.example.yaml`.
 Profile `notes` are human guidance only; executable readiness is defined by `required_gate_artifacts` and the stage registry.
 Profile `artifact_steps` declare profile-specific artifact generation or inspection commands. `auto-runner` interprets these steps instead of hard-coding frontend, data, or release behavior.
+
+`open_questions.json` is bound to the canonical current spec through `spec_digest`. Regeneration preserves answers only for unchanged stable question IDs, records answer provenance, and marks questions removed by the new spec as non-blocking `obsolete`. A digest mismatch blocks profile readiness even when every required question in the old artifact was answered.
+
+Every applicable artifact records its direct input digests. Updating an input recursively invalidates downstream readiness. Cross-repo work uses a draft plan before aggregate design review, so final test and delivery artifacts are generated only after `cross_repo_readiness.json` exists.
 
 Traceability is intentionally two-pass. The initial pass (`traceability_matrix.json`) runs before implementation and proves that requirements, design, tests, and delivery tasks line up. The post-implementation pass (`post_implementation_traceability_matrix.json`) runs after changes exist and binds requirements to diff, test evidence, review evidence, and release evidence.
 
@@ -98,6 +108,7 @@ Traceability is intentionally two-pass. The initial pass (`traceability_matrix.j
 - `edit_permit.json` exists, is ready, and binds a narrow file scope.
 - `write_guard_snapshot.json` exists after the permit when direct edits are used.
 - `write_guard_audit.json` passes before commit, push, or release evidence.
+- `delivery-runner` reports `can_implement=true`, `next_stage=implementation`, `next_action_type=ready_to_implement`, and no blockers for the selected profile.
 
 ## Release Is Allowed Only When
 
@@ -108,7 +119,8 @@ Traceability is intentionally two-pass. The initial pass (`traceability_matrix.j
 - Frontend acceptance passes when UI changed.
 - Environment promotion, UAT acceptance, and release change evidence are complete.
 - Configuration, performance, and data-security blockers are resolved.
-- Release evidence binder returns `go` or explicitly accepted `conditional_go`.
+- Release evidence binder returns `go`; `conditional_go` remains blocked until a separate time-bounded waiver contract with owner and expiry is implemented.
+- `delivery-runner --profile release_readiness` reports `can_release=true`, `next_action_type=ready_to_release`, and no blockers.
 - Post-release observation is required before the release is closed.
 
 ## Open Core And Private Overlay

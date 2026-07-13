@@ -2,11 +2,25 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def load_workflow_contract() -> Any:
+    path = Path(__file__).resolve().parents[2] / "delivery-runner/scripts/workflow_contract.py"
+    spec = importlib.util.spec_from_file_location("write_guard_workflow_contract", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+WORKFLOW_CONTRACT = load_workflow_contract()
 
 
 def utc_now() -> datetime:
@@ -225,6 +239,9 @@ def main() -> int:
     p_hook.add_argument("--out")
     args = parser.parse_args()
     result = create_snapshot(args) if args.cmd == "snapshot" else audit(args)
+    if args.out:
+        output = Path(args.out)
+        WORKFLOW_CONTRACT.bind_lineage(output, f"workspace-write-guard:{args.cmd}", WORKFLOW_CONTRACT.command_input_paths(sys.argv, output))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") == "ready" else 1
 

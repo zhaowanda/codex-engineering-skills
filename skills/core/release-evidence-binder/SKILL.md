@@ -18,8 +18,8 @@ design review
 -> implementation completion
 -> code review gate
 -> test evidence gate
--> release-evidence-binder
 -> release change approval
+-> release-evidence-binder
 -> post-release observation
 ```
 

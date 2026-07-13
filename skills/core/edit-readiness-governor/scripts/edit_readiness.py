@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,18 @@ DELIVERY_STATE = CORE_DIR / "delivery-state-governor/scripts/delivery_state.py"
 FULL_DOC_LANES = {"standard_requirement", "large_prd", "migration"}
 LIGHT_DOC_LANES = {"bugfix", "small_change", "hotfix"}
 DEFAULT_BRANCHES = {"master", "main"}
+
+
+def load_workflow_contract() -> Any:
+    path = CORE_DIR / "delivery-runner/scripts/workflow_contract.py"
+    spec = importlib.util.spec_from_file_location("edit_readiness_workflow_contract", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+WORKFLOW_CONTRACT = load_workflow_contract()
 
 
 def utc_now() -> datetime:
@@ -451,6 +465,9 @@ def main() -> int:
     else:
         raise AssertionError(args.cmd)
     write_json(getattr(args, "out", None), result)
+    if getattr(args, "out", None):
+        output = Path(args.out)
+        WORKFLOW_CONTRACT.bind_lineage(output, f"edit-readiness:{args.cmd}", WORKFLOW_CONTRACT.command_input_paths(sys.argv, output))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") == "ready" else 1
 

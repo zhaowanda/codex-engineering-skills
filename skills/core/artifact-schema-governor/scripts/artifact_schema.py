@@ -115,8 +115,10 @@ def inventory(root: Path) -> dict[str, Any]:
         artifacts.append({"script": rel, "schemas": schemas, "gate_like": gate_like})
     allowed_duplicates: list[dict[str, Any]] = []
     for schema, owners in seen.items():
-        if len(owners) > 1 and schema in ALLOWED_DUPLICATE_SCHEMAS:
-            allowed_duplicates.append({"schema": schema, "reason": ALLOWED_DUPLICATE_SCHEMAS[schema], "owners": owners})
+        synthetic_fixture_owner = any("skills/templates/synthetic-e2e-runner/" in owner for owner in owners)
+        if len(owners) > 1 and (schema in ALLOWED_DUPLICATE_SCHEMAS or synthetic_fixture_owner):
+            reason = ALLOWED_DUPLICATE_SCHEMAS.get(schema, "synthetic E2E fixtures intentionally exercise the canonical artifact contract")
+            allowed_duplicates.append({"schema": schema, "reason": reason, "owners": owners})
         elif len(owners) > 1 and not schema.endswith("-validation-v1"):
             warnings.append({"source": schema, "message": "schema appears in multiple scripts", "owners": owners})
     return {

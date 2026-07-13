@@ -464,6 +464,8 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
     architecture_options, architecture_fit_matrix, architecture_score_summary, selected_architecture = build_architecture_options(owner_repo, owner_module, producer, route_contract, breakdown, technical, summary)
     result = {
         "schema": "codex-architecture-design-v1",
+        "decision": "pass" if design_allowed else "block",
+        "blockers": requirements_understanding_gate.get("blockers", []),
         "doc_id": doc_id,
         "title": title,
         "requirements_understanding_gate": requirements_understanding_gate,

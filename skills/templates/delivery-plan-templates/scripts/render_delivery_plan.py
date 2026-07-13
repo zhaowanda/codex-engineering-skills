@@ -192,7 +192,16 @@ def narrow_allowed_files(paths: list[str]) -> list[str]:
     return sorted(set(concrete))
 
 
-def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dict[str, Any], project_understanding: dict[str, Any] | None = None) -> dict[str, Any]:
+def render_from_design(
+    doc_id: str,
+    technical: dict[str, Any],
+    architecture: dict[str, Any],
+    project_understanding: dict[str, Any] | None = None,
+    design_review: dict[str, Any] | None = None,
+    test_design: dict[str, Any] | None = None,
+    test_data_plan: dict[str, Any] | None = None,
+    cross_repo_readiness: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     ctx = project_context(project_understanding or {})
     technical_gate = technical.get("requirements_understanding_gate") if isinstance(technical.get("requirements_understanding_gate"), dict) else {}
     architecture_gate = architecture.get("requirements_understanding_gate") if isinstance(architecture.get("requirements_understanding_gate"), dict) else {}
@@ -265,6 +274,10 @@ def render_from_design(doc_id: str, technical: dict[str, Any], architecture: dic
         "source": {
             "technical_design_doc_id": technical.get("doc_id", ""),
             "architecture_design_doc_id": architecture.get("doc_id", ""),
+            "design_review_decision": (design_review or {}).get("decision", ""),
+            "test_design_decision": (test_design or {}).get("decision", ""),
+            "test_data_plan_decision": (test_data_plan or {}).get("decision", ""),
+            "cross_repo_readiness_decision": (cross_repo_readiness or {}).get("decision", ""),
         },
         "source_design_gate": source_design_gate,
         "repo_tasks": repo_tasks,
@@ -407,6 +420,10 @@ def main() -> int:
     parser.add_argument("--technical-design")
     parser.add_argument("--architecture-design")
     parser.add_argument("--project-understanding")
+    parser.add_argument("--design-review")
+    parser.add_argument("--test-design")
+    parser.add_argument("--test-data-plan")
+    parser.add_argument("--cross-repo-readiness")
     parser.add_argument("--example", action="store_true")
     parser.add_argument("--out")
     args = parser.parse_args()
@@ -429,6 +446,10 @@ def main() -> int:
             read_json(args.technical_design),
             read_json(args.architecture_design),
             load_project_understanding(Path(args.project_understanding)) if args.project_understanding else None,
+            read_json(args.design_review) if args.design_review else None,
+            read_json(args.test_design) if args.test_design else None,
+            read_json(args.test_data_plan) if args.test_data_plan else None,
+            read_json(args.cross_repo_readiness) if args.cross_repo_readiness else None,
         )
     write_json(args.out, plan)
     print(json.dumps(plan, ensure_ascii=False, indent=2))

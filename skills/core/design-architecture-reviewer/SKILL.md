@@ -17,8 +17,11 @@ Use this skill after technical and architecture design are drafted, before deliv
 spec
 -> technical_design
 -> architecture_design
+-> applicable UI/API/data/observability/configuration/security/performance reviews
 -> design-architecture-reviewer
 -> delivery_plan
+-> cross-repo readiness when applicable
+-> final design-architecture-reviewer refresh when cross-repo readiness is produced
 -> git / edit gates
 -> implementation
 ```
@@ -42,6 +45,10 @@ spec
 - Require `new_service_design` when a requirement creates a new service, repository, or project. It must explain why existing systems cannot own the change and define responsibility boundaries, bootstrap, module structure, API contracts, CI/CD, configuration, deployment, observability, security, maintenance ownership, rollout/migration, and rollback.
 - Require security, performance, rollback, observability, and test strategy to be executable, not generic.
 - Treat placeholders such as `TBD`, `unknown`, `todo`, and `confirm later` as findings unless they are inside an explicitly controlled gate.
+- Consume every applicable specialty artifact rather than treating it as advisory prose: UI/UE review, API contract design, data model design, observability design, configuration readiness, data security review, performance review, and cross-repo readiness.
+- Promote blocking specialty decisions or blockers into the total-design blockers. The aggregate review cannot pass while an applicable specialty gate is unresolved.
+- Record `input_digests` for technical design, architecture design, and every supplied specialty artifact so orchestration can detect a stale aggregate review.
+- When cross-repo readiness is produced after the first delivery plan, rerun the aggregate review and then refresh downstream plan/traceability evidence as needed before implementation.
 
 ## Commands
 
@@ -52,8 +59,18 @@ python3 scripts/design_arch_review.py \
   review \
   --technical-design artifacts/technical_design.json \
   --architecture-design artifacts/architecture_design.json \
+  --ui-ue-review artifacts/ui_ue_review.json \
+  --api-contract-design artifacts/api_contract_design.json \
+  --data-model-design artifacts/data_model_design.json \
+  --observability-design artifacts/observability_design.json \
+  --configuration-readiness artifacts/configuration_readiness.json \
+  --data-security-review artifacts/data_security_review.json \
+  --performance-review artifacts/performance_review.json \
+  --cross-repo-readiness artifacts/cross_repo_readiness.json \
   --out artifacts/design_architecture_review.json
 ```
+
+Pass only the specialty artifacts that apply to the selected workflow profile and impact set.
 
 Validate a review artifact:
 
@@ -128,4 +145,6 @@ The review output uses schema `codex-design-architecture-review-v1` and includes
 - `level`: `expert_ready`, `reviewable`, `needs_revision`, or `block`.
 - `decision`: `pass`, `needs_revision`, or `block`.
 - `readiness_gate.implementation_allowed`: true only when decision is pass, score is at least 85, and no blocker/high/medium findings exist.
+- `specialty_review_summary`: decision and blocker summary for each supplied specialty artifact.
+- `input_digests`: content digests used by orchestration to invalidate stale reviews.
 - grouped findings by review area.

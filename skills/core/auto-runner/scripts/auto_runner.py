@@ -15,6 +15,18 @@ SCHEMA = "codex-auto-runner-summary-v1"
 PROFILE_REGISTRY = ROOT / "config/workflow-profiles.example.yaml"
 
 
+def load_workflow_contract_module() -> Any:
+    path = ROOT / "skills/core/delivery-runner/scripts/workflow_contract.py"
+    spec = importlib.util.spec_from_file_location("auto_runner_workflow_contract", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+WORKFLOW_CONTRACT = load_workflow_contract_module()
+
+
 def slug(value: str) -> str:
     text = re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-")
     return text or "requirement"
@@ -206,7 +218,11 @@ def run_docs_quality(docs_root: Path | None, docs_sync: dict[str, Any], out: Pat
 
 
 def parse_scalar(value: str) -> Any:
-    value = value.strip().strip('"').strip("'")
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        return [] if not inner else [parse_scalar(item) for item in inner.split(",")]
+    value = value.strip('"').strip("'")
     if value.lower() == "true":
         return True
     if value.lower() == "false":
@@ -298,14 +314,34 @@ def run_command(name: str, args: list[str]) -> dict[str, Any]:
     }
 
 
+def workflow_stage_inputs(output: Path) -> list[Path]:
+    registry = load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")
+    for stage in as_list(registry.get("stages")):
+        if not isinstance(stage, dict):
+            continue
+        artifact = Path(str(stage.get("artifact") or ""))
+        if not artifact.name or artifact.name != output.name:
+            continue
+        artifact_dir = output.parents[len(artifact.parts) - 1]
+        return [
+            artifact_dir / str(item)
+            for item in as_list(stage.get("input_artifacts"))
+            if (artifact_dir / str(item)).exists()
+        ]
+    return []
+
+
 def run_if_needed(name: str, output: Path, command: list[str], force: bool, generated: list[str], skipped: list[str], steps: list[dict[str, Any]]) -> None:
-    if output.exists() and not force:
+    inputs = WORKFLOW_CONTRACT.command_input_paths(command, output) + workflow_stage_inputs(output)
+    inputs = list({str(path): path for path in inputs}.values())
+    if output.exists() and not force and WORKFLOW_CONTRACT.lineage_is_fresh(output, inputs):
         skipped.append(output.name)
-        steps.append({"name": name, "skipped": True, "output": str(output), "reason": "artifact exists"})
+        steps.append({"name": name, "skipped": True, "output": str(output), "reason": "artifact inputs are unchanged"})
         return
     result = run_command(name, command)
     steps.append(result | {"output": str(output)})
     if output.exists():
+        WORKFLOW_CONTRACT.bind_lineage(output, name, inputs)
         generated.append(output.name)
 
 
@@ -630,6 +666,10 @@ def nested_value(data: dict[str, Any], path: str) -> Any:
     return current
 
 
+def canonical_artifact_digest(data: dict[str, Any]) -> str:
+    return WORKFLOW_CONTRACT.canonical_digest(data)
+
+
 def profile_gate_gaps(profile: dict[str, Any], out: Path) -> list[dict[str, Any]]:
     gaps: list[dict[str, Any]] = []
     for gate in as_list(profile.get("required_gate_artifacts")):
@@ -653,6 +693,14 @@ def profile_gate_gaps(profile: dict[str, Any], out: Path) -> list[dict[str, Any]
         readiness_path = str(gate.get("readiness_path") or "")
         if readiness_path and nested_value(data, readiness_path) != gate.get("readiness_value"):
             gaps.append({"artifact": artifact_name, "message": f"{readiness_path} is not {gate.get('readiness_value')}"})
+        digest_source = str(gate.get("digest_source") or "")
+        digest_path = str(gate.get("digest_path") or "")
+        if digest_source and digest_path:
+            source_data = read_json(out / digest_source)
+            actual_digest = nested_value(data, digest_path)
+            expected_digest = canonical_artifact_digest(source_data) if source_data else ""
+            if not expected_digest or actual_digest != expected_digest:
+                gaps.append({"artifact": artifact_name, "message": f"{digest_path} does not match current {digest_source}"})
     return gaps
 
 
@@ -689,9 +737,11 @@ def run_registry_artifact_steps(
             steps.append({"name": name, "returncode": 1, "passed": False, "reason": "artifact_steps entry requires artifact and command"})
             continue
         target = out / artifact
-        if target.exists() and not force:
+        inputs = WORKFLOW_CONTRACT.command_input_paths(command, target) + workflow_stage_inputs(target)
+        inputs = list({str(path): path for path in inputs}.values())
+        if target.exists() and not force and WORKFLOW_CONTRACT.lineage_is_fresh(target, inputs):
             skipped.append(target.name)
-            steps.append({"name": name, "skipped": True, "output": str(target), "reason": "artifact exists"})
+            steps.append({"name": name, "skipped": True, "output": str(target), "reason": "artifact inputs are unchanged"})
             continue
         result = run_command(name, command)
         if item.get("allow_fail"):
@@ -699,6 +749,7 @@ def run_registry_artifact_steps(
             result["passed"] = True
         steps.append(result | {"output": str(target)})
         if target.exists():
+            WORKFLOW_CONTRACT.bind_lineage(target, name, inputs)
             generated.append(target.name)
     return True
 
@@ -921,7 +972,7 @@ def run_requirement_questions(
             "--out",
             str(questions),
         ],
-        False,
+        True,
         generated,
         skipped,
         steps,
@@ -1251,6 +1302,26 @@ def run(
         write_json(out / "auto_run_summary.json", summary)
         return summary
 
+    normalized = out / "requirement.normalized.txt"
+    run_if_needed(
+        "ingest",
+        out / "requirement_ingestion.json",
+        [
+            "python3",
+            "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py",
+            "--input",
+            str(input_path),
+            "--doc-id",
+            doc_id,
+            "--out-dir",
+            str(out),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
+
     if repo and project:
         project_out = out / "project_understanding"
         marker = project_out / "baseline_quality.json"
@@ -1274,26 +1345,6 @@ def run(
         )
     else:
         project_out = None
-
-    normalized = out / "requirement.normalized.txt"
-    run_if_needed(
-        "ingest",
-        normalized,
-        [
-            "python3",
-            "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py",
-            "--input",
-            str(input_path),
-            "--doc-id",
-            doc_id,
-            "--out-dir",
-            str(out),
-        ],
-        force,
-        generated,
-        skipped,
-        steps,
-    )
 
     spec = out / "spec.json"
     run_if_needed(
@@ -1378,21 +1429,63 @@ def run(
 
     run_design_assurance_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
-    design_review = out / "design_architecture_review.json"
-    run_if_needed(
-        "design_review",
-        design_review,
-        [
+    if profile_requires(selected_profile, "cross-repo-planner"):
+        delivery_plan_draft = out / "delivery_plan_draft.json"
+        draft_command = [
             "python3",
-            "skills/core/design-architecture-reviewer/scripts/design_arch_review.py",
-            "review",
+            "skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py",
+            "--doc-id",
+            doc_id,
             "--technical-design",
             str(technical),
             "--architecture-design",
             str(architecture),
             "--out",
-            str(design_review),
-        ],
+            str(delivery_plan_draft),
+        ]
+        if project_out:
+            draft_command.extend(["--project-understanding", str(project_out)])
+        run_if_needed(
+            "delivery_plan_draft",
+            delivery_plan_draft,
+            draft_command,
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+        run_pre_review_planning_steps(selected_profile, out, spec, delivery_plan_draft, force, generated, skipped, steps)
+
+    design_review = out / "design_architecture_review.json"
+    design_review_command = [
+        "python3",
+        "skills/core/design-architecture-reviewer/scripts/design_arch_review.py",
+        "review",
+        "--technical-design",
+        str(technical),
+        "--architecture-design",
+        str(architecture),
+        "--out",
+        str(design_review),
+    ]
+    for argument, artifact_name in [
+        ("--ui-ue-design", "ui_ue_design.json"),
+        ("--ui-ue-review", "ui_ue_review.json"),
+        ("--api-contract-design", "api_contract_design.json"),
+        ("--data-model-design", "data_model_design.json"),
+        ("--observability-design", "observability_design.json"),
+        ("--configuration-readiness", "configuration_readiness.json"),
+        ("--data-security-review", "data_security_review.json"),
+        ("--performance-review", "performance_review.json"),
+        ("--cross-repo-readiness", "cross_repo_readiness.json"),
+    ]:
+        artifact = out / artifact_name
+        if artifact.exists():
+            design_review_command.extend([argument, str(artifact)])
+    run_if_needed(
+        "design_review",
+        design_review,
+        design_review_command,
         force,
         generated,
         skipped,
@@ -1456,6 +1549,16 @@ def run(
     ]
     if project_out:
         delivery_command.extend(["--project-understanding", str(project_out)])
+    delivery_command.extend([
+        "--design-review",
+        str(design_review),
+        "--test-design",
+        str(test_design),
+        "--test-data-plan",
+        str(test_data_plan),
+    ])
+    if (out / "cross_repo_readiness.json").exists():
+        delivery_command.extend(["--cross-repo-readiness", str(out / "cross_repo_readiness.json")])
     run_if_needed(
         "delivery_plan",
         delivery_plan,
@@ -1465,8 +1568,6 @@ def run(
         skipped,
         steps,
     )
-
-    run_pre_review_planning_steps(selected_profile, out, spec, delivery_plan, force, generated, skipped, steps)
 
     if profile_requires(selected_profile, "traceability-governor"):
         run_initial_traceability(out, force, generated, skipped, steps)
@@ -1496,6 +1597,11 @@ def run(
     if docs_sync.get("decision") == "pass":
         docs_status = docs_readiness(effective_docs_root, doc_id)
     docs_quality = run_docs_quality(effective_docs_root, docs_sync, out)
+    WORKFLOW_CONTRACT.bind_lineage(
+        out / "docs_quality.json",
+        "docs_quality",
+        workflow_stage_inputs(out / "docs_quality.json"),
+    )
     generated.append("docs_quality.json")
 
     delivery_status = out / "delivery_status.json"

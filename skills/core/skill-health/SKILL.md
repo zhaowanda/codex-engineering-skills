@@ -32,6 +32,10 @@ skill/documentation changes
 - Python scripts under skill folders must compile.
 - Tests must exist for the repository.
 - Roadmap should contain completion markers for release tracking.
+- Validate workflow v3 schemas, required fields, semantic dependencies, profile applicability, and the default fail-closed validator.
+- Execute the synthetic E2E suite and reject placeholder artifacts for every registered stage; source-string presence is not runtime evidence.
+- Reserve expert-level skill classification for expert/advisory gates. Helpers, orchestrators, and templates may score advanced but not expert.
+- Set real-project calibration to zero until privacy-reviewed replays declare `source_type=anonymized_real_project`; framework expert requires at least three such replays across three scenario families.
 
 ## Command
 
@@ -44,4 +48,4 @@ python3 scripts/skill_health.py \
 
 The output uses schema `codex-skill-health-v1`.
 
-The artifact reports skill count, blockers, warnings, and a pass/warn/block decision.
+The artifact reports skill count, blockers, warnings, runtime workflow assessment, five-dimensional framework assessment, and a pass/warn/block decision.

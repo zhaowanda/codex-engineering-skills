@@ -349,13 +349,18 @@ def report(root: Path) -> dict[str, Any]:
             "artifact_schema_warning_count": artifact_schema_gate.get("warning_count", 0),
             "design_template_regression_decision": design_template_gate.get("decision"),
             "requirement_understanding_strict": requirement_understanding_gate,
-            "expert_readiness_strict": (
+            "structural_readiness_strict": (
                 health["json"].get("decision") == "pass"
                 and artifact_schema_gate.get("decision") == "pass"
                 and design_template_gate.get("decision") == "pass"
                 and requirement_understanding_gate
                 and privacy["json"].get("decision") == "pass"
                 and forward["json"].get("decision") == "pass"
+            ),
+            "expert_readiness_strict": (
+                health["json"].get("framework_expert_assessment", {}).get("level") == "expert"
+                and health["json"].get("framework_expert_assessment", {}).get("real_project_replay_count", 0) >= 3
+                and health["json"].get("framework_expert_assessment", {}).get("real_project_replay_family_count", 0) >= 3
             ),
             "forward_test_decision": forward["json"].get("decision"),
             "replay_case_count": replay["json"].get("case_count", 0),

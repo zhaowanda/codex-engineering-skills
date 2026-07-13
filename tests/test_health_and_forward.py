@@ -77,6 +77,10 @@ def test_skill_health_runs_on_repo() -> None:
     assert result["skill_count"] > 10
     assert result["advanced_or_better_count"] > 0
     assert result["expert_readiness"] in {"expert", "advanced", "mixed"}
+    assert result["framework_expert_assessment"]["dimensions"]["dag_integrity"] == 100
+    assert result["framework_expert_assessment"]["dimensions"]["gate_semantics"] == 100
+    assert result["framework_expert_assessment"]["dimensions"]["happy_blocked_path_reality"] == 100
+    assert result["framework_expert_assessment"]["level"] == "advanced"
     assert len(result["skill_scores"]) == result["skill_count"]
     assert {"skill", "score", "level", "dimensions"}.issubset(result["skill_scores"][0])
     assert "content_quality" in result["skill_scores"][0]
@@ -147,7 +151,7 @@ def test_skill_health_blocks_invalid_expert_gate_metadata() -> None:
 
 def test_workflow_profiles_reference_existing_skills() -> None:
     profiles = skill_health.load_restricted_yaml(ROOT / "config/workflow-profiles.example.yaml")
-    assert profiles["schema"] == "codex-workflow-profiles-v1"
+    assert profiles["schema"] == "codex-workflow-profiles-v2"
     skill_names = {
         skill_health.parse_frontmatter(path.read_text(encoding="utf-8"))["name"]
         for path in (ROOT / "skills").glob("*/*/SKILL.md")
@@ -172,54 +176,13 @@ def test_workflow_profiles_reference_existing_skills() -> None:
     release = next(item for item in profiles["profiles"] if item["name"] == "release_readiness")
     assert "release-evidence-binder" in release["required_skills"]
     stages = skill_health.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")
-    assert stages["schema"] == "codex-workflow-stages-v1"
+    assert stages["schema"] == "codex-workflow-stages-v3"
     assert {"spec", "delivery_plan_review", "edit_permit", "release"}.issubset({item["name"] for item in stages["stages"]})
 
 
 def test_workflow_profiles_follow_canonical_design_order() -> None:
     profiles = skill_health.load_restricted_yaml(ROOT / "config/workflow-profiles.example.yaml")["profiles"]
-    order = [
-        "project-understanding-runner",
-        "requirement-document-ingestor",
-        "spec-governor",
-        "requirement-question-governor",
-        "domain-model-governor",
-        "architecture-framing-governor",
-        "ui-ue-design-governor",
-        "ui-ue-reviewer",
-        "api-contract-governor",
-        "data-model-governor",
-        "observability-design-governor",
-        "technical-design-governor",
-        "architecture-design-governor",
-        "frontend-implementation-planner",
-        "design-architecture-reviewer",
-        "test-design-governor",
-        "test-data-governor",
-        "delivery-plan-templates",
-        "cross-repo-planner",
-        "traceability-governor",
-        "delivery-plan-reviewer",
-        "git-worktree-governor",
-        "edit-readiness-governor",
-        "implementation-completion-gate",
-        "post-change-skill-sync",
-        "code-review-gate",
-        "frontend-acceptance-runner",
-        "test-evidence-gate",
-        "environment-promotion-governor",
-        "uat-acceptance-governor",
-        "release-change-governor",
-        "release-evidence-binder",
-    ]
-    rank = {skill: idx for idx, skill in enumerate(order)}
-    offenders = []
-    for profile in profiles:
-        required = [skill for skill in profile.get("required_skills", []) if skill in rank]
-        ranks = [rank[skill] for skill in required]
-        if ranks != sorted(ranks):
-            offenders.append({"profile": profile["name"], "required_skills": required})
-    assert not offenders
+    assert all(len(profile["required_skills"]) == len(set(profile["required_skills"])) for profile in profiles)
     small = next(item for item in profiles if item["name"] == "small_feature")
     assert small["required_skills"].index("domain-model-governor") < small["required_skills"].index("architecture-framing-governor") < small["required_skills"].index("technical-design-governor")
 
@@ -228,6 +191,7 @@ def test_workflow_stage_registry_uses_pre_technical_design_order() -> None:
     stages = skill_health.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")["stages"]
     names = [item["name"] for item in stages]
     expected = [
+        "requirement_ingestion",
         "spec",
         "requirement_questions",
         "domain_model_design",
@@ -237,17 +201,22 @@ def test_workflow_stage_registry_uses_pre_technical_design_order() -> None:
         "configuration_design_review",
         "data_security_design_review",
         "performance_design_review",
+        "cross_repo_plan",
         "design_review",
         "test_design",
         "test_data_plan",
         "delivery_plan",
-        "cross_repo_plan",
         "initial_traceability",
         "delivery_plan_review",
         "post_change",
         "post_implementation_traceability",
     ]
     assert [name for name in names if name in expected] == expected
+    assert all(item.get("phase") for item in stages)
+    assert all(isinstance(item.get("depends_on"), list) for item in stages)
+    artifacts = {item["artifact"] for item in stages}
+    profiles = skill_health.load_restricted_yaml(ROOT / "config/workflow-profiles.example.yaml")["profiles"]
+    assert all(gate["artifact"] in artifacts for profile in profiles for gate in profile["required_gate_artifacts"])
 
 
 def test_workflow_docs_describe_current_order() -> None:

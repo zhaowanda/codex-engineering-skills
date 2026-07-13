@@ -1,15 +1,21 @@
 ---
 name: delivery-state-governor
-description: Maintain one canonical delivery_state.json for AI-assisted engineering workflows. Use to initialize, inspect, advance, block, unblock, and validate requirement stage state across requirement docs, design, Git, implementation, review, test, release, and post-release gates.
-category: workflow-gate
-maturity: expert-gate
+description: Maintain a compatibility navigation snapshot in delivery_state.json. Use to initialize, inspect, advance, block, unblock, and validate legacy delivery state while workflow-stages-v3 and delivery-runner remain the canonical readiness authority.
+category: artifact-generator
+maturity: deterministic-helper
 stage: delivery-planning
-gate: true
+gate: false
 ---
 
 # Delivery State Governor
 
-Use this skill as the single machine-readable status board for a requirement. It does not replace detailed artifacts; it records which stage is current, which gates are required, which evidence exists, and why delivery is blocked.
+Use this skill as a legacy-compatible navigation snapshot for a requirement. It does not replace detailed artifacts or the canonical stage registry.
+
+## Authority
+
+- `config/workflow-stages.example.yaml` and `delivery-runner` are the only implementation/release readiness authority.
+- `delivery_state.json` may summarize progress for existing integrations, but it cannot grant implementation or release permission.
+- A state validation result is advisory unless the same evidence also passes the v3 artifact contracts, dependency checks, and lineage checks.
 
 ## Position
 
@@ -70,8 +76,7 @@ python3 scripts/delivery_state.py \
 - Treat `delivery_state.json` as navigation state, not the source of detailed facts.
 - Store detailed facts in spec/design/plan/test/release/evidence artifacts.
 - Every blocker must have a concrete next action.
-- Do not implement unless `validate --target implementation` returns `decision=ready`.
-- Do not release unless `validate --target release` returns `decision=ready`.
+- Do not use `validate --target implementation` or `validate --target release` as a substitute for `delivery-runner` readiness.
 - When repo states declare `requires_git` or `requires_edit_permit`, validation requires matching per-repo evidence before implementation.
 - Release validation blocks incomplete `integration_gates` unless each gate is `passed`, `ready`, `complete`, or `waived`.
 - Let downstream gates advance only the evidence they own.

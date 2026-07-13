@@ -314,8 +314,23 @@ def test_auto_runner_is_idempotent_without_force() -> None:
         out = Path(tmp) / "artifacts"
         auto_runner.run(ROOT / "examples/synthetic-e2e-case/requirement.md", doc_id="REQ-AUTO-2", out=out)
         second = auto_runner.run(ROOT / "examples/synthetic-e2e-case/requirement.md", doc_id="REQ-AUTO-2", out=out)
-        assert "requirement.normalized.txt" in second["skipped_artifacts"]
+        assert "requirement_ingestion.json" in second["skipped_artifacts"]
         assert "spec.json" in second["skipped_artifacts"]
+
+
+def test_auto_runner_regenerates_transitive_artifacts_when_requirement_changes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        requirement = root / "requirement.md"
+        requirement.write_text("Goal: show status. AC: status is visible.\n", encoding="utf-8")
+        out = root / "artifacts"
+        auto_runner.run(requirement, doc_id="REQ-LINEAGE", out=out, profile="small_feature")
+        before = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))["input_digests"]["spec.json"]
+        requirement.write_text("Goal: show status and owner. AC: status and owner are visible.\n", encoding="utf-8")
+        second = auto_runner.run(requirement, doc_id="REQ-LINEAGE", out=out, profile="small_feature")
+        after = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))["input_digests"]["spec.json"]
+        assert before != after
+        assert {"requirement_ingestion.json", "spec.json", "technical_design.json", "architecture_design.json"}.issubset(set(second["generated_artifacts"]))
 
 
 def test_auto_runner_force_regenerates_existing_artifacts() -> None:
@@ -577,6 +592,19 @@ def test_cross_repo_planning_runs_before_delivery_plan_review() -> None:
         auto_runner.run_pre_review_planning_steps(profile, out, out / "spec.json", out / "delivery_plan.json", False, generated, skipped, steps)
         assert steps[0]["name"] == "cross_repo_plan"
         assert (out / "cross_repo_readiness.json").exists()
+
+
+def test_cross_repo_readiness_is_aggregated_by_final_design_review() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "api.md"
+        req.write_text("Req: Add API contract. AC: existing consumer remains compatible.", encoding="utf-8")
+        out = root / "artifacts"
+        result = auto_runner.run(req, doc_id="REQ-CROSS-REVIEW", out=out, profile="cross_repo_api")
+        step_names = [item.get("name") for item in result["steps"]]
+        assert step_names.index("delivery_plan_draft") < step_names.index("cross_repo_plan") < step_names.index("design_review")
+        review = json.loads((out / "design_architecture_review.json").read_text(encoding="utf-8"))
+        assert "cross_repo_readiness.json" in review["input_digests"]
 
 
 def test_auto_runner_generates_specialty_design_before_technical_design() -> None:

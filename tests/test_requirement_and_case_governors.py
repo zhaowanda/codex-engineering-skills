@@ -106,6 +106,35 @@ def test_question_governor_blocks_closed_required_question_without_answer() -> N
     assert any("answer" in item["message"] for item in result["blockers"])
 
 
+def test_question_governor_binds_answers_to_current_spec_and_merges_stable_questions() -> None:
+    original = {
+        "schema": "codex-spec-v1",
+        "doc_id": "REQ-DIGEST",
+        "acceptance_criteria": [],
+        "open_questions": [{"question": "Which fields?", "status": "open"}],
+        "scope": {"in_scope": ["export"]},
+    }
+    first = question_governor.generate(original)
+    required_questions = [item for item in first["questions"] if item["required"]]
+    for item in required_questions:
+        item["status"] = "closed"
+        item["answer"] = "Confirmed answer"
+        item["answer_provenance"] = [{"source": "product_owner"}]
+    required = required_questions[0]
+    first["decision"] = "pass"
+
+    changed = dict(original)
+    changed["scope"] = {"in_scope": ["export", "filtering"]}
+    merged = question_governor.generate(changed, first)
+    carried = next(item for item in merged["questions"] if item["id"] == required["id"])
+    assert merged["spec_digest"] != first["spec_digest"]
+    assert carried["status"] == "closed"
+    assert carried["answer"] == "Confirmed answer"
+    assert any(item["source"] == "carried_forward" for item in carried["answer_provenance"])
+    assert question_governor.validate_questions(first, changed)["decision"] == "block"
+    assert question_governor.validate_questions(merged, changed)["decision"] == "pass"
+
+
 def test_spec_blocks_ambiguous_requirement_without_real_goal_or_flow() -> None:
     spec = spec_governor.normalize("REQ-AMB", "续费优化", "优化续费流程，状态更新正确，功能正常。")
     validation = spec_governor.validate_spec(spec)

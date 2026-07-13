@@ -57,4 +57,6 @@ The output uses schema `codex-technical-design-v1`.
 
 The artifact includes process flow, modules, logical data flow, API/UI behavior, data model/table schema, system sequence, MQ/cache/transaction/observability decisions, detailed options, selected approach, weighted comparison matrix, score summary, invariants, tests, risks, and traceability.
 
+It also emits top-level `decision` and `blockers`; downstream workflow contracts accept only `decision=pass`.
+
 Readiness decision is enforced by `design-architecture-reviewer`: missing or weak design evidence must appear as review findings/blockers and must not proceed to implementation until the review decision is pass.

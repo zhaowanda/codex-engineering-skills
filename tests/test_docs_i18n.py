@@ -703,9 +703,6 @@ def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
         result = docs_governor.sync(docs_root, doc_id, artifact_dir, "路径脱敏", doc_language="zh")
 
         paths_to_check = [
-            artifact_dir / "architecture_design.json",
-            artifact_dir / "delivery_plan.json",
-            artifact_dir / "project_understanding/code_index.json",
             docs_root / "machine/designs" / f"{doc_id}.design.json",
             docs_root / "machine/raw" / doc_id / "architecture_design.json",
             docs_root / "machine/raw" / doc_id / "delivery_plan.json",
@@ -715,6 +712,7 @@ def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
         assert str(root) not in combined
         assert "<docs-root>" in combined or "<artifact-dir>" in combined or "<workspace>" in combined
         assert result["sanitized_artifacts"]
+        assert str(repo_root) in (artifact_dir / "architecture_design.json").read_text(encoding="utf-8")
 
 
 def test_zh_text_preserves_unquoted_command_tokens() -> None:

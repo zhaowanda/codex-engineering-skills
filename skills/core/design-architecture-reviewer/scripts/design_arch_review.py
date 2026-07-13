@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -152,6 +153,52 @@ def has_signal(blob: str, terms: tuple[str, ...]) -> bool:
 
 def finding(area: str, severity: str, message: str, evidence: Any, suggestion: str) -> dict[str, Any]:
     return {"area": area, "severity": severity, "message": message, "evidence": evidence, "suggestion": suggestion}
+
+
+def artifact_digest(data: dict[str, Any]) -> str:
+    def strip_volatile(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: strip_volatile(item)
+                for key, item in sorted(value.items())
+                if key not in {"generated_at", "updated_at", "producer", "producer_version", "lineage_schema", "input_digests"}
+            }
+        if isinstance(value, list):
+            return [strip_volatile(item) for item in value]
+        return value
+
+    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def review_specialty_artifacts(specialty_artifacts: dict[str, dict[str, Any]], findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    area_by_name = {
+        "ui_ue_review.json": "frontend_behavior_review",
+        "api_contract_design.json": "api_contract_review",
+        "data_model_design.json": "data_model_review",
+        "observability_design.json": "observability_review",
+        "configuration_readiness.json": "deployment_rollback_review",
+        "data_security_review.json": "security_review",
+        "performance_review.json": "performance_review",
+        "cross_repo_readiness.json": "cross_repo_contract_review",
+    }
+    summary: list[dict[str, Any]] = []
+    blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "needs_review", "needs_evidence", "no_go"}
+    for name, artifact in specialty_artifacts.items():
+        if not artifact:
+            continue
+        decision = str(artifact.get("decision") or artifact.get("status") or "")
+        blockers = as_list(artifact.get("blockers")) + as_list(artifact.get("active_blockers"))
+        summary.append({"artifact": name, "decision": decision, "blocker_count": len(blockers)})
+        if decision in blocking_decisions or blockers:
+            findings.append(finding(
+                area_by_name.get(name, "technical_design_quality"),
+                "blocker",
+                f"specialty design gate {name} is not approved",
+                {"decision": decision, "blockers": blockers},
+                "Resolve the specialty design findings and regenerate dependent technical, architecture, test, and delivery artifacts.",
+            ))
+    return summary
 
 
 def highest_scored_option(score_summary: dict[str, Any]) -> str:
@@ -461,8 +508,15 @@ def review_new_service_design(new_service: dict[str, Any], findings: list[dict[s
             findings.append(finding(area, "high", f"{key} lacks required new-service fields", {"missing": nested_missing}, f"Complete {key}: {', '.join(fields)}."))
 
 
-def review(technical: dict[str, Any], architecture: dict[str, Any], ui_ue_artifact: dict[str, Any] | None = None) -> dict[str, Any]:
+def review(
+    technical: dict[str, Any],
+    architecture: dict[str, Any],
+    ui_ue_artifact: dict[str, Any] | None = None,
+    specialty_artifacts: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
+    specialty_artifacts = specialty_artifacts or {}
+    specialty_summary = review_specialty_artifacts(specialty_artifacts, findings)
     current_state = technical.get("current_state_analysis") if isinstance(technical.get("current_state_analysis"), dict) else {}
     problem_analysis = technical.get("problem_analysis") if isinstance(technical.get("problem_analysis"), dict) else {}
     requirement_breakdown = [item for item in as_list(technical.get("requirement_breakdown")) if isinstance(item, dict)]
@@ -853,6 +907,12 @@ def review(technical: dict[str, Any], architecture: dict[str, Any], ui_ue_artifa
     grouped = {area: [item for item in findings if item["area"] == area] for area in REVIEW_AREAS}
     return {
         "schema": "codex-design-architecture-review-v1",
+        "input_digests": {
+            "technical_design.json": artifact_digest(technical),
+            "architecture_design.json": artifact_digest(architecture),
+            **{name: artifact_digest(data) for name, data in specialty_artifacts.items() if data},
+        },
+        "specialty_review_summary": specialty_summary,
         "score": score_card["score"],
         "level": score_card["level"],
         "severity_counts": score_card["severity_counts"],
@@ -908,13 +968,36 @@ def main() -> int:
     p_review.add_argument("--technical-design", required=True)
     p_review.add_argument("--architecture-design", required=True)
     p_review.add_argument("--ui-ue-design")
+    p_review.add_argument("--ui-ue-review")
+    p_review.add_argument("--api-contract-design")
+    p_review.add_argument("--data-model-design")
+    p_review.add_argument("--observability-design")
+    p_review.add_argument("--configuration-readiness")
+    p_review.add_argument("--data-security-review")
+    p_review.add_argument("--performance-review")
+    p_review.add_argument("--cross-repo-readiness")
     p_review.add_argument("--out")
     p_validate = sub.add_parser("validate")
     p_validate.add_argument("--file", required=True)
     args = parser.parse_args()
 
     if args.cmd == "review":
-        result = review(read_json(args.technical_design), read_json(args.architecture_design), read_json(args.ui_ue_design) if args.ui_ue_design else None)
+        specialty_paths = {
+            "ui_ue_review.json": args.ui_ue_review,
+            "api_contract_design.json": args.api_contract_design,
+            "data_model_design.json": args.data_model_design,
+            "observability_design.json": args.observability_design,
+            "configuration_readiness.json": args.configuration_readiness,
+            "data_security_review.json": args.data_security_review,
+            "performance_review.json": args.performance_review,
+            "cross_repo_readiness.json": args.cross_repo_readiness,
+        }
+        result = review(
+            read_json(args.technical_design),
+            read_json(args.architecture_design),
+            read_json(args.ui_ue_design) if args.ui_ue_design else None,
+            {name: read_json(path) for name, path in specialty_paths.items() if path},
+        )
         if args.out:
             Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False, indent=2))

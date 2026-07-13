@@ -111,7 +111,7 @@ def sanitize_for_docs(value: Any, docs_root: Path | None = None, artifact_dir: P
     return value
 
 
-def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path) -> list[str]:
+def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path, mutate: bool = False) -> list[str]:
     sanitized: list[str] = []
     suffixes = {".json", ".md", ".txt", ".log"}
     if not artifact_dir.exists():
@@ -133,7 +133,8 @@ def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path) -> l
         else:
             updated = sanitize_local_paths(original, docs_root, artifact_dir)
         if updated != original:
-            path.write_text(updated, encoding="utf-8")
+            if mutate:
+                path.write_text(updated, encoding="utf-8")
             sanitized.append(str(path.relative_to(artifact_dir)))
     return sanitized
 
@@ -5499,7 +5500,7 @@ def sync(
     manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language) if human_section == "all" else sync_manifest_without_rewrite(docs_root, doc_id, title, language)
     inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir)
     generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id)
-    sanitized_artifacts = [] if human_section != "all" else sanitize_artifact_tree_local_paths(artifact_dir, docs_root)
+    sanitized_artifacts = [] if human_section != "all" else sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
     human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],

@@ -228,6 +228,24 @@ def test_complete_design_passes() -> None:
     assert valid, issues
 
 
+def test_specialty_blocker_is_aggregated_and_blocks_implementation() -> None:
+    technical, architecture = complete_design()
+    result = design_arch_review.review(
+        technical,
+        architecture,
+        specialty_artifacts={
+            "data_security_review.json": {
+                "decision": "needs_review",
+                "blockers": [{"message": "tenant isolation is undefined"}],
+            }
+        },
+    )
+    assert result["decision"] == "block"
+    assert result["readiness_gate"]["implementation_allowed"] is False
+    assert result["specialty_review_summary"][0]["artifact"] == "data_security_review.json"
+    assert result["input_digests"]["technical_design.json"]
+
+
 def test_missing_option_comparison_needs_revision() -> None:
     technical, architecture = complete_design()
     technical["option_comparison_matrix"] = []

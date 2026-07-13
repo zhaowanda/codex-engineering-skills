@@ -1,4 +1,4 @@
-schema: codex-workflow-profiles-v1
+schema: codex-workflow-profiles-v2
 profiles:
   - name: bugfix
     trigger_lanes:
@@ -8,6 +8,7 @@ profiles:
       - spec-governor
       - requirement-question-governor
       - technical-design-governor
+      - architecture-design-governor
       - design-architecture-reviewer
       - test-design-governor
       - test-data-governor
@@ -16,13 +17,16 @@ profiles:
       - delivery-plan-reviewer
       - git-worktree-governor
       - edit-readiness-governor
+      - workspace-write-guard
     optional_skills:
       - diff-impact-analyzer
       - test-evidence-gate
     expected_artifacts:
       - spec.json
+      - requirement_ingestion.json
       - open_questions.json
       - technical_design.json
+      - architecture_design.json
       - test_design.json
       - test_data_plan.json
       - design_architecture_review.json
@@ -30,15 +34,24 @@ profiles:
       - traceability_matrix.json
       - delivery_plan_review.json
       - docs_quality.json
+      - git_worktree_evidence.json
+      - edit_permit.json
+      - write_guard_snapshot.json
     required_gate_artifacts:
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
           - pass
+      - artifact: requirement_ingestion.json
+        accepted_decisions:
+          - ready
       - artifact: open_questions.json
         accepted_decisions:
           - pass
+        digest_source: spec.json
+        digest_path: spec_digest
       - artifact: technical_design.json
+      - artifact: architecture_design.json
       - artifact: test_design.json
       - artifact: test_data_plan.json
       - artifact: docs_quality.json
@@ -59,6 +72,16 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: git_worktree_evidence.json
+        accepted_decisions:
+          - ready
+      - artifact: edit_permit.json
+        accepted_decisions:
+          - ready
+          - pass
+      - artifact: write_guard_snapshot.json
+        accepted_decisions:
+          - ready
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
       - required artifacts exist
@@ -84,9 +107,13 @@ profiles:
       - delivery-plan-templates
       - traceability-governor
       - delivery-plan-reviewer
+      - git-worktree-governor
+      - edit-readiness-governor
+      - workspace-write-guard
     optional_skills: []
     expected_artifacts:
       - spec.json
+      - requirement_ingestion.json
       - open_questions.json
       - domain_model_design.json
       - architecture_framing.json
@@ -99,21 +126,28 @@ profiles:
       - traceability_matrix.json
       - delivery_plan_review.json
       - docs_quality.json
+      - git_worktree_evidence.json
+      - edit_permit.json
+      - write_guard_snapshot.json
     required_gate_artifacts:
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
           - pass
+      - artifact: requirement_ingestion.json
+        accepted_decisions:
+          - ready
       - artifact: open_questions.json
         accepted_decisions:
           - pass
+        digest_source: spec.json
+        digest_path: spec_digest
       - artifact: domain_model_design.json
         accepted_decisions:
           - pass
       - artifact: architecture_framing.json
         accepted_decisions:
           - pass
-          - block
       - artifact: technical_design.json
       - artifact: architecture_design.json
       - artifact: test_design.json
@@ -136,6 +170,16 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: git_worktree_evidence.json
+        accepted_decisions:
+          - ready
+      - artifact: edit_permit.json
+        accepted_decisions:
+          - ready
+          - pass
+      - artifact: write_guard_snapshot.json
+        accepted_decisions:
+          - ready
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
       - design review passes
@@ -147,6 +191,7 @@ profiles:
       - ui
       - frontend
     required_skills:
+      - requirement-document-ingestor
       - spec-governor
       - requirement-question-governor
       - domain-model-governor
@@ -154,17 +199,21 @@ profiles:
       - ui-ue-design-governor
       - ui-ue-reviewer
       - technical-design-governor
-      - architecture-design-governor
       - frontend-implementation-planner
+      - architecture-design-governor
       - design-architecture-reviewer
       - test-design-governor
       - test-data-governor
       - delivery-plan-templates
       - traceability-governor
       - delivery-plan-reviewer
+      - git-worktree-governor
+      - edit-readiness-governor
+      - workspace-write-guard
     optional_skills:
       - code-review-gate
     expected_artifacts:
+      - requirement_ingestion.json
       - spec.json
       - open_questions.json
       - domain_model_design.json
@@ -181,6 +230,9 @@ profiles:
       - traceability_matrix.json
       - delivery_plan_review.json
       - docs_quality.json
+      - git_worktree_evidence.json
+      - edit_permit.json
+      - write_guard_snapshot.json
     artifact_steps:
       - name: domain_model_design
         artifact: domain_model_design.json
@@ -234,6 +286,9 @@ profiles:
           - --out
           - "{artifact_dir}/frontend_implementation_plan.json"
     required_gate_artifacts:
+      - artifact: requirement_ingestion.json
+        accepted_decisions:
+          - ready
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
@@ -241,6 +296,8 @@ profiles:
       - artifact: open_questions.json
         accepted_decisions:
           - pass
+        digest_source: spec.json
+        digest_path: spec_digest
       - artifact: domain_model_design.json
         accepted_decisions:
           - pass
@@ -249,7 +306,6 @@ profiles:
       - artifact: architecture_framing.json
         accepted_decisions:
           - pass
-          - block
       - artifact: ui_ue_design.json
         accepted_decisions:
           - pass
@@ -281,6 +337,16 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: git_worktree_evidence.json
+        accepted_decisions:
+          - ready
+      - artifact: edit_permit.json
+        accepted_decisions:
+          - ready
+          - pass
+      - artifact: write_guard_snapshot.json
+        accepted_decisions:
+          - ready
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
       - UI/UE design must name concrete user entry surfaces such as menu, route, button, form submit, table action, or dialog action
@@ -292,6 +358,7 @@ profiles:
     trigger_impacts:
       - api
     required_skills:
+      - requirement-document-ingestor
       - project-understanding-runner
       - spec-governor
       - requirement-question-governor
@@ -308,11 +375,14 @@ profiles:
       - cross-repo-planner
       - traceability-governor
       - delivery-plan-reviewer
-      - release-evidence-binder
+      - git-worktree-governor
+      - edit-readiness-governor
+      - workspace-write-guard
     optional_skills:
       - api-surface-extractor
       - code-review-gate
     expected_artifacts:
+      - requirement_ingestion.json
       - project_understanding/baseline_quality.json
       - spec.json
       - open_questions.json
@@ -326,12 +396,16 @@ profiles:
       - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
+      - delivery_plan_draft.json
       - cross_repo_execution_graph.json
       - cross_repo_readiness.json
       - cross_repo_release_plan.json
       - traceability_matrix.json
       - delivery_plan_review.json
       - docs_quality.json
+      - git_worktree_evidence.json
+      - edit_permit.json
+      - write_guard_snapshot.json
     artifact_steps:
       - name: domain_model_design
         artifact: domain_model_design.json
@@ -391,6 +465,9 @@ profiles:
           - --out-dir
           - "{artifact_dir}"
     required_gate_artifacts:
+      - artifact: requirement_ingestion.json
+        accepted_decisions:
+          - ready
       - artifact: project_understanding/baseline_quality.json
         accepted_decisions:
           - pass
@@ -398,6 +475,8 @@ profiles:
       - artifact: open_questions.json
         accepted_decisions:
           - pass
+        digest_source: spec.json
+        digest_path: spec_digest
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
@@ -410,7 +489,6 @@ profiles:
       - artifact: architecture_framing.json
         accepted_decisions:
           - pass
-          - block
       - artifact: api_contract_design.json
         accepted_decisions:
           - pass
@@ -427,6 +505,9 @@ profiles:
         accepted_decisions:
           - ready
           - pass
+      - artifact: delivery_plan_draft.json
+        accepted_decisions:
+          - ready
       - artifact: traceability_matrix.json
         accepted_decisions:
           - pass
@@ -441,6 +522,16 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: git_worktree_evidence.json
+        accepted_decisions:
+          - ready
+      - artifact: edit_permit.json
+        accepted_decisions:
+          - ready
+          - pass
+      - artifact: write_guard_snapshot.json
+        accepted_decisions:
+          - ready
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
       - project understanding exists
@@ -450,6 +541,7 @@ profiles:
     trigger_impacts:
       - data
     required_skills:
+      - requirement-document-ingestor
       - spec-governor
       - requirement-question-governor
       - domain-model-governor
@@ -467,10 +559,14 @@ profiles:
       - delivery-plan-templates
       - traceability-governor
       - delivery-plan-reviewer
+      - git-worktree-governor
+      - edit-readiness-governor
+      - workspace-write-guard
     optional_skills:
       - environment-promotion-governor
       - uat-acceptance-governor
     expected_artifacts:
+      - requirement_ingestion.json
       - spec.json
       - open_questions.json
       - domain_model_design.json
@@ -489,6 +585,9 @@ profiles:
       - configuration_readiness.json
       - data_security_review.json
       - performance_review.json
+      - git_worktree_evidence.json
+      - edit_permit.json
+      - write_guard_snapshot.json
     artifact_steps:
       - name: domain_model_design
         artifact: domain_model_design.json
@@ -581,6 +680,9 @@ profiles:
           - --out
           - "{artifact_dir}/performance_review.json"
     required_gate_artifacts:
+      - artifact: requirement_ingestion.json
+        accepted_decisions:
+          - ready
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
@@ -588,6 +690,8 @@ profiles:
       - artifact: open_questions.json
         accepted_decisions:
           - pass
+        digest_source: spec.json
+        digest_path: spec_digest
       - artifact: domain_model_design.json
         accepted_decisions:
           - pass
@@ -596,11 +700,9 @@ profiles:
       - artifact: architecture_framing.json
         accepted_decisions:
           - pass
-          - block
       - artifact: data_model_design.json
         accepted_decisions:
           - pass
-          - block
       - artifact: observability_design.json
         accepted_decisions:
           - pass
@@ -636,6 +738,16 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: git_worktree_evidence.json
+        accepted_decisions:
+          - ready
+      - artifact: edit_permit.json
+        accepted_decisions:
+          - ready
+          - pass
+      - artifact: write_guard_snapshot.json
+        accepted_decisions:
+          - ready
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
       - data design and rollback are reviewed
@@ -646,18 +758,28 @@ profiles:
     required_skills:
       - implementation-completion-gate
       - post-change-skill-sync
-      - code-review-gate
+      - workspace-write-guard
+      - diff-impact-analyzer
+      - traceability-governor
+      - change-risk-governor
+      - evidence-auto-collector
+      - code-design-quality-reviewer
       - test-evidence-gate
+      - code-review-gate
       - environment-promotion-governor
       - uat-acceptance-governor
       - release-change-governor
       - release-evidence-binder
     optional_skills:
       - post-release-observer
-      - traceability-governor
     expected_artifacts:
       - implementation_completion_gate.json
       - post_change_implementation_report.json
+      - write_guard_audit.json
+      - diff_impact.json
+      - change_risk.json
+      - evidence_gap_summary.json
+      - code_design_quality.json
       - code_review_gate.json
       - test_evidence_gate.json
       - post_implementation_traceability_matrix.json
@@ -720,9 +842,29 @@ profiles:
         accepted_decisions:
           - pass
           - warn
+      - artifact: write_guard_audit.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: diff_impact.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: change_risk.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: evidence_gap_summary.json
+        accepted_decisions:
+          - pass
+      - artifact: code_design_quality.json
+        accepted_decisions:
+          - pass
+          - approved
       - artifact: code_review_gate.json
         accepted_decisions:
           - pass
+          - approve
           - approved
       - artifact: test_evidence_gate.json
         accepted_decisions:
@@ -747,7 +889,6 @@ profiles:
       - artifact: release_gate.json
         accepted_decisions:
           - go
-          - conditional_go
     next_safe_command: python3 skills/core/release-evidence-binder/scripts/bind_release.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/release_gate.json
     notes:
       - implementation is complete
