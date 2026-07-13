@@ -388,9 +388,12 @@ def check(root: Path) -> dict[str, Any]:
             if profile_name == "release_readiness" and "release-evidence-binder" not in required:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "release_readiness must include release-evidence-binder"})
             if profile_name == "frontend_change":
-                for required_skill in ["frontend-acceptance-runner", "test-evidence-gate"]:
+                for required_skill in ["frontend-implementation-planner"]:
                     if required_skill not in required:
                         blockers.append({"source": f"workflow_profile.{profile_name}", "message": f"frontend_change must include {required_skill}"})
+                for post_implementation_skill in ["frontend-acceptance-runner", "test-evidence-gate"]:
+                    if post_implementation_skill in required:
+                        blockers.append({"source": f"workflow_profile.{profile_name}", "message": f"frontend_change must not require post-implementation skill {post_implementation_skill}"})
     stage_path = root / "config/workflow-stages.example.yaml"
     if stage_path.exists():
         stages_doc = load_restricted_yaml(stage_path)

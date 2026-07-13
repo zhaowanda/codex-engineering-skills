@@ -357,12 +357,11 @@ def test_auto_runner_explicit_profile_selects_required_gates() -> None:
             profile="frontend_change",
         )
         assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "frontend_change"
-        assert "frontend-acceptance-runner" in result["required_gates"]
-        assert "test-evidence-gate" in result["required_gates"]
-        assert (out / "frontend_acceptance.json").exists()
-        assert (out / "test_evidence_gate.json").exists()
-        assert any(step["name"] == "frontend_acceptance_template" for step in result["steps"])
-        assert any(gap["artifact"] == "frontend_acceptance.json" for gap in result["profile_gate_gaps"])
+        assert "frontend-acceptance-runner" not in result["required_gates"]
+        assert "test-evidence-gate" not in result["required_gates"]
+        assert (out / "frontend_implementation_plan.json").exists()
+        assert not (out / "frontend_acceptance.json").exists()
+        assert not (out / "test_evidence_gate.json").exists()
 
 
 def test_auto_runner_infers_frontend_profile_from_requirement() -> None:
@@ -482,10 +481,9 @@ def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
         assert result["profile_selection_reason"]["composition_mode"] == "merged"
         assert "data-security-governor" in result["required_gates"]
         assert "performance-governor" in result["required_gates"]
-        assert "frontend-acceptance-runner" in result["required_gates"]
         assert "traceability-governor" in result["required_gates"]
-        assert (out / "frontend_acceptance.json").exists()
-        assert any(gap["artifact"] == "frontend_acceptance.json" for gap in result["profile_gate_gaps"])
+        assert (out / "frontend_implementation_plan.json").exists()
+        assert not (out / "frontend_acceptance.json").exists()
 
 
 def test_auto_runner_merges_repo_context_with_frontend_profile() -> None:
@@ -500,9 +498,9 @@ def test_auto_runner_merges_repo_context_with_frontend_profile() -> None:
     assert profile["composition_mode"] == "merged"
     assert profile["base_profile"] == "cross_repo_api"
     assert "frontend_change" in profile["overlay_profiles"]
-    assert "frontend-acceptance-runner" in profile["required_skills"]
     assert "project-understanding-runner" in profile["required_skills"]
-    assert "frontend_acceptance.json" in profile["expected_artifacts"]
+    assert "frontend_implementation_plan.json" in profile["expected_artifacts"]
+    assert "frontend_acceptance.json" not in profile["expected_artifacts"]
     assert reason["composition_mode"] == "merged"
 
 
@@ -552,6 +550,35 @@ def test_cross_repo_profile_artifact_step_generates_graph_artifacts() -> None:
         assert all(step.get("passed") for step in steps if not step.get("skipped"))
 
 
+def test_cross_repo_planning_runs_before_delivery_plan_review() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        (out / "spec.json").write_text(
+            json.dumps({"doc_id": "REQ-CROSS", "summary": "provider api consumed by frontend"}),
+            encoding="utf-8",
+        )
+        (out / "delivery_plan.json").write_text(
+            json.dumps(
+                {
+                    "doc_id": "REQ-CROSS",
+                    "repo_tasks": [
+                        {"repo": "provider", "role": "modify", "tasks": ["change api"]},
+                        {"repo": "frontend", "role": "modify", "tasks": ["consume api"]},
+                    ],
+                    "cross_repo_order": ["provider", "frontend"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        profile = auto_runner.load_profile_registry()["cross_repo_api"]
+        generated: list[str] = []
+        skipped: list[str] = []
+        steps: list[dict] = []
+        auto_runner.run_pre_review_planning_steps(profile, out, out / "spec.json", out / "delivery_plan.json", False, generated, skipped, steps)
+        assert steps[0]["name"] == "cross_repo_plan"
+        assert (out / "cross_repo_readiness.json").exists()
+
+
 def test_auto_runner_generates_specialty_design_before_technical_design() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -572,8 +599,9 @@ def test_auto_runner_generates_specialty_design_before_technical_design() -> Non
         assert step_names.index("domain_model_design") < step_names.index("architecture_framing") < step_names.index("technical_design")
         assert step_names.index("ui_ue_design") < step_names.index("technical_design")
         assert step_names.index("design_review") < step_names.index("test_design")
-        assert step_names.index("delivery_plan") < step_names.index("traceability_matrix") < step_names.index("delivery_plan_review")
+        assert step_names.index("delivery_plan") < step_names.index("initial_traceability") < step_names.index("delivery_plan_review")
         assert step_names.index("frontend_implementation_plan") > step_names.index("technical_design")
+        assert result["steps"][step_names.index("initial_traceability")]["traceability_phase"] == "initial_design_plan"
         tech = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))
         assert tech["architecture_framing_ref"] == "architecture_framing.json"
         assert (out / "ui_ue_design.json").exists()
@@ -600,6 +628,9 @@ def test_workflow_strictness_classifies_light_standard_and_regulated() -> None:
     api_bugfix = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "api"}]}, {"name": "bugfix+cross_repo_api"}, "high")
     assert api_bugfix["tier"] == "standard"
     assert api_bugfix["elevated"] is True
+    mq_bugfix = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "mq"}]}, {"name": "bugfix"}, "high")
+    assert mq_bugfix["tier"] == "standard"
+    assert mq_bugfix["elevated"] is True
     regulated = auto_runner.workflow_strictness({"lane": "standard_requirement", "impact_surface": [{"area": "data"}]}, {"name": "data_migration"}, "high")
     assert regulated["tier"] == "regulated"
     profile = {"name": "data_migration", "required_skills": ["release-evidence-binder"]}
@@ -620,7 +651,10 @@ def test_auto_runner_release_profile_only_checks_release_artifacts() -> None:
         assert result["workflow_profile"]["name"] == "release_readiness"
         assert result["safety_boundary"] == "release_artifact_inspection_only"
         assert not (out / "spec.json").exists()
+        assert (out / "post_implementation_traceability_matrix.json").exists()
         assert (out / "release_gate.json").exists()
+        assert any(step["name"] == "post_implementation_traceability" for step in result["steps"])
+        assert "spec" not in result["inspect_status"]["implementation_missing"]
         assert result["inspect_status"]["next_release_actions"]
 
 

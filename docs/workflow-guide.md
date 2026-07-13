@@ -7,7 +7,7 @@ requirement source
 -> project-understanding-runner when existing repositories or legacy code must be understood
 -> requirement-document-ingestor
 -> spec-governor
--> requirement-question-governor
+-> requirement-question-governor (required questions block design approval and implementation)
 -> domain-model-governor
 -> architecture-framing-governor
 -> UI/API/data/observability specialty design governors as applicable
@@ -16,16 +16,17 @@ requirement source
 -> design-architecture-reviewer
 -> test-design-governor
 -> test-data-governor
--> configuration/performance/data-security governors
+-> configuration/performance/data-security design governors
 -> delivery-plan-templates
--> traceability-governor after delivery_plan exists when acceptance/task scope must be proven
+-> cross-repo-planner before delivery plan review when more than one repository or contract boundary is involved
+-> traceability-governor initial pass after delivery_plan exists to prove requirement/design/test/task coverage
 -> delivery-plan-reviewer
 -> git-worktree-governor
 -> edit-readiness-governor
 -> implementation
 -> implementation-completion-gate
 -> diff-impact-analyzer
--> traceability-governor
+-> traceability-governor post-implementation pass to bind requirements to diff, tests, and release evidence
 -> change-risk-governor
 -> evidence-auto-collector
 -> workspace-write-guard
@@ -63,7 +64,8 @@ requirement-document-ingestor
 -> test-design-governor
 -> test-data-governor
 -> delivery-plan-templates
--> traceability-governor
+-> cross-repo-planner before delivery-plan-reviewer when repository order or contract compatibility can change the plan
+-> traceability-governor initial pass
 -> delivery-plan-reviewer
 ```
 
@@ -71,20 +73,22 @@ requirement-document-ingestor
 
 | Scenario | Required path |
 | --- | --- |
-| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> test-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo signals should elevate to the standard path. |
+| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> design-architecture-reviewer -> test-design-governor -> test-data-governor -> delivery-plan-templates -> traceability-governor initial pass -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo/MQ/async/scheduler/task/job/cache/integration/permission/security signals elevate above the light path. |
 | `small_feature` | Standard design-first profile, then Git/edit readiness gates. |
-| `frontend_change` | Standard design-first profile plus pre-technical `ui-ue-design-governor`, `ui-ue-reviewer`, `frontend-implementation-planner`, then `frontend-acceptance-runner -> test-evidence-gate`. |
-| `cross_repo_api` | API/cross-repo contract profile with project understanding, pre-technical API/observability design, delivery plan, `traceability-governor`, cross-repo execution graph/readiness, and release evidence gates. |
-| `data_migration` | Standard design-first profile plus `configuration-governor`, `data-security-governor`, `performance-governor`, and release gates. |
-| `release_readiness` | `implementation-completion-gate -> post-change-skill-sync -> code-review-gate -> frontend-acceptance-runner when UI changed -> test-evidence-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
+| `frontend_change` | Standard design-first profile plus pre-technical `ui-ue-design-governor`, `ui-ue-reviewer`, and `frontend-implementation-planner`. Real `frontend-acceptance-runner -> test-evidence-gate` evidence is collected after implementation, before release. UI/UE design must name concrete user entry surfaces and cover loading, empty, success, validation error, permission denied, and dependency error states. |
+| `cross_repo_api` | API/cross-repo contract profile with project understanding, pre-technical API/observability design, delivery plan, cross-repo execution graph/readiness before delivery plan review, initial traceability, and release evidence gates. |
+| `data_migration` | Standard design-first profile plus configuration, security, and performance design gates before design approval; release gates run only after implementation evidence exists. |
+| `release_readiness` | `implementation-completion-gate -> post-change-skill-sync -> code-review-gate -> frontend-acceptance-runner when UI changed -> test-evidence-gate -> post-implementation traceability -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
 
 Profiles are machine-validated contracts, not only documentation. Each profile declares required skills, expected artifacts, required gate artifacts, accepted decisions, and readiness fields. Stage order and next commands are defined in `config/workflow-stages.example.yaml`.
 Profile `notes` are human guidance only; executable readiness is defined by `required_gate_artifacts` and the stage registry.
 Profile `artifact_steps` declare profile-specific artifact generation or inspection commands. `auto-runner` interprets these steps instead of hard-coding frontend, data, or release behavior.
 
+Traceability is intentionally two-pass. The initial pass (`traceability_matrix.json`) runs before implementation and proves that requirements, design, tests, and delivery tasks line up. The post-implementation pass (`post_implementation_traceability_matrix.json`) runs after changes exist and binds requirements to diff, test evidence, review evidence, and release evidence.
+
 ## Coding Is Allowed Only When
 
-- Spec is ready and required open questions are closed.
+- Spec is ready and `open_questions.json` has `decision=pass`; draft design artifacts may be generated for discussion, but unresolved required questions block design approval and implementation.
 - `technical_design.json` and `architecture_design.json` exist.
 - `design_architecture_review.json` has `decision=pass` or `approved` and `readiness_gate.implementation_allowed=true`.
 - `delivery_plan_review.json` has `decision=pass` and `readiness_gate.implementation_allowed=true`.
@@ -143,7 +147,7 @@ MCP usage must stay inside the current task boundary and must produce evidence t
 - Reuse generated repository/API/config/dependency/baseline JSON as compact context instead of re-reading whole repositories.
 - Use generated JSON artifacts as compact context.
 - Keep human-readable documents separate from machine gate JSON.
-- Run `traceability-governor` to prove acceptance coverage and task/file scope before implementation or release.
+- Run initial `traceability-governor` to prove acceptance coverage and task/file scope before implementation, then run post-implementation traceability after diff/test/release evidence exists.
 - Run `change-risk-governor` after diff analysis to choose lightweight, standard, heavy, or critical controls.
 - Capture repeated blockers with `delivery-case-capture`.
 - Run `issue-pr-governor`, `version-release-governor`, and `dependency-license-governor` before open-source release or external contribution merge.

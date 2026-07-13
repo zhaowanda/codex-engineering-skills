@@ -8,11 +8,11 @@ profiles:
       - spec-governor
       - requirement-question-governor
       - technical-design-governor
+      - design-architecture-reviewer
       - test-design-governor
       - test-data-governor
-      - design-architecture-reviewer
-      - traceability-governor
       - delivery-plan-templates
+      - traceability-governor
       - delivery-plan-reviewer
       - git-worktree-governor
       - edit-readiness-governor
@@ -21,6 +21,7 @@ profiles:
       - test-evidence-gate
     expected_artifacts:
       - spec.json
+      - open_questions.json
       - technical_design.json
       - test_design.json
       - test_data_plan.json
@@ -33,6 +34,9 @@ profiles:
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
+          - pass
+      - artifact: open_questions.json
+        accepted_decisions:
           - pass
       - artifact: technical_design.json
       - artifact: test_design.json
@@ -74,15 +78,16 @@ profiles:
       - architecture-framing-governor
       - technical-design-governor
       - architecture-design-governor
+      - design-architecture-reviewer
       - test-design-governor
       - test-data-governor
-      - design-architecture-reviewer
-      - traceability-governor
       - delivery-plan-templates
+      - traceability-governor
       - delivery-plan-reviewer
     optional_skills: []
     expected_artifacts:
       - spec.json
+      - open_questions.json
       - domain_model_design.json
       - architecture_framing.json
       - technical_design.json
@@ -98,6 +103,9 @@ profiles:
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
+          - pass
+      - artifact: open_questions.json
+        accepted_decisions:
           - pass
       - artifact: domain_model_design.json
         accepted_decisions:
@@ -137,8 +145,10 @@ profiles:
   - name: frontend_change
     trigger_impacts:
       - ui
+      - frontend
     required_skills:
       - spec-governor
+      - requirement-question-governor
       - domain-model-governor
       - architecture-framing-governor
       - ui-ue-design-governor
@@ -146,18 +156,17 @@ profiles:
       - technical-design-governor
       - architecture-design-governor
       - frontend-implementation-planner
+      - design-architecture-reviewer
       - test-design-governor
       - test-data-governor
-      - design-architecture-reviewer
-      - traceability-governor
       - delivery-plan-templates
+      - traceability-governor
       - delivery-plan-reviewer
-      - frontend-acceptance-runner
-      - test-evidence-gate
     optional_skills:
       - code-review-gate
     expected_artifacts:
       - spec.json
+      - open_questions.json
       - domain_model_design.json
       - architecture_framing.json
       - technical_design.json
@@ -172,8 +181,6 @@ profiles:
       - traceability_matrix.json
       - delivery_plan_review.json
       - docs_quality.json
-      - frontend_acceptance.json
-      - test_evidence_gate.json
     artifact_steps:
       - name: domain_model_design
         artifact: domain_model_design.json
@@ -226,35 +233,13 @@ profiles:
           - "{artifact_dir}/technical_design.json"
           - --out
           - "{artifact_dir}/frontend_implementation_plan.json"
-      - name: frontend_acceptance_template
-        artifact: frontend_acceptance.json
-        command:
-          - python3
-          - skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py
-          - template
-          - --page-type
-          - custom
-          - --target-url
-          - http://localhost/TBD
-          - --artifact-dir
-          - "{artifact_dir}"
-          - --out
-          - "{artifact_dir}/frontend_acceptance.json"
-      - name: test_evidence_gate
-        artifact: test_evidence_gate.json
-        allow_fail: true
-        command:
-          - python3
-          - skills/core/test-evidence-gate/scripts/test_evidence_gate.py
-          - --artifact-dir
-          - "{artifact_dir}"
-          - --out
-          - "{artifact_dir}/test_evidence_gate.json"
-          - --require-frontend
     required_gate_artifacts:
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
+          - pass
+      - artifact: open_questions.json
+        accepted_decisions:
           - pass
       - artifact: domain_model_design.json
         accepted_decisions:
@@ -271,6 +256,8 @@ profiles:
       - artifact: ui_ue_review.json
         accepted_decisions:
           - pass
+        readiness_path: readiness_gate.frontend_implementation_allowed
+        readiness_value: true
       - artifact: frontend_implementation_plan.json
         accepted_decisions:
           - pass
@@ -294,16 +281,10 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
-      - artifact: frontend_acceptance.json
-        accepted_decisions:
-          - pass
-          - ready
-      - artifact: test_evidence_gate.json
-        accepted_decisions:
-          - pass
-          - ready
-    next_safe_command: python3 skills/core/frontend-acceptance-runner/scripts/frontend_acceptance.py template --out artifacts/REQ-001/frontend_acceptance.json
+    next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
+      - UI/UE design must name concrete user entry surfaces such as menu, route, button, form submit, table action, or dialog action
+      - UI/UE review must cover loading, empty, success, validation error, permission denied, and dependency error states before frontend implementation
       - frontend acceptance scope is planned
       - delivery plan review passes
       - edit permit is ready
@@ -313,18 +294,19 @@ profiles:
     required_skills:
       - project-understanding-runner
       - spec-governor
+      - requirement-question-governor
       - domain-model-governor
       - architecture-framing-governor
       - api-contract-governor
       - observability-design-governor
       - technical-design-governor
       - architecture-design-governor
-      - cross-repo-planner
+      - design-architecture-reviewer
       - test-design-governor
       - test-data-governor
-      - design-architecture-reviewer
-      - traceability-governor
       - delivery-plan-templates
+      - cross-repo-planner
+      - traceability-governor
       - delivery-plan-reviewer
       - release-evidence-binder
     optional_skills:
@@ -333,6 +315,7 @@ profiles:
     expected_artifacts:
       - project_understanding/baseline_quality.json
       - spec.json
+      - open_questions.json
       - domain_model_design.json
       - architecture_framing.json
       - technical_design.json
@@ -343,10 +326,10 @@ profiles:
       - test_data_plan.json
       - design_architecture_review.json
       - delivery_plan.json
-      - traceability_matrix.json
       - cross_repo_execution_graph.json
       - cross_repo_readiness.json
       - cross_repo_release_plan.json
+      - traceability_matrix.json
       - delivery_plan_review.json
       - docs_quality.json
     artifact_steps:
@@ -412,6 +395,9 @@ profiles:
         accepted_decisions:
           - pass
           - ready
+      - artifact: open_questions.json
+        accepted_decisions:
+          - pass
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
@@ -458,34 +444,35 @@ profiles:
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
       - project understanding exists
-      - cross-repo contracts are reviewed
+      - cross-repo graph/readiness is generated before delivery plan review so repo order, contracts, and rollback boundaries can change the plan
       - delivery plan review passes
   - name: data_migration
     trigger_impacts:
       - data
     required_skills:
       - spec-governor
+      - requirement-question-governor
       - domain-model-governor
       - architecture-framing-governor
       - data-model-governor
       - observability-design-governor
       - technical-design-governor
       - architecture-design-governor
-      - test-design-governor
-      - test-data-governor
-      - design-architecture-reviewer
-      - traceability-governor
-      - delivery-plan-templates
-      - delivery-plan-reviewer
       - configuration-governor
       - data-security-governor
       - performance-governor
-      - release-evidence-binder
+      - design-architecture-reviewer
+      - test-design-governor
+      - test-data-governor
+      - delivery-plan-templates
+      - traceability-governor
+      - delivery-plan-reviewer
     optional_skills:
       - environment-promotion-governor
       - uat-acceptance-governor
     expected_artifacts:
       - spec.json
+      - open_questions.json
       - domain_model_design.json
       - architecture_framing.json
       - technical_design.json
@@ -502,7 +489,6 @@ profiles:
       - configuration_readiness.json
       - data_security_review.json
       - performance_review.json
-      - release_gate.json
     artifact_steps:
       - name: domain_model_design
         artifact: domain_model_design.json
@@ -594,20 +580,13 @@ profiles:
           - "{artifact_dir}/architecture_design.json"
           - --out
           - "{artifact_dir}/performance_review.json"
-      - name: release_evidence_binder
-        artifact: release_gate.json
-        allow_fail: true
-        command:
-          - python3
-          - skills/core/release-evidence-binder/scripts/bind_release.py
-          - --artifact-dir
-          - "{artifact_dir}"
-          - --out
-          - "{artifact_dir}/release_gate.json"
     required_gate_artifacts:
       - artifact: spec.json
         accepted_decisions:
           - ready_for_design
+          - pass
+      - artifact: open_questions.json
+        accepted_decisions:
           - pass
       - artifact: domain_model_design.json
         accepted_decisions:
@@ -625,6 +604,18 @@ profiles:
       - artifact: observability_design.json
         accepted_decisions:
           - pass
+      - artifact: configuration_readiness.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: data_security_review.json
+        accepted_decisions:
+          - pass
+          - ready
+      - artifact: performance_review.json
+        accepted_decisions:
+          - pass
+          - ready
       - artifact: test_design.json
       - artifact: test_data_plan.json
       - artifact: docs_quality.json
@@ -645,10 +636,6 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
-      - artifact: release_gate.json
-        accepted_decisions:
-          - go
-          - conditional_go
     next_safe_command: python3 skills/core/delivery-runner/scripts/delivery_runner.py inspect --artifact-dir artifacts/REQ-001
     notes:
       - data design and rollback are reviewed
@@ -667,11 +654,13 @@ profiles:
       - release-evidence-binder
     optional_skills:
       - post-release-observer
+      - traceability-governor
     expected_artifacts:
       - implementation_completion_gate.json
       - post_change_implementation_report.json
       - code_review_gate.json
       - test_evidence_gate.json
+      - post_implementation_traceability_matrix.json
       - environment_promotion.json
       - uat_acceptance.json
       - release_change.json
@@ -702,6 +691,16 @@ profiles:
           - template
           - --out
           - "{artifact_dir}/release_change.json"
+      - name: post_implementation_traceability
+        artifact: post_implementation_traceability_matrix.json
+        allow_fail: true
+        command:
+          - python3
+          - skills/core/traceability-governor/scripts/traceability.py
+          - --artifact-dir
+          - "{artifact_dir}"
+          - --out
+          - "{artifact_dir}/post_implementation_traceability_matrix.json"
       - name: release_evidence_binder
         artifact: release_gate.json
         allow_fail: true
@@ -729,6 +728,10 @@ profiles:
         accepted_decisions:
           - pass
           - ready
+      - artifact: post_implementation_traceability_matrix.json
+        accepted_decisions:
+          - pass
+          - warn
       - artifact: environment_promotion.json
         accepted_decisions:
           - pass
@@ -749,4 +752,5 @@ profiles:
     notes:
       - implementation is complete
       - review and tests pass
+      - post-implementation traceability binds requirement scope to implementation, test, and release evidence when design artifacts are available
       - release evidence binder returns go

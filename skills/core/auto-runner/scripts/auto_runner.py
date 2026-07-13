@@ -383,8 +383,8 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
     lane = str(spec.get("lane") or "")
     impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
     profile_name = str(profile.get("name") or "")
-    regulated_impacts = {"data", "database", "security", "permission", "performance", "configuration", "release"}
-    standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo"}
+    regulated_impacts = {"data", "database", "security", "permission", "tenant", "payment", "performance", "configuration", "release"}
+    standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo", "mq", "async", "scheduler", "task", "job", "cache", "integration"}
     reasons: list[str] = []
     if impacts & regulated_impacts or "data_migration" in profile_name:
         reasons.extend(sorted(impacts & regulated_impacts) or ["data_migration_profile"])
@@ -406,7 +406,7 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
         reasons.append("low profile confidence raises minimum strictness")
     required_controls = {
         "light": ["spec", "technical_design", "test_design", "delivery_plan_review", "git_edit_permit"],
-        "standard": ["spec", "domain_model_design", "architecture_framing", "technical_design", "architecture_design", "design_review", "test_design", "test_data_plan", "traceability", "delivery_plan_review", "docs_quality", "git_edit_permit"],
+        "standard": ["spec", "domain_model_design", "architecture_framing", "technical_design", "architecture_design", "design_review", "test_design", "test_data_plan", "initial_traceability", "delivery_plan_review", "docs_quality", "git_edit_permit"],
         "regulated": ["standard_controls", "security_or_configuration_review", "performance_or_release_evidence", "environment_uat_release_gates"],
     }[tier]
     return {
@@ -508,7 +508,7 @@ def merge_workflow_profiles(base: dict[str, Any], overlays: list[dict[str, Any]]
 
 def impact_overlay_profile_names(impacts: set[str], has_repo: bool) -> list[str]:
     names: list[str] = []
-    if impacts & {"api", "cross_repo"}:
+    if impacts & {"api", "cross_repo", "integration"}:
         names.append("cross_repo_api")
     if impacts & {"ui", "frontend"}:
         names.append("frontend_change")
@@ -729,6 +729,9 @@ def run_profile_artifact_steps(
             "api_contract_design.json",
             "data_model_design.json",
             "observability_design.json",
+            "cross_repo_readiness.json",
+            "cross_repo_execution_graph.json",
+            "cross_repo_release_plan.json",
         },
     ):
         return
@@ -832,6 +835,143 @@ def run_profile_artifact_steps(
         if profile_requires(profile, "frontend-acceptance-runner"):
             command.append("--require-frontend")
         run_if_needed("test_evidence_gate", out / "test_evidence_gate.json", command, force, generated, skipped, steps)
+
+
+def run_pre_review_planning_steps(
+    profile: dict[str, Any],
+    out: Path,
+    spec: Path,
+    delivery_plan: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> None:
+    if profile_requires(profile, "cross-repo-planner"):
+        run_if_needed(
+            "cross_repo_plan",
+            out / "cross_repo_readiness.json",
+            [
+                "python3",
+                "skills/core/cross-repo-planner/scripts/cross_repo_plan.py",
+                "plan",
+                "--spec",
+                str(spec),
+                "--delivery-plan",
+                str(delivery_plan),
+                "--out-dir",
+                str(out),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+
+
+def run_initial_traceability(
+    out: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> None:
+    before = len(steps)
+    run_if_needed(
+        "initial_traceability",
+        out / "traceability_matrix.json",
+        [
+            "python3",
+            "skills/core/traceability-governor/scripts/traceability.py",
+            "--artifact-dir",
+            str(out),
+            "--out",
+            str(out / "traceability_matrix.json"),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
+    if len(steps) > before:
+        steps[-1]["traceability_phase"] = "initial_design_plan"
+
+
+def run_requirement_questions(
+    profile: dict[str, Any],
+    out: Path,
+    spec: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> Path | None:
+    if not profile_requires(profile, "requirement-question-governor"):
+        return None
+    questions = out / "open_questions.json"
+    run_if_needed(
+        "requirement_questions",
+        questions,
+        [
+            "python3",
+            "skills/core/requirement-question-governor/scripts/question_governor.py",
+            "generate",
+            "--spec",
+            str(spec),
+            "--out",
+            str(questions),
+        ],
+        False,
+        generated,
+        skipped,
+        steps,
+    )
+    return questions
+
+
+def run_design_assurance_steps(
+    profile: dict[str, Any],
+    out: Path,
+    spec: Path,
+    technical: Path,
+    architecture: Path,
+    force: bool,
+    generated: list[str],
+    skipped: list[str],
+    steps: list[dict[str, Any]],
+) -> None:
+    """Run design-time configuration, security, and performance gates before design approval."""
+    for skill, name, artifact, command in [
+        (
+            "configuration-governor",
+            "configuration_review",
+            "configuration_readiness.json",
+            ["python3", "skills/core/configuration-governor/scripts/configuration.py", "analyze"],
+        ),
+        (
+            "data-security-governor",
+            "data_security_review",
+            "data_security_review.json",
+            ["python3", "skills/core/data-security-governor/scripts/data_security.py", "design"],
+        ),
+        (
+            "performance-governor",
+            "performance_review",
+            "performance_review.json",
+            ["python3", "skills/core/performance-governor/scripts/performance.py", "design"],
+        ),
+    ]:
+        if not profile_requires(profile, skill):
+            continue
+        run_if_needed(
+            name,
+            out / artifact,
+            command + ["--spec", str(spec), "--technical-design", str(technical), "--architecture-design", str(architecture), "--out", str(out / artifact)],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
 
 
 def run_pre_technical_design_steps(
@@ -1180,6 +1320,8 @@ def run(
     spec_data = read_json(spec)
     selected_profile, profile_selection_reason = select_workflow_profile_with_reason(spec_data, bool(repo and project), profile)
 
+    questions = run_requirement_questions(selected_profile, out, spec, force, generated, skipped, steps)
+
     run_pre_technical_design_steps(selected_profile, out, spec, project_out, force, generated, skipped, steps)
 
     technical = out / "technical_design.json"
@@ -1233,6 +1375,8 @@ def run(
         skipped,
         steps,
     )
+
+    run_design_assurance_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
     design_review = out / "design_architecture_review.json"
     run_if_needed(
@@ -1322,23 +1466,10 @@ def run(
         steps,
     )
 
+    run_pre_review_planning_steps(selected_profile, out, spec, delivery_plan, force, generated, skipped, steps)
+
     if profile_requires(selected_profile, "traceability-governor"):
-        run_if_needed(
-            "traceability_matrix",
-            out / "traceability_matrix.json",
-            [
-                "python3",
-                "skills/core/traceability-governor/scripts/traceability.py",
-                "--artifact-dir",
-                str(out),
-                "--out",
-                str(out / "traceability_matrix.json"),
-            ],
-            force,
-            generated,
-            skipped,
-            steps,
-        )
+        run_initial_traceability(out, force, generated, skipped, steps)
 
     delivery_plan_review = out / "delivery_plan_review.json"
     run_if_needed(

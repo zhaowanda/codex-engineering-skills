@@ -249,7 +249,9 @@ def main() -> int:
         result = generate(load_json(Path(args.spec)))
         write_json(Path(args.out), result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result["decision"] == "pass" else 1
+        # Generation records unresolved questions as an artifact; validation and workflow gates
+        # decide whether they block approval or implementation.
+        return 0
     result = validate_questions(load_json(Path(args.file)))
     if args.out:
         write_json(Path(args.out), result)

@@ -166,8 +166,9 @@ def test_workflow_profiles_reference_existing_skills() -> None:
             assert {"test_design.json", "docs_quality.json"}.issubset(expected)
             assert {"test_design.json", "docs_quality.json"}.issubset(gate_artifacts)
     frontend = next(item for item in profiles["profiles"] if item["name"] == "frontend_change")
-    assert "frontend-acceptance-runner" in frontend["required_skills"]
-    assert "test-evidence-gate" in frontend["required_skills"]
+    assert "frontend-implementation-planner" in frontend["required_skills"]
+    assert "frontend-acceptance-runner" not in frontend["required_skills"]
+    assert "test-evidence-gate" not in frontend["required_skills"]
     release = next(item for item in profiles["profiles"] if item["name"] == "release_readiness")
     assert "release-evidence-binder" in release["required_skills"]
     stages = skill_health.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")
@@ -192,11 +193,12 @@ def test_workflow_profiles_follow_canonical_design_order() -> None:
         "technical-design-governor",
         "architecture-design-governor",
         "frontend-implementation-planner",
+        "design-architecture-reviewer",
         "test-design-governor",
         "test-data-governor",
-        "design-architecture-reviewer",
-        "traceability-governor",
         "delivery-plan-templates",
+        "cross-repo-planner",
+        "traceability-governor",
         "delivery-plan-reviewer",
         "git-worktree-governor",
         "edit-readiness-governor",
@@ -227,16 +229,23 @@ def test_workflow_stage_registry_uses_pre_technical_design_order() -> None:
     names = [item["name"] for item in stages]
     expected = [
         "spec",
+        "requirement_questions",
         "domain_model_design",
         "architecture_framing",
         "technical_design",
         "architecture_design",
+        "configuration_design_review",
+        "data_security_design_review",
+        "performance_design_review",
         "design_review",
         "test_design",
         "test_data_plan",
         "delivery_plan",
-        "traceability",
+        "cross_repo_plan",
+        "initial_traceability",
         "delivery_plan_review",
+        "post_change",
+        "post_implementation_traceability",
     ]
     assert [name for name in names if name in expected] == expected
 
@@ -854,9 +863,9 @@ def test_scenario_catalog_documents_supported_development_scenarios() -> None:
     bugfix_gates = set(matrix_by_id["bugfix"]["required_gates"])
     assert {"spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json", "docs_quality.json"}.issubset(bugfix_gates)
     assert "architecture_design.json" not in bugfix_gates
-    assert "test_data_plan.json" not in bugfix_gates
+    assert "test_data_plan.json" in bugfix_gates
     for item in result["scenarios"]:
-        if item["id"] in {"one_line_request", "long_prd", "frontend_change", "cross_repo_api", "data_migration"}:
+        if item["id"] in {"one_line_request", "long_prd", "cross_repo_api", "data_migration"}:
             next_step = item["next_step"]
             assert "technical_design.json" in next_step
             assert "architecture_design.json" in next_step

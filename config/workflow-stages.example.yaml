@@ -3,6 +3,13 @@ stages:
   - name: spec
     artifact: spec.json
     next_command: python3 skills/core/spec-governor/scripts/spec_governor.py normalize --doc-id REQ-001 --title "Title" --input requirement.txt --out artifacts/REQ-001/spec.json
+  - name: requirement_questions
+    artifact: open_questions.json
+    next_command: python3 skills/core/requirement-question-governor/scripts/question_governor.py generate --spec artifacts/REQ-001/spec.json --out artifacts/REQ-001/open_questions.json
+    implementation_required: true
+    conditional_skill: requirement-question-governor
+    accepted_decisions:
+      - pass
   - name: domain_model_design
     artifact: domain_model_design.json
     next_command: python3 skills/core/domain-model-governor/scripts/domain_model.py --spec artifacts/REQ-001/spec.json --out artifacts/REQ-001/domain_model_design.json
@@ -19,6 +26,27 @@ stages:
     artifact: architecture_design.json
     next_command: python3 skills/core/architecture-design-governor/scripts/architecture_design.py --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --architecture-framing artifacts/REQ-001/architecture_framing.json --out artifacts/REQ-001/architecture_design.json
     implementation_required: true
+  - name: configuration_design_review
+    artifact: configuration_readiness.json
+    implementation_required: true
+    conditional_skill: configuration-governor
+    accepted_decisions:
+      - pass
+      - ready
+  - name: data_security_design_review
+    artifact: data_security_review.json
+    implementation_required: true
+    conditional_skill: data-security-governor
+    accepted_decisions:
+      - pass
+      - ready
+  - name: performance_design_review
+    artifact: performance_review.json
+    implementation_required: true
+    conditional_skill: performance-governor
+    accepted_decisions:
+      - pass
+      - ready
   - name: design_review
     artifact: design_architecture_review.json
     next_command: python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py review --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json
@@ -35,10 +63,16 @@ stages:
     artifact: delivery_plan.json
     next_command: python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py --doc-id REQ-001 --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/delivery_plan.json
     implementation_required: true
-  - name: traceability
+  - name: cross_repo_plan
+    artifact: cross_repo_readiness.json
+    next_command: python3 skills/core/cross-repo-planner/scripts/cross_repo_plan.py plan --spec artifacts/REQ-001/spec.json --delivery-plan artifacts/REQ-001/delivery_plan.json --out-dir artifacts/REQ-001
+    implementation_required: true
+    conditional_skill: cross-repo-planner
+  - name: initial_traceability
     artifact: traceability_matrix.json
     next_command: python3 skills/core/traceability-governor/scripts/traceability.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/traceability_matrix.json
     implementation_required: true
+    phase: initial_design_plan
   - name: delivery_plan_review
     artifact: delivery_plan_review.json
     next_command: python3 skills/core/delivery-plan-reviewer/scripts/delivery_plan_review.py review --file artifacts/REQ-001/delivery_plan.json --out artifacts/REQ-001/delivery_plan_review.json
@@ -60,6 +94,15 @@ stages:
     artifact: post_change_implementation_report.json
     next_command: python3 skills/core/post-change-skill-sync/scripts/sync_after_change.py --repo /path/to/repo --artifact-dir artifacts/REQ-001 --doc-id REQ-001
     release_required: true
+  - name: post_implementation_traceability
+    artifact: post_implementation_traceability_matrix.json
+    next_command: python3 skills/core/traceability-governor/scripts/traceability.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/post_implementation_traceability_matrix.json
+    release_required: true
+    phase: post_implementation_evidence
+    conditional_skill: post-change-skill-sync
+    accepted_decisions:
+      - pass
+      - warn
   - name: review
     artifact: code_review_gate.json
     release_required: true

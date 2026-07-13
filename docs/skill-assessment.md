@@ -4,11 +4,11 @@ This assessment records the current quality level, orchestration fit, and remain
 
 ## Summary
 
-Current level: **expert-ready for controlled real-project rollout**.
+Current level: **strong structured framework; end-to-end orchestration is under active calibration**.
 
 The repository has a coherent delivery framework rather than a loose prompt collection. Skills are grouped by lifecycle stage, most commands produce machine-readable artifacts, and the main gates expose `decision`, `blockers`, and readiness fields. The unified CLI, workflow profiles, scenario catalog, forward tests, privacy scan, and health checks make the system operable as a repeatable workflow.
 
-The main remaining risk is not basic correctness. It is real-project calibration: private overlays, project-specific skills, code indexes, baseline docs, and team release policies must be added before the framework can reliably handle complex production changes.
+The main remaining risk is lifecycle calibration: every profile must keep design artifacts, implementation evidence, and release evidence in their correct phases. Private overlays, project-specific skills, code indexes, baseline docs, and team release policies remain necessary before complex production changes.
 
 ## Verified Baseline
 

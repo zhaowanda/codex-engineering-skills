@@ -9,7 +9,7 @@ from typing import Any
 
 SCHEMA = "codex-scenario-catalog-v1"
 PRE_EDIT_GATE = "Before editing, require technical_design.json, architecture_design.json, design_architecture_review.json with implementation_allowed=true, delivery_plan_review.json with implementation_allowed=true, Git fetch plus pull --ff-only evidence, and edit_permit.json. For direct edits, create write_guard_snapshot.json after the permit and require write_guard_audit.json before commit or push."
-LIGHT_BUGFIX_GATE = "Light bugfix effective gates are reported in auto_run_summary.effective_workflow_controls and omit architecture/test-data gates unless confidence or impact raises strictness."
+LIGHT_BUGFIX_GATE = "Light bugfix effective gates are reported in auto_run_summary.effective_workflow_controls and omit architecture/test-data gates unless confidence or API/data/UI/cross-repo/MQ/async/scheduler/task/job/cache/integration/security impact raises strictness."
 
 SCENARIOS: list[dict[str, Any]] = [
     {
@@ -45,8 +45,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A page, route, form, table, export, or browser-visible behavior changes.",
         "command": "python3 scripts/codex_eng.py auto --input ui.md --profile frontend_change --out /tmp/codex-auto",
         "expected_profile": "frontend_change",
-        "evidence": ["frontend_acceptance.json", "test_evidence_gate.json", "auto_run_summary.json"],
-        "next_step": "Replace template browser evidence with real frontend acceptance before review or release. " + PRE_EDIT_GATE,
+        "evidence": ["ui_ue_design.json", "ui_ue_review.json", "frontend_acceptance.json", "test_evidence_gate.json", "auto_run_summary.json"],
+        "next_step": "UI/UE must name the concrete menu, route, button, form submit, table action, or dialog trigger and cover loading, empty, success, validation error, permission denied, and dependency error states. Replace template browser evidence with real frontend acceptance before review or release.",
     },
     {
         "id": "cross_repo_api",
@@ -54,8 +54,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A backend API, route contract, producer/consumer boundary, explicit cross_repo impact, or coordinated multi-repository change is required.",
         "command": "python3 scripts/codex_eng.py auto --input api.md --repo /path/to/repo --project project-name --out /tmp/codex-auto",
         "expected_profile": "cross_repo_api",
-        "evidence": ["project_understanding/baseline_quality.json", "architecture_framing.json", "api_contract_design.json", "traceability_matrix.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json", "delivery_plan_review.json"],
-        "next_step": "Use project understanding, pre-technical framing, contract evidence, cross-repo graph/readiness, and traceability evidence before implementation. " + PRE_EDIT_GATE,
+        "evidence": ["project_understanding/baseline_quality.json", "architecture_framing.json", "api_contract_design.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json", "traceability_matrix.json", "delivery_plan_review.json"],
+        "next_step": "Use project understanding, pre-technical framing, contract evidence, and cross-repo graph/readiness before delivery plan review; then use initial traceability evidence before implementation. " + PRE_EDIT_GATE,
     },
     {
         "id": "data_migration",
@@ -63,7 +63,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A database, migration, sensitive data, configuration, performance, or rollback-sensitive change is required.",
         "command": "python3 scripts/codex_eng.py auto --input data.md --profile data_migration --out /tmp/codex-auto",
         "expected_profile": "data_migration",
-        "evidence": ["configuration_readiness.json", "data_security_review.json", "performance_review.json", "release_gate.json"],
+        "evidence": ["configuration_readiness.json", "data_security_review.json", "performance_review.json"],
         "next_step": "Complete real security, performance, configuration, rollback, and release evidence before implementation/release. " + PRE_EDIT_GATE,
     },
     {
@@ -72,8 +72,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "Implementation exists and the question is whether release is allowed.",
         "command": "python3 scripts/codex_eng.py auto --input release.md --profile release_readiness --out /tmp/codex-auto",
         "expected_profile": "release_readiness",
-        "evidence": ["implementation_completion_gate.json", "code_review_gate.json", "test_evidence_gate.json", "release_gate.json"],
-        "next_step": "Fill missing release artifacts until release_gate.json returns go or conditional_go.",
+        "evidence": ["implementation_completion_gate.json", "post_change_implementation_report.json", "code_review_gate.json", "test_evidence_gate.json", "post_implementation_traceability_matrix.json", "release_gate.json"],
+        "next_step": "Fill missing release artifacts and post-implementation traceability until release_gate.json returns go or conditional_go.",
     },
     {
         "id": "code_review",
@@ -105,32 +105,32 @@ CORE_PRE_EDIT_GATES = [
 
 SCENARIO_MATRIX: dict[str, dict[str, Any]] = {
     "one_line_request": {
-        "required_skills": ["spec-governor", "domain-model-governor", "architecture-framing-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "traceability-governor", "delivery-plan-reviewer"],
+        "required_skills": ["spec-governor", "domain-model-governor", "architecture-framing-governor", "technical-design-governor", "architecture-design-governor", "design-architecture-reviewer", "test-design-governor", "test-data-governor", "delivery-plan-templates", "traceability-governor", "delivery-plan-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES,
     },
     "long_prd": {
-        "required_skills": ["requirement-question-governor", "domain-model-governor", "architecture-framing-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "traceability-governor", "human-doc-reviewer"],
+        "required_skills": ["requirement-question-governor", "domain-model-governor", "architecture-framing-governor", "technical-design-governor", "architecture-design-governor", "design-architecture-reviewer", "test-design-governor", "test-data-governor", "delivery-plan-templates", "traceability-governor", "human-doc-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES,
     },
     "bugfix": {
-        "required_skills": ["spec-governor", "technical-design-governor", "test-design-governor", "test-data-governor", "git-worktree-governor", "edit-readiness-governor"],
-        "required_gates": ["spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json", "docs_quality.json", "git_worktree_evidence.json", "edit_permit.json"],
+        "required_skills": ["spec-governor", "technical-design-governor", "design-architecture-reviewer", "test-design-governor", "test-data-governor", "delivery-plan-templates", "traceability-governor", "delivery-plan-reviewer", "git-worktree-governor", "edit-readiness-governor"],
+        "required_gates": ["spec.json", "technical_design.json", "design_architecture_review.json", "test_design.json", "test_data_plan.json", "delivery_plan.json", "traceability_matrix.json", "delivery_plan_review.json", "docs_quality.json", "git_worktree_evidence.json", "edit_permit.json"],
     },
     "frontend_change": {
-        "required_skills": ["domain-model-governor", "architecture-framing-governor", "ui-ue-design-governor", "ui-ue-reviewer", "frontend-implementation-planner", "frontend-acceptance-runner", "test-evidence-gate", "human-doc-reviewer"],
+        "required_skills": ["domain-model-governor", "architecture-framing-governor", "ui-ue-design-governor", "ui-ue-reviewer", "frontend-implementation-planner", "design-architecture-reviewer", "test-design-governor", "test-data-governor", "delivery-plan-templates", "traceability-governor", "human-doc-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES + ["frontend_acceptance.json", "test_evidence_gate.json"],
     },
     "cross_repo_api": {
-        "required_skills": ["project-understanding-runner", "domain-model-governor", "architecture-framing-governor", "api-contract-governor", "observability-design-governor", "cross-repo-planner", "traceability-governor", "delivery-plan-reviewer"],
+        "required_skills": ["project-understanding-runner", "domain-model-governor", "architecture-framing-governor", "api-contract-governor", "observability-design-governor", "technical-design-governor", "architecture-design-governor", "design-architecture-reviewer", "test-design-governor", "test-data-governor", "delivery-plan-templates", "cross-repo-planner", "traceability-governor", "delivery-plan-reviewer"],
         "required_gates": ["project_understanding/baseline_quality.json", "api_contract_design.json", "observability_design.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json"] + CORE_PRE_EDIT_GATES,
     },
     "data_migration": {
         "required_skills": ["configuration-governor", "data-security-governor", "performance-governor", "release-evidence-binder"],
-        "required_gates": CORE_PRE_EDIT_GATES + ["configuration_readiness.json", "data_security_review.json", "performance_review.json", "release_gate.json"],
+        "required_gates": CORE_PRE_EDIT_GATES + ["configuration_readiness.json", "data_security_review.json", "performance_review.json"],
     },
     "release_readiness": {
-        "required_skills": ["implementation-completion-gate", "post-change-skill-sync", "code-review-gate", "test-evidence-gate", "release-evidence-binder"],
-        "required_gates": ["implementation_completion_gate.json", "post_change_implementation_report.json", "code_review_gate.json", "test_evidence_gate.json", "ci_execution_evidence.json", "release_gate.json"],
+        "required_skills": ["implementation-completion-gate", "post-change-skill-sync", "code-review-gate", "test-evidence-gate", "traceability-governor", "release-evidence-binder"],
+        "required_gates": ["implementation_completion_gate.json", "post_change_implementation_report.json", "code_review_gate.json", "test_evidence_gate.json", "post_implementation_traceability_matrix.json", "ci_execution_evidence.json", "release_gate.json"],
     },
     "code_review": {
         "required_skills": ["diff-impact-analyzer", "code-design-quality-reviewer", "code-review-gate", "test-evidence-gate"],

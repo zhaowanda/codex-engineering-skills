@@ -47,6 +47,17 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def resolve_required_questions(out_dir: Path) -> None:
+    path = out_dir / "open_questions.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for question in data.get("questions", []):
+        if isinstance(question, dict) and question.get("required"):
+            question["status"] = "closed"
+            question["answer"] = "Confirmed by the synthetic product owner."
+    data["decision"] = "pass"
+    write_json(path, data)
+
+
 def write_release_governance_examples(out_dir: Path) -> None:
     write_json(out_dir / "environment_promotion.json", {"decision": "pass", "blockers": [], "environments": [{"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke"], "approver": "release-owner", "rollback_ready": True}, {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke"], "approver": "release-owner", "rollback_ready": True}]})
     write_json(out_dir / "uat_acceptance.json", {"decision": "pass", "blockers": []})
@@ -168,6 +179,18 @@ def run(out_dir: Path) -> dict[str, Any]:
     release_happy_dir.mkdir(parents=True, exist_ok=True)
     release_followup_dir.mkdir(parents=True, exist_ok=True)
     req = ROOT / "examples/synthetic-e2e-case/requirement.md"
+    happy_req = happy_dir / "requirement.md"
+    happy_req.write_text(
+        "Goal: reduce buyer support tickets caused by an unclear completed-order confirmation message by 20 percent.\n"
+        "Metric: completed-order confirmation support tickets decrease by 20 percent.\n"
+        "Flow: buyer submits an order, the order completes, and the confirmation message is shown.\n"
+        "Route: /orders/complete.\n"
+        "Entrypoint: buyer submits the checkout form.\n"
+        "Requirement: replace the confirmation phrase with Order received.\n"
+        "Rule: keep existing order processing unchanged.\n"
+        "Acceptance: a completed order shows Order received.\n",
+        encoding="utf-8",
+    )
     happy_docs = write_docs_manifest(happy_dir, "REQ-SYN-HAPPY")
     frontend_docs = write_docs_manifest(frontend_dir, "REQ-SYN-FE")
     data_docs = write_docs_manifest(data_dir, "REQ-SYN-DATA")
@@ -191,13 +214,15 @@ def run(out_dir: Path) -> dict[str, Any]:
             "scripts/codex_eng.py",
             "auto",
             "--input",
-            str(req),
+            str(happy_req),
             "--doc-id",
             "REQ-SYN-HAPPY",
             "--repo",
             "examples/synthetic-repos/basic-web-service",
             "--project",
             "basic-web-service",
+            "--profile",
+            "frontend_change",
             "--out",
             str(happy_dir),
             "--docs-root",
@@ -205,6 +230,31 @@ def run(out_dir: Path) -> dict[str, Any]:
         ],
     )
     steps.append(happy_step)
+    resolve_required_questions(happy_dir)
+    happy_resolved_step = run_json_step(
+        "happy_path_resolved_auto",
+        [
+            "python3",
+            "scripts/codex_eng.py",
+            "auto",
+            "--input",
+            str(happy_req),
+            "--doc-id",
+            "REQ-SYN-HAPPY",
+            "--repo",
+            "examples/synthetic-repos/basic-web-service",
+            "--project",
+            "basic-web-service",
+            "--profile",
+            "frontend_change",
+            "--out",
+            str(happy_dir),
+            "--docs-root",
+            str(happy_docs),
+            "--force",
+        ],
+    )
+    steps.append(happy_resolved_step)
     frontend_step = run_json_step(
         "frontend_profile_auto",
         ["python3", "scripts/codex_eng.py", "auto", "--input", str(req), "--doc-id", "REQ-SYN-FE", "--profile", "frontend_change", "--out", str(frontend_dir), "--docs-root", str(frontend_docs)],
@@ -263,13 +313,14 @@ def run(out_dir: Path) -> dict[str, Any]:
         "case": "happy_path_case",
         "passed": (
             happy_step.get("returncode") == 0
-            and happy_summary.get("decision") == "pass"
-            and happy_summary.get("docs_quality", {}).get("decision") == "pass"
+            and happy_resolved_step.get("returncode") == 0
+            and (happy_dir / "open_questions.json").exists()
+            and json.loads((happy_dir / "open_questions.json").read_text(encoding="utf-8")).get("decision") == "pass"
             and happy_summary.get("can_implement") is False
-            and any(gap.get("artifact") in {"frontend_acceptance.json", "test_evidence_gate.json", "release_gate.json"} for gap in happy_summary.get("profile_gate_gaps", []))
+            and not any(gap.get("artifact") == "open_questions.json" for gap in happy_summary.get("profile_gate_gaps", []))
         ),
         "decision": happy_summary.get("decision", ""),
-        "reason": "project-understanding-backed synthetic repo passes design/docs gates while merged profile evidence still blocks implementation",
+        "reason": "a generated clarification artifact can be resolved and preserved across a forced design regeneration; remaining source-scope gates still prevent implementation",
     }
     frontend_case = {
         "case": "frontend_happy_path",
@@ -282,11 +333,10 @@ def run(out_dir: Path) -> dict[str, Any]:
         "passed": (
             data_summary.get("decision") in {"pass", "block"}
             and data_summary.get("can_implement") is False
-            and any(gap.get("artifact") == "release_gate.json" for gap in data_summary.get("profile_gate_gaps", []))
-            and any(gap.get("artifact") in {"docs_quality.json", "delivery_plan_review.json"} for gap in data_summary.get("profile_gate_gaps", []))
+            and any(gap.get("artifact") in {"open_questions.json", "configuration_readiness.json", "data_security_review.json", "performance_review.json"} for gap in data_summary.get("profile_gate_gaps", []))
         ),
         "decision": data_summary.get("decision", ""),
-        "reason": "data migration profile blocks until release/security/performance evidence is real",
+        "reason": "data migration blocks on unresolved requirements and design-time configuration, security, or performance evidence rather than a post-implementation release gate",
     }
     release_blocked_case = {
         "case": "release_readiness_blocked_path",

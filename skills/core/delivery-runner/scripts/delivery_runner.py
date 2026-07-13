@@ -53,6 +53,14 @@ def is_pass(data: dict[str, Any]) -> bool:
     return bool(data) and not any(data.get(key) for key in ["blockers", "active_blockers", "missing_evidence"])
 
 
+def stage_is_pass(stage: dict[str, Any], data: dict[str, Any]) -> bool:
+    accepted = stage.get("accepted_decisions", [])
+    if isinstance(accepted, list) and accepted:
+        decision = str(data.get("decision") or data.get("status") or "")
+        return bool(data) and decision in {str(item) for item in accepted}
+    return is_pass(data)
+
+
 def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
     auto_summary = load_json(artifact_dir / "auto_run_summary.json")
     status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
@@ -268,13 +276,19 @@ def primary_next_action(
 
 
 def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, Any]:
-    stages = load_stage_registry()
+    profile = selected_profile(artifact_dir, profile_name)
+    profile_skills = {str(item) for item in profile.get("required_skills", [])} if isinstance(profile.get("required_skills"), list) else set()
+    stages = [
+        stage for stage in load_stage_registry()
+        if not stage.get("conditional_skill") or str(stage.get("conditional_skill")) in profile_skills
+    ]
+    if profile.get("profile_stage_mode") == "release_only":
+        stages = [stage for stage in stages if stage.get("release_required")]
     order = [(str(stage["name"]), str(stage["artifact"])) for stage in stages]
     artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_dir / filename) for name, filename in order}
     state = load_json(artifact_dir / "delivery_state.json")
-    profile = selected_profile(artifact_dir, profile_name)
     profile_missing = missing_profile_artifacts(profile, artifact_dir)
-    completed = [name for name, _ in order if is_pass(artifacts[name])]
+    completed = [str(stage["name"]) for stage in stages if stage_is_pass(stage, artifacts[str(stage["name"])])]
     missing = [name for name, _ in order if not artifacts[name]]
     blockers: list[dict[str, Any]] = []
     for name, data in artifacts.items():
@@ -305,7 +319,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
             next_stage = name
             break
     implementation_required = [str(stage["name"]) for stage in stages if stage.get("implementation_required")]
-    if not implementation_required:
+    if not implementation_required and profile.get("profile_stage_mode") != "release_only":
         implementation_required = FALLBACK_IMPLEMENTATION_REQUIRED
     release_required = [str(stage["name"]) for stage in stages if stage.get("release_required")]
     if not release_required:
