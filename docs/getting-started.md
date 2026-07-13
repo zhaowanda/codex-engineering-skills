@@ -182,13 +182,25 @@ python3 skills/core/requirement-question-governor/scripts/question_governor.py g
 ## 6. Generate Designs
 
 ```bash
+python3 skills/core/domain-model-governor/scripts/domain_model.py \
+  --spec /tmp/codex-synthetic/spec.json \
+  --out /tmp/codex-synthetic/domain_model_design.json
+
+python3 skills/core/architecture-framing-governor/scripts/architecture_framing.py \
+  --spec /tmp/codex-synthetic/spec.json \
+  --domain-model-design /tmp/codex-synthetic/domain_model_design.json \
+  --out /tmp/codex-synthetic/architecture_framing.json
+
 python3 skills/core/technical-design-governor/scripts/technical_design.py \
   --spec /tmp/codex-synthetic/spec.json \
+  --domain-model-design /tmp/codex-synthetic/domain_model_design.json \
+  --architecture-framing /tmp/codex-synthetic/architecture_framing.json \
   --out /tmp/codex-synthetic/technical_design.json
 
 python3 skills/core/architecture-design-governor/scripts/architecture_design.py \
   --spec /tmp/codex-synthetic/spec.json \
   --technical-design /tmp/codex-synthetic/technical_design.json \
+  --architecture-framing /tmp/codex-synthetic/architecture_framing.json \
   --out /tmp/codex-synthetic/architecture_design.json
 ```
 

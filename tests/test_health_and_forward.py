@@ -175,6 +175,83 @@ def test_workflow_profiles_reference_existing_skills() -> None:
     assert {"spec", "delivery_plan_review", "edit_permit", "release"}.issubset({item["name"] for item in stages["stages"]})
 
 
+def test_workflow_profiles_follow_canonical_design_order() -> None:
+    profiles = skill_health.load_restricted_yaml(ROOT / "config/workflow-profiles.example.yaml")["profiles"]
+    order = [
+        "project-understanding-runner",
+        "requirement-document-ingestor",
+        "spec-governor",
+        "requirement-question-governor",
+        "domain-model-governor",
+        "architecture-framing-governor",
+        "ui-ue-design-governor",
+        "ui-ue-reviewer",
+        "api-contract-governor",
+        "data-model-governor",
+        "observability-design-governor",
+        "technical-design-governor",
+        "architecture-design-governor",
+        "frontend-implementation-planner",
+        "test-design-governor",
+        "test-data-governor",
+        "design-architecture-reviewer",
+        "traceability-governor",
+        "delivery-plan-templates",
+        "delivery-plan-reviewer",
+        "git-worktree-governor",
+        "edit-readiness-governor",
+        "implementation-completion-gate",
+        "post-change-skill-sync",
+        "code-review-gate",
+        "frontend-acceptance-runner",
+        "test-evidence-gate",
+        "environment-promotion-governor",
+        "uat-acceptance-governor",
+        "release-change-governor",
+        "release-evidence-binder",
+    ]
+    rank = {skill: idx for idx, skill in enumerate(order)}
+    offenders = []
+    for profile in profiles:
+        required = [skill for skill in profile.get("required_skills", []) if skill in rank]
+        ranks = [rank[skill] for skill in required]
+        if ranks != sorted(ranks):
+            offenders.append({"profile": profile["name"], "required_skills": required})
+    assert not offenders
+    small = next(item for item in profiles if item["name"] == "small_feature")
+    assert small["required_skills"].index("domain-model-governor") < small["required_skills"].index("architecture-framing-governor") < small["required_skills"].index("technical-design-governor")
+
+
+def test_workflow_stage_registry_uses_pre_technical_design_order() -> None:
+    stages = skill_health.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")["stages"]
+    names = [item["name"] for item in stages]
+    expected = [
+        "spec",
+        "domain_model_design",
+        "architecture_framing",
+        "technical_design",
+        "architecture_design",
+        "design_review",
+        "test_design",
+        "test_data_plan",
+        "delivery_plan",
+        "traceability",
+        "delivery_plan_review",
+    ]
+    assert [name for name in names if name in expected] == expected
+
+
+def test_workflow_docs_describe_current_order() -> None:
+    workflow = (ROOT / "docs/workflow-guide.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
+    catalog = (ROOT / "docs/skill-catalog.md").read_text(encoding="utf-8")
+    scenario = (ROOT / "docs/scenario-guide.md").read_text(encoding="utf-8")
+    for text in [workflow, architecture, catalog, scenario]:
+        assert "architecture-framing" in text or "architecture framing" in text
+    assert workflow.index("domain-model-governor") < workflow.index("architecture-framing-governor") < workflow.index("technical-design-governor")
+    assert workflow.index("frontend-acceptance-runner") < workflow.index("test-evidence-gate")
+
+
 def test_readme_uses_current_validation_commands() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "python3 -m pytest -q" in readme

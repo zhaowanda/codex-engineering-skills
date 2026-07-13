@@ -571,10 +571,13 @@ def test_auto_runner_generates_specialty_design_before_technical_design() -> Non
         step_names = [step.get("name") for step in result["steps"]]
         assert step_names.index("domain_model_design") < step_names.index("architecture_framing") < step_names.index("technical_design")
         assert step_names.index("ui_ue_design") < step_names.index("technical_design")
+        assert step_names.index("design_review") < step_names.index("test_design")
+        assert step_names.index("delivery_plan") < step_names.index("traceability_matrix") < step_names.index("delivery_plan_review")
         assert step_names.index("frontend_implementation_plan") > step_names.index("technical_design")
         tech = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))
         assert tech["architecture_framing_ref"] == "architecture_framing.json"
         assert (out / "ui_ue_design.json").exists()
+        assert (out / "traceability_matrix.json").exists()
         assert (out / "frontend_implementation_plan.json").exists()
 
 

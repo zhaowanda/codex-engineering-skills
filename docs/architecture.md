@@ -7,14 +7,21 @@ The framework turns an AI coding assistant into a gated engineering workflow par
 ```text
 requirement input
 -> normalized spec
+-> domain model and architecture framing
+-> UI/API/data/observability specialty designs as applicable
 -> technical design
 -> architecture design
+-> design review
+-> test design and test data plan
 -> delivery plan
+-> traceability matrix when required
+-> delivery plan review
 -> Git baseline and feature branch
 -> edit permit
 -> implementation in allowed scope
 -> design/code/security/performance review
--> tests and frontend acceptance
+-> frontend acceptance when UI changed
+-> tests and test evidence
 -> release evidence
 -> post-change learning
 ```

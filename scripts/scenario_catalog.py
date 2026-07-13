@@ -18,7 +18,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A small user request arrives as one sentence or a short chat message.",
         "command": "python3 scripts/codex_eng.py auto --input requirement.md --out /tmp/codex-auto",
         "expected_profile": "small_feature",
-        "evidence": ["auto_run_summary.json", "technical_design.json", "architecture_design.json", "delivery_plan_review.json"],
+        "evidence": ["auto_run_summary.json", "domain_model_design.json", "architecture_framing.json", "technical_design.json", "architecture_design.json", "delivery_plan_review.json"],
         "next_step": "Read auto_run_summary.json for next_stage, readiness_blockers, and next_command. " + PRE_EDIT_GATE,
     },
     {
@@ -27,7 +27,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A copied PRD, Markdown document, or long requirement needs normalization before design.",
         "command": "python3 scripts/codex_eng.py auto --input prd.md --out /tmp/codex-auto",
         "expected_profile": "small_feature",
-        "evidence": ["spec.json", "technical_design.json", "architecture_design.json", "delivery_plan.json"],
+        "evidence": ["spec.json", "domain_model_design.json", "architecture_framing.json", "technical_design.json", "architecture_design.json", "delivery_plan.json"],
         "next_step": "Resolve open questions first; otherwise continue only with auto_run_summary.next_command. " + PRE_EDIT_GATE,
     },
     {
@@ -54,8 +54,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "when": "A backend API, route contract, producer/consumer boundary, explicit cross_repo impact, or coordinated multi-repository change is required.",
         "command": "python3 scripts/codex_eng.py auto --input api.md --repo /path/to/repo --project project-name --out /tmp/codex-auto",
         "expected_profile": "cross_repo_api",
-        "evidence": ["project_understanding/baseline_quality.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json", "delivery_plan_review.json"],
-        "next_step": "Use project understanding, cross-repo graph, readiness, and traceability evidence before implementation. " + PRE_EDIT_GATE,
+        "evidence": ["project_understanding/baseline_quality.json", "architecture_framing.json", "api_contract_design.json", "traceability_matrix.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json", "delivery_plan_review.json"],
+        "next_step": "Use project understanding, pre-technical framing, contract evidence, cross-repo graph/readiness, and traceability evidence before implementation. " + PRE_EDIT_GATE,
     },
     {
         "id": "data_migration",
@@ -88,10 +88,13 @@ SCENARIOS: list[dict[str, Any]] = [
 
 
 CORE_PRE_EDIT_GATES = [
+    "domain_model_design.json",
+    "architecture_framing.json",
     "technical_design.json",
     "architecture_design.json",
     "test_design.json",
     "test_data_plan.json",
+    "traceability_matrix.json",
     "design_architecture_review.json",
     "delivery_plan_review.json",
     "docs_quality.json",
@@ -102,11 +105,11 @@ CORE_PRE_EDIT_GATES = [
 
 SCENARIO_MATRIX: dict[str, dict[str, Any]] = {
     "one_line_request": {
-        "required_skills": ["spec-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "delivery-plan-reviewer"],
+        "required_skills": ["spec-governor", "domain-model-governor", "architecture-framing-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "traceability-governor", "delivery-plan-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES,
     },
     "long_prd": {
-        "required_skills": ["requirement-question-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "human-doc-reviewer"],
+        "required_skills": ["requirement-question-governor", "domain-model-governor", "architecture-framing-governor", "technical-design-governor", "architecture-design-governor", "test-design-governor", "test-data-governor", "traceability-governor", "human-doc-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES,
     },
     "bugfix": {
@@ -114,12 +117,12 @@ SCENARIO_MATRIX: dict[str, dict[str, Any]] = {
         "required_gates": ["spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json", "docs_quality.json", "git_worktree_evidence.json", "edit_permit.json"],
     },
     "frontend_change": {
-        "required_skills": ["frontend-acceptance-runner", "test-evidence-gate", "human-doc-reviewer"],
+        "required_skills": ["domain-model-governor", "architecture-framing-governor", "ui-ue-design-governor", "ui-ue-reviewer", "frontend-implementation-planner", "frontend-acceptance-runner", "test-evidence-gate", "human-doc-reviewer"],
         "required_gates": CORE_PRE_EDIT_GATES + ["frontend_acceptance.json", "test_evidence_gate.json"],
     },
     "cross_repo_api": {
-        "required_skills": ["project-understanding-runner", "cross-repo-planner", "traceability-governor", "api-surface-extractor", "delivery-plan-reviewer"],
-        "required_gates": ["project_understanding/baseline_quality.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json"] + CORE_PRE_EDIT_GATES,
+        "required_skills": ["project-understanding-runner", "domain-model-governor", "architecture-framing-governor", "api-contract-governor", "observability-design-governor", "cross-repo-planner", "traceability-governor", "delivery-plan-reviewer"],
+        "required_gates": ["project_understanding/baseline_quality.json", "api_contract_design.json", "observability_design.json", "cross_repo_execution_graph.json", "cross_repo_readiness.json"] + CORE_PRE_EDIT_GATES,
     },
     "data_migration": {
         "required_skills": ["configuration-governor", "data-security-governor", "performance-governor", "release-evidence-binder"],

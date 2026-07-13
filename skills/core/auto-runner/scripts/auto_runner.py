@@ -406,7 +406,7 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
         reasons.append("low profile confidence raises minimum strictness")
     required_controls = {
         "light": ["spec", "technical_design", "test_design", "delivery_plan_review", "git_edit_permit"],
-        "standard": ["spec", "technical_design", "architecture_design", "test_design", "test_data_plan", "design_review", "delivery_plan_review", "docs_quality", "git_edit_permit"],
+        "standard": ["spec", "domain_model_design", "architecture_framing", "technical_design", "architecture_design", "design_review", "test_design", "test_data_plan", "traceability", "delivery_plan_review", "docs_quality", "git_edit_permit"],
         "regulated": ["standard_controls", "security_or_configuration_review", "performance_or_release_evidence", "environment_uat_release_gates"],
     }[tier]
     return {
@@ -1234,6 +1234,27 @@ def run(
         steps,
     )
 
+    design_review = out / "design_architecture_review.json"
+    run_if_needed(
+        "design_review",
+        design_review,
+        [
+            "python3",
+            "skills/core/design-architecture-reviewer/scripts/design_arch_review.py",
+            "review",
+            "--technical-design",
+            str(technical),
+            "--architecture-design",
+            str(architecture),
+            "--out",
+            str(design_review),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
+
     test_design = out / "test_design.json"
     run_if_needed(
         "test_design",
@@ -1276,27 +1297,6 @@ def run(
         steps,
     )
 
-    design_review = out / "design_architecture_review.json"
-    run_if_needed(
-        "design_review",
-        design_review,
-        [
-            "python3",
-            "skills/core/design-architecture-reviewer/scripts/design_arch_review.py",
-            "review",
-            "--technical-design",
-            str(technical),
-            "--architecture-design",
-            str(architecture),
-            "--out",
-            str(design_review),
-        ],
-        force,
-        generated,
-        skipped,
-        steps,
-    )
-
     delivery_plan = out / "delivery_plan.json"
     delivery_command = [
         "python3",
@@ -1321,6 +1321,24 @@ def run(
         skipped,
         steps,
     )
+
+    if profile_requires(selected_profile, "traceability-governor"):
+        run_if_needed(
+            "traceability_matrix",
+            out / "traceability_matrix.json",
+            [
+                "python3",
+                "skills/core/traceability-governor/scripts/traceability.py",
+                "--artifact-dir",
+                str(out),
+                "--out",
+                str(out / "traceability_matrix.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
 
     delivery_plan_review = out / "delivery_plan_review.json"
     run_if_needed(

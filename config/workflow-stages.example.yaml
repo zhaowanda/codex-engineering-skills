@@ -3,26 +3,45 @@ stages:
   - name: spec
     artifact: spec.json
     next_command: python3 skills/core/spec-governor/scripts/spec_governor.py normalize --doc-id REQ-001 --title "Title" --input requirement.txt --out artifacts/REQ-001/spec.json
+  - name: domain_model_design
+    artifact: domain_model_design.json
+    next_command: python3 skills/core/domain-model-governor/scripts/domain_model.py --spec artifacts/REQ-001/spec.json --out artifacts/REQ-001/domain_model_design.json
+    implementation_required: true
+  - name: architecture_framing
+    artifact: architecture_framing.json
+    next_command: python3 skills/core/architecture-framing-governor/scripts/architecture_framing.py --spec artifacts/REQ-001/spec.json --domain-model-design artifacts/REQ-001/domain_model_design.json --out artifacts/REQ-001/architecture_framing.json
+    implementation_required: true
   - name: technical_design
     artifact: technical_design.json
-    next_command: python3 skills/core/technical-design-governor/scripts/technical_design.py --spec artifacts/REQ-001/spec.json --out artifacts/REQ-001/technical_design.json
+    next_command: python3 skills/core/technical-design-governor/scripts/technical_design.py --spec artifacts/REQ-001/spec.json --architecture-framing artifacts/REQ-001/architecture_framing.json --domain-model-design artifacts/REQ-001/domain_model_design.json --out artifacts/REQ-001/technical_design.json
+    implementation_required: true
   - name: architecture_design
     artifact: architecture_design.json
-    next_command: python3 skills/core/architecture-design-governor/scripts/architecture_design.py --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --out artifacts/REQ-001/architecture_design.json
+    next_command: python3 skills/core/architecture-design-governor/scripts/architecture_design.py --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --architecture-framing artifacts/REQ-001/architecture_framing.json --out artifacts/REQ-001/architecture_design.json
+    implementation_required: true
+  - name: design_review
+    artifact: design_architecture_review.json
+    next_command: python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py review --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json
+    implementation_required: true
   - name: test_design
     artifact: test_design.json
     next_command: python3 skills/core/test-design-governor/scripts/test_design.py render --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/test_design.json
     implementation_required: true
+  - name: test_data_plan
+    artifact: test_data_plan.json
+    next_command: python3 skills/core/test-data-governor/scripts/test_data.py render --test-design artifacts/REQ-001/test_design.json --out artifacts/REQ-001/test_data_plan.json
+    implementation_required: true
   - name: delivery_plan
     artifact: delivery_plan.json
     next_command: python3 skills/templates/delivery-plan-templates/scripts/render_delivery_plan.py --doc-id REQ-001 --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/delivery_plan.json
+    implementation_required: true
+  - name: traceability
+    artifact: traceability_matrix.json
+    next_command: python3 skills/core/traceability-governor/scripts/traceability.py --artifact-dir artifacts/REQ-001 --out artifacts/REQ-001/traceability_matrix.json
+    implementation_required: true
   - name: delivery_plan_review
     artifact: delivery_plan_review.json
     next_command: python3 skills/core/delivery-plan-reviewer/scripts/delivery_plan_review.py review --file artifacts/REQ-001/delivery_plan.json --out artifacts/REQ-001/delivery_plan_review.json
-    implementation_required: true
-  - name: design_review
-    artifact: design_architecture_review.json
-    next_command: python3 skills/core/design-architecture-reviewer/scripts/design_arch_review.py --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/design_architecture_review.json
     implementation_required: true
   - name: docs_quality
     artifact: docs_quality.json

@@ -8,12 +8,17 @@ requirement source
 -> requirement-document-ingestor
 -> spec-governor
 -> requirement-question-governor
+-> domain-model-governor
+-> architecture-framing-governor
+-> UI/API/data/observability specialty design governors as applicable
 -> technical-design-governor
 -> architecture-design-governor
--> test-design-governor
--> configuration/performance/data-security governors
 -> design-architecture-reviewer
+-> test-design-governor
+-> test-data-governor
+-> configuration/performance/data-security governors
 -> delivery-plan-templates
+-> traceability-governor after delivery_plan exists when acceptance/task scope must be proven
 -> delivery-plan-reviewer
 -> git-worktree-governor
 -> edit-readiness-governor
@@ -26,8 +31,8 @@ requirement source
 -> workspace-write-guard
 -> code-design-quality-reviewer
 -> code-review-gate
--> test-evidence-gate
 -> frontend-acceptance-runner when UI changed
+-> test-evidence-gate
 -> environment-promotion-governor
 -> uat-acceptance-governor
 -> release-change-governor
@@ -49,10 +54,16 @@ Use this profile for normal feature work before any Git or edit readiness step:
 requirement-document-ingestor
 -> spec-governor
 -> requirement-question-governor
+-> domain-model-governor
+-> architecture-framing-governor
+-> specialty design governors as applicable
 -> technical-design-governor
 -> architecture-design-governor
 -> design-architecture-reviewer
+-> test-design-governor
+-> test-data-governor
 -> delivery-plan-templates
+-> traceability-governor
 -> delivery-plan-reviewer
 ```
 
@@ -60,12 +71,12 @@ requirement-document-ingestor
 
 | Scenario | Required path |
 | --- | --- |
-| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor` |
+| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> test-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo signals should elevate to the standard path. |
 | `small_feature` | Standard design-first profile, then Git/edit readiness gates. |
-| `frontend_change` | Standard design-first profile plus `frontend-acceptance-runner` and `test-evidence-gate`. |
-| `cross_repo_api` | API/cross-repo contract profile with project understanding, cross-repo execution graph/readiness, `traceability-governor`, and release evidence gates. |
+| `frontend_change` | Standard design-first profile plus pre-technical `ui-ue-design-governor`, `ui-ue-reviewer`, `frontend-implementation-planner`, then `frontend-acceptance-runner -> test-evidence-gate`. |
+| `cross_repo_api` | API/cross-repo contract profile with project understanding, pre-technical API/observability design, delivery plan, `traceability-governor`, cross-repo execution graph/readiness, and release evidence gates. |
 | `data_migration` | Standard design-first profile plus `configuration-governor`, `data-security-governor`, `performance-governor`, and release gates. |
-| `release_readiness` | `implementation-completion-gate -> code-review-gate -> test-evidence-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
+| `release_readiness` | `implementation-completion-gate -> post-change-skill-sync -> code-review-gate -> frontend-acceptance-runner when UI changed -> test-evidence-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
 
 Profiles are machine-validated contracts, not only documentation. Each profile declares required skills, expected artifacts, required gate artifacts, accepted decisions, and readiness fields. Stage order and next commands are defined in `config/workflow-stages.example.yaml`.
 Profile `notes` are human guidance only; executable readiness is defined by `required_gate_artifacts` and the stage registry.

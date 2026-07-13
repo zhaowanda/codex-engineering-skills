@@ -4,9 +4,9 @@ Skills are grouped by delivery stage. Each entry shows maturity and category fro
 
 ## Recommended Minimum Paths
 
-- Bugfix: `requirement-document-ingestor -> spec-governor -> technical-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`.
-- Standard feature: bugfix path plus `architecture-design-governor`, `test-design-governor`, `test-data-governor`, and `traceability-governor` when acceptance coverage or cross-module scope is non-trivial.
-- Frontend change: standard feature path plus `frontend-acceptance-runner` and `test-evidence-gate`.
+- Bugfix: `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> test-design-governor -> design-architecture-reviewer -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo signals should elevate to the standard path.
+- Standard feature: `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> domain-model-governor -> architecture-framing-governor -> specialty design governors -> technical-design-governor -> architecture-design-governor -> design-architecture-reviewer -> test-design-governor -> test-data-governor -> delivery-plan-templates -> traceability-governor -> delivery-plan-reviewer`.
+- Frontend change: standard feature path plus `ui-ue-design-governor -> ui-ue-reviewer -> frontend-implementation-planner`, then real `frontend-acceptance-runner -> test-evidence-gate`.
 - Data/config/security/performance change: standard feature path plus the matching `configuration-governor`, `data-security-governor`, and `performance-governor`.
 - Release readiness: start from `implementation-completion-gate`, then `code-review-gate`, `test-evidence-gate`, environment/UAT/release-change evidence, and `release-evidence-binder`.
 

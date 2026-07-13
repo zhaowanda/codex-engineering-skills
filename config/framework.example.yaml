@@ -18,11 +18,17 @@ delivery:
     standard_requirement:
       - doc_id
       - spec
+      - domain_model_design
+      - architecture_framing
       - technical_design
       - architecture_design
-      - delivery_plan
-      - docs_quality
       - design_review
+      - test_design
+      - test_data_plan
+      - delivery_plan
+      - traceability
+      - delivery_plan_review
+      - docs_quality
       - git
       - edit_permit
       - implementation
@@ -53,4 +59,3 @@ quality:
 
 privacy:
   pattern_file: config/private-patterns.example.yaml
-

@@ -131,7 +131,7 @@ python3 scripts/codex_eng.py auto \
 
 Configure the delivery docs repository once per workspace. Later requirements reuse the configured docs repo by `doc_id`; pass `--docs-root` only when overriding the workspace default.
 
-The auto runner ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/design/test/test-data/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
+The auto runner ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/domain/framing/specialty-design/technical-design/architecture-design/test/test-data/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
 Check the next safe action later:
 
@@ -211,6 +211,8 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/requirement-document-ingestor`: ingests Markdown, text, JSON, copied docs, and PDF placeholders into normalized requirement text and source manifest.
 - `skills/core/spec-governor`: normalizes one-line requests or long requirement text into `spec.json` with scope, acceptance criteria, rules, risks, and open questions.
 - `skills/core/requirement-question-governor`: generates and validates focused open questions so unresolved ambiguity blocks design or implementation instead of being guessed.
+- `skills/core/domain-model-governor`: models business objects, lifecycle, state machine, invariants, rules, triggers, and clarification gaps before architecture framing or technical design.
+- `skills/core/architecture-framing-governor`: frames owner system, repo boundaries, new-service decisions, provider/consumer direction, entrypoints, dependency degree, release order, and rollback before technical design.
 - `skills/core/technical-design-governor`: generates a structured technical design draft with process flow, module decomposition, data flow, API/UI behavior, options, tests, and traceability.
 - `skills/core/architecture-design-governor`: generates an architecture design draft with boundaries, repo responsibilities, contracts, data ownership, deployment, rollback, and option comparison.
 - `skills/core/ui-ue-design-governor`: generates first-class UI/UE design artifacts for user goals, entry actions, flows, state matrices, accessibility, and browser evidence.
@@ -218,8 +220,6 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/frontend-implementation-planner`: maps UI/UE design into frontend routes, components, API dependencies, state handling, permission behavior, and acceptance evidence.
 - `skills/core/api-contract-governor`: generates API contract design artifacts for endpoint naming, request/response, errors, permissions, idempotency, compatibility, and consumers.
 - `skills/core/data-model-governor`: generates data model design artifacts for tables, fields, indexes, migrations, history data, consistency, rollback, and test data.
-- `skills/core/domain-model-governor`: models business objects, lifecycle, state machine, invariants, rules, triggers, and clarification gaps before technical design.
-- `skills/core/architecture-framing-governor`: frames owner system, repo boundaries, new-service decisions, provider/consumer direction, entrypoints, dependency degree, release order, and rollback before technical design.
 - `skills/core/observability-design-governor`: designs logs, metrics, traces, alerts, dashboards, MQ/task/cache signals, and post-release validation.
 - `skills/core/cross-repo-planner`: generates a cross-repository execution graph, readiness gate, and release plan for multi-repo requirements with provider/consumer dependencies.
 - `skills/core/delivery-plan-reviewer`: reviews delivery plans for executable task depth, narrow file scope, evidence mapping, rollback controls, and unresolved gates before Git or edit readiness.
