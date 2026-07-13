@@ -158,7 +158,11 @@ def finding(area: str, severity: str, message: str, evidence: Any, suggestion: s
 def artifact_digest(data: dict[str, Any]) -> str:
     def strip_volatile(value: Any) -> Any:
         if isinstance(value, dict):
-            return {key: strip_volatile(item) for key, item in sorted(value.items()) if key not in {"generated_at", "updated_at"}}
+            return {
+                key: strip_volatile(item)
+                for key, item in sorted(value.items())
+                if key not in {"generated_at", "updated_at", "producer", "producer_version", "lineage_schema", "input_digests"}
+            }
         if isinstance(value, list):
             return [strip_volatile(item) for item in value]
         return value

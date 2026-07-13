@@ -41,8 +41,14 @@ def write_json(path: Path, data: dict) -> None:
 def write_bound_questions(root: Path) -> None:
     spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
     write_json(root / "open_questions.json", {
+        "schema": "codex-open-questions-v1",
+        "questions": [],
         "decision": "pass",
         "spec_digest": delivery_runner.canonical_artifact_digest(spec),
+        "producer": "test-fixture",
+        "producer_version": "workflow-v3",
+        "lineage_schema": "codex-workflow-artifact-lineage-v1",
+        "input_digests": {"spec.json": delivery_runner.CONTRACT.path_digest(root / "spec.json")},
     })
 
 
@@ -50,12 +56,59 @@ def write_bound_design_review(root: Path, implementation_allowed: bool = True) -
     technical = json.loads((root / "technical_design.json").read_text(encoding="utf-8"))
     architecture = json.loads((root / "architecture_design.json").read_text(encoding="utf-8"))
     write_json(root / "design_architecture_review.json", {
+        "schema": "codex-design-architecture-review-v1",
         "decision": "pass",
+        "blockers": [],
+        "score": 100,
         "readiness_gate": {"implementation_allowed": implementation_allowed},
         "input_digests": {
             "technical_design.json": delivery_runner.canonical_artifact_digest(technical),
             "architecture_design.json": delivery_runner.canonical_artifact_digest(architecture),
         },
+    })
+
+
+def write_ready_small_feature(root: Path, docs_root: Path, doc_id: str = "REQ-1") -> None:
+    (root / "requirement.normalized.txt").write_text("Requirement\n", encoding="utf-8")
+    payloads = {
+        "requirement_ingestion.json": {"schema": "codex-requirement-ingestion-v1", "doc_id": doc_id, "normalized_text": str(root / "requirement.normalized.txt"), "decision": "ready", "blockers": []},
+        "spec.json": {"schema": "codex-spec-v1", "doc_id": doc_id, "decision": "pass"},
+        "open_questions.json": {"schema": "codex-open-questions-v1", "questions": [], "decision": "pass"},
+        "domain_model_design.json": {"schema": "codex-domain-model-design-v1", "decision": "pass", "blockers": []},
+        "architecture_framing.json": {"schema": "codex-architecture-framing-v1", "decision": "pass", "blockers": [], "system_boundary": {}, "repo_responsibilities": []},
+        "technical_design.json": {"schema": "codex-technical-design-v1", "decision": "pass", "blockers": [], "design_scope": {}, "process_flow": [], "solution_options": [], "selected_solution": {}, "test_strategy": []},
+        "architecture_design.json": {"schema": "codex-architecture-design-v1", "decision": "pass", "blockers": [], "architecture_scope": {}, "architecture_options": [], "selected_architecture": {}, "component_boundaries": []},
+        "design_architecture_review.json": {"schema": "codex-design-architecture-review-v1", "decision": "pass", "blockers": [], "score": 100, "readiness_gate": {"implementation_allowed": True}},
+        "test_design.json": {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [], "evidence_required": []},
+        "test_data_plan.json": {"schema": "codex-test-data-plan-v1", "decision": "pass", "datasets": [], "case_data_matrix": []},
+        "delivery_plan.json": {"schema": "codex-delivery-plan-v1", "doc_id": doc_id, "decision": "ready", "repo_tasks": [], "validation_plan": {}, "release_plan": {}, "rollback_plan": {}},
+        "traceability_matrix.json": {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": []},
+        "delivery_plan_review.json": {"schema": "codex-delivery-plan-review-v1", "decision": "pass", "blockers": [], "readiness_gate": {"implementation_allowed": True}},
+        "docs_quality.json": {"schema": "codex-docs-quality-aggregate-v1", "decision": "pass", "blockers": []},
+        "git_worktree_evidence.json": {"schema": "codex-git-baseline-evidence-v1", "decision": "ready", "fetched": True, "base_updated": True},
+        "edit_permit.json": {"schema": "codex-edit-permit-v1", "decision": "ready", "doc_id": doc_id, "branch": "feature/test", "allowed_files": ["src/app.py"]},
+        "write_guard_snapshot.json": {"schema": "codex-write-guard-snapshot-v1", "decision": "ready", "doc_id": doc_id, "branch": "feature/test", "permit_id": "EDIT-TEST"},
+    }
+    for name, payload in payloads.items():
+        write_json(root / name, payload)
+    questions = json.loads((root / "open_questions.json").read_text(encoding="utf-8"))
+    questions["spec_digest"] = delivery_runner.canonical_artifact_digest(payloads["spec.json"])
+    write_json(root / "open_questions.json", questions)
+    for stage in delivery_runner.load_stage_registry():
+        path = root / str(stage["artifact"])
+        if not path.exists():
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        inputs = {}
+        for artifact in stage.get("input_artifacts", []):
+            source = root / str(artifact)
+            if source.exists():
+                inputs[source.name] = delivery_runner.CONTRACT.path_digest(source)
+        data.update({"producer": "test-fixture", "producer_version": "workflow-v3", "lineage_schema": "codex-workflow-artifact-lineage-v1", "input_digests": inputs})
+        write_json(path, data)
+    write_json(root / "auto_run_summary.json", {
+        "doc_id": doc_id,
+        "docs_readiness": {"decision": "pass", "docs_root": str(docs_root), "manifest": str(docs_root / f"indexes/{doc_id}.manifest.json")},
     })
 
 
@@ -560,12 +613,14 @@ def test_delivery_runner_reports_next_stage() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         status = delivery_runner.inspect(root)
-        assert status["next_stage"] == "spec"
+        assert status["next_stage"] == "requirement_ingestion"
         assert status["next_action_type"] == "fix_blocker"
         assert status["primary_next_action"]["action_type"] == "fix_blocker"
         assert status["can_implement"] is False
 
-        spec = {"schema": "codex-spec-v1", "doc_id": "REQ-4", "decision": "pass"}
+        write_json(root / "requirement_ingestion.json", {"schema": "codex-requirement-ingestion-v1", "doc_id": "REQ-4", "normalized_text": "requirement.normalized.txt", "decision": "ready", "blockers": []})
+        (root / "requirement.normalized.txt").write_text("Requirement\n", encoding="utf-8")
+        spec = {"schema": "codex-spec-v1", "doc_id": "REQ-4", "decision": "pass", "lineage_schema": "codex-workflow-artifact-lineage-v1", "input_digests": {"requirement.normalized.txt": delivery_runner.CONTRACT.path_digest(root / "requirement.normalized.txt")}}
         write_json(root / "spec.json", spec)
         write_bound_questions(root)
         status = delivery_runner.inspect(root)
@@ -577,34 +632,7 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = make_docs_repo(root, "REQ-1")
-        for name in [
-            "spec",
-            "open_questions",
-            "domain_model_design",
-            "architecture_framing",
-            "technical_design",
-            "architecture_design",
-            "test_design",
-            "test_data_plan",
-            "traceability_matrix",
-            "docs_quality",
-            "git_worktree_evidence",
-            "edit_permit",
-        ]:
-            write_json(root / f"{name}.json", {"decision": "pass"})
-        write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
-        write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
-        write_bound_questions(root)
-        write_bound_design_review(root)
-        write_json(root / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True})
-        write_json(root / "auto_run_summary.json", {
-            "doc_id": "REQ-1",
-            "docs_readiness": {
-                "decision": "pass",
-                "docs_root": str(docs_root),
-                "manifest": str(docs_root / "indexes/REQ-1.manifest.json"),
-            },
-        })
+        write_ready_small_feature(root, docs_root)
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is True
         assert status["next_stage"] == "implementation"
@@ -614,10 +642,10 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
 def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        for name in ["spec", "open_questions", "domain_model_design", "architecture_framing", "technical_design", "architecture_design", "delivery_plan", "design_architecture_review"]:
-            write_json(root / f"{name}.json", {"decision": "pass"})
-        write_bound_questions(root)
-        write_bound_design_review(root)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        for name in ["test_design.json", "test_data_plan.json", "delivery_plan.json", "traceability_matrix.json", "delivery_plan_review.json", "docs_quality.json", "git_worktree_evidence.json", "edit_permit.json", "write_guard_snapshot.json"]:
+            (root / name).unlink()
         status = delivery_runner.inspect(root)
         assert status["can_implement"] is False
         assert status["next_stage"] == "test_design"
@@ -695,39 +723,79 @@ def test_delivery_runner_skips_conditional_cross_repo_stage_for_small_feature() 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = make_docs_repo(root, "REQ-1")
-        for name in [
-            "spec",
-            "open_questions",
-            "domain_model_design",
-            "architecture_framing",
-            "technical_design",
-            "architecture_design",
-            "test_design",
-            "test_data_plan",
-            "traceability_matrix",
-            "docs_quality",
-            "git_worktree_evidence",
-            "edit_permit",
-        ]:
-            write_json(root / f"{name}.json", {"decision": "pass"})
-        write_json(root / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-1"})
-        write_json(root / "delivery_plan_review.json", {"decision": "pass", "readiness_gate": {"implementation_allowed": True}})
-        write_bound_questions(root)
-        write_bound_design_review(root)
-        write_json(root / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True})
-        write_json(root / "auto_run_summary.json", {
-            "doc_id": "REQ-1",
-            "workflow_profile": {"name": "small_feature", "required_skills": ["traceability-governor"]},
-            "docs_readiness": {
-                "decision": "pass",
-                "docs_root": str(docs_root),
-                "manifest": str(docs_root / "indexes/REQ-1.manifest.json"),
-            },
-        })
+        write_ready_small_feature(root, docs_root)
         status = delivery_runner.inspect(root, profile_name="small_feature")
         assert "cross_repo_plan" not in status["missing_artifacts"]
         assert "cross_repo_plan" not in status["implementation_missing"]
         assert status["can_implement"] is True
+
+
+def test_delivery_runner_rejects_placeholder_artifact_even_with_pass_decisions() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        write_json(root / "technical_design.json", {"schema": "placeholder", "decision": "pass", "blockers": []})
+        review = json.loads((root / "design_architecture_review.json").read_text(encoding="utf-8"))
+        review["input_digests"]["technical_design.json"] = delivery_runner.CONTRACT.path_digest(root / "technical_design.json")
+        write_json(root / "design_architecture_review.json", review)
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+        assert status["can_implement"] is False
+        assert any(item["source"] == "technical_design" and "contract" in item["message"] for item in status["blockers"])
+
+
+def test_delivery_runner_requires_write_guard_snapshot() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        (root / "write_guard_snapshot.json").unlink()
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+        assert status["can_implement"] is False
+        assert status["next_stage"] == "write_guard_snapshot"
+
+
+def test_delivery_runner_propagates_spec_staleness() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
+        spec["requirement_summary"] = "changed requirement"
+        write_json(root / "spec.json", spec)
+        questions = json.loads((root / "open_questions.json").read_text(encoding="utf-8"))
+        questions["spec_digest"] = delivery_runner.canonical_artifact_digest(spec)
+        questions["input_digests"]["spec.json"] = delivery_runner.CONTRACT.path_digest(root / "spec.json")
+        write_json(root / "open_questions.json", questions)
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+        assert status["can_implement"] is False
+        assert any(item["source"] in {"domain_model_design", "technical_design"} and "stale" in item["message"] for item in status["blockers"])
+
+
+def test_delivery_runner_rejects_placeholder_release_chain() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        decisions = {
+            "implementation_completion_gate.json": "pass",
+            "post_change_implementation_report.json": "pass",
+            "write_guard_audit.json": "ready",
+            "diff_impact.json": "pass",
+            "change_risk.json": "pass",
+            "evidence_gap_summary.json": "pass",
+            "code_design_quality.json": "pass",
+            "test_evidence_gate.json": "pass",
+            "post_implementation_traceability_matrix.json": "pass",
+            "code_review_gate.json": "approve",
+            "environment_promotion.json": "pass",
+            "uat_acceptance.json": "pass",
+            "release_change.json": "pass",
+            "release_gate.json": "go",
+        }
+        for name, decision in decisions.items():
+            write_json(root / name, {"schema": "placeholder", "decision": decision})
+        status = delivery_runner.inspect(root, profile_name="release_readiness")
+        assert status["can_release"] is False
+        assert any("contract" in item["message"] for item in status["blockers"])
 
 
 def run_all() -> None:

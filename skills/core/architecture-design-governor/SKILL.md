@@ -50,6 +50,8 @@ python3 scripts/architecture_design.py \
 
 The output uses schema `codex-architecture-design-v1`.
 
+The artifact emits top-level `decision` and `blockers`; downstream workflow contracts accept only `decision=pass`.
+
 The artifact contains detailed architecture options, selected option, weighted fit matrix, score summary, repository responsibilities, contracts, invariants, data ownership, deployment, rollback, observability, and risks.
 
 Readiness decision is enforced by `design-architecture-reviewer`: missing ownership, contract, deployment, rollback, or new-service evidence must appear as review findings/blockers and must not proceed to delivery planning or implementation until the review decision is pass.

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -10,6 +9,18 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[4]
+
+
+def load_contract_module() -> Any:
+    path = Path(__file__).with_name("workflow_contract.py")
+    spec = importlib.util.spec_from_file_location("workflow_artifact_contract", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+CONTRACT = load_contract_module()
 FALLBACK_ORDER = [
     ("spec", "spec.json"),
     ("technical_design", "technical_design.json"),
@@ -45,21 +56,8 @@ def load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def is_pass(data: dict[str, Any]) -> bool:
-    decision = data.get("decision") or data.get("status")
-    if decision in {"pass", "ready", "approve", "approved", "go"}:
-        return True
-    if data.get("pass") is True:
-        return True
-    return bool(data) and not any(data.get(key) for key in ["blockers", "active_blockers", "missing_evidence"])
-
-
 def stage_is_pass(stage: dict[str, Any], data: dict[str, Any]) -> bool:
-    accepted = stage.get("accepted_decisions", [])
-    if isinstance(accepted, list) and accepted:
-        decision = str(data.get("decision") or data.get("status") or "")
-        return bool(data) and decision in {str(item) for item in accepted}
-    return is_pass(data)
+    return not CONTRACT.validate_artifact_contract(stage, data)
 
 
 def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
@@ -144,7 +142,10 @@ def load_stage_registry() -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for item in stages:
         if isinstance(item, dict) and item.get("name") and item.get("artifact"):
-            normalized.append(item)
+            normalized_item = dict(item)
+            normalized_item.setdefault("validator", data.get("default_validator", ""))
+            normalized_item.setdefault("lineage_schema", data.get("default_lineage_schema", ""))
+            normalized.append(normalized_item)
     return normalized
 
 
@@ -200,15 +201,7 @@ def nested_value(data: dict[str, Any], path: str) -> Any:
 
 
 def canonical_artifact_digest(data: dict[str, Any]) -> str:
-    def strip_volatile(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {key: strip_volatile(item) for key, item in sorted(value.items()) if key not in {"generated_at", "updated_at"}}
-        if isinstance(value, list):
-            return [strip_volatile(item) for item in value]
-        return value
-
-    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return CONTRACT.canonical_digest(data)
 
 
 def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[dict[str, Any]]:
@@ -333,6 +326,14 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     completed = [str(stage["name"]) for stage in stages if stage_is_pass(stage, artifacts[str(stage["name"])])]
     missing = [name for name, _ in order if not artifacts[name]]
     blockers: list[dict[str, Any]] = []
+    for stage in stages:
+        name = str(stage["name"])
+        data = artifacts.get(name, {})
+        if not data:
+            continue
+        issues = CONTRACT.validate_artifact_contract(stage, data)
+        if issues:
+            blockers.append({"source": name, "message": "artifact contract validation failed", "issues": issues})
     for name, data in artifacts.items():
         if not data:
             continue
@@ -350,10 +351,11 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         recorded = data.get("input_digests") if isinstance(data.get("input_digests"), dict) else {}
         stale_inputs = []
         for artifact_name in input_artifacts:
-            source = load_json(artifact_dir / artifact_name)
-            if source and recorded.get(artifact_name) != canonical_artifact_digest(source):
+            source_path = artifact_dir / artifact_name
+            recorded_digest = recorded.get(artifact_name) or recorded.get(source_path.name)
+            if source_path.exists() and recorded_digest != CONTRACT.path_digest(source_path):
                 stale_inputs.append(artifact_name)
-            elif not source and artifact_name in recorded:
+            elif not source_path.exists() and (artifact_name in recorded or source_path.name in recorded):
                 stale_inputs.append(artifact_name)
         if stale_inputs:
             if name in completed:
@@ -398,7 +400,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         release_required = FALLBACK_RELEASE_REQUIRED
     implementation_missing = [name for name in implementation_required if name not in completed]
     release_missing = [name for name in release_required if name not in completed]
-    can_implement = not implementation_missing and not blockers
+    can_implement = not release_only and not implementation_missing and not blockers
     can_release = not release_missing and not blockers
     commands = {str(stage["name"]): str(stage.get("next_command") or "") for stage in stages}
     next_command = commands.get(next_stage, "Run the gate for the next missing stage and attach evidence.")

@@ -6,6 +6,7 @@ import importlib.util
 import json
 import py_compile
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -34,11 +35,33 @@ VALID_STAGES = {
     "meta",
 }
 GATE_MATURITY = {"expert-gate", "advisory-review"}
-PROFILE_SCHEMA = "codex-workflow-profiles-v1"
-STAGE_SCHEMA = "codex-workflow-stages-v2"
+PROFILE_SCHEMA = "codex-workflow-profiles-v2"
+STAGE_SCHEMA = "codex-workflow-stages-v3"
+DEPRECATED_PROFILE_SCHEMAS = {"codex-workflow-profiles-v1"}
 # Retained in the public schema inventory so v1 consumers receive an explicit
 # migration contract instead of an unannounced schema removal.
-DEPRECATED_STAGE_SCHEMAS = {"codex-workflow-stages-v1"}
+DEPRECATED_STAGE_SCHEMAS = {"codex-workflow-stages-v1", "codex-workflow-stages-v2"}
+REQUIRED_SEMANTIC_DEPENDENCIES = {
+    "architecture_framing": {"domain_model_design"},
+    "technical_design": {"requirement_questions", "architecture_framing"},
+    "architecture_design": {"technical_design", "architecture_framing"},
+    "cross_repo_plan": {"delivery_plan_draft"},
+    "design_review": {"architecture_design", "cross_repo_plan"},
+    "test_design": {"design_review"},
+    "test_data_plan": {"test_design"},
+    "delivery_plan": {"test_data_plan"},
+    "delivery_plan_review": {"initial_traceability"},
+    "write_guard_snapshot": {"edit_permit"},
+    "implementation": {"write_guard_snapshot"},
+    "change_risk": {"diff_impact"},
+    "evidence_collection": {"post_change", "change_risk"},
+    "test": {"implementation"},
+    "review": {"write_guard_audit", "evidence_collection", "code_design_quality", "test", "post_implementation_traceability"},
+    "environment": {"review"},
+    "uat": {"environment"},
+    "release_change": {"uat"},
+    "release": {"release_change"},
+}
 
 
 def artifact_schema_inventory(root: Path) -> dict[str, Any]:
@@ -111,6 +134,55 @@ def design_template_regression(root: Path) -> dict[str, Any]:
         "blockers": blockers,
         "examples": example_results,
     }
+
+
+def workflow_runtime_assessment(root: Path, stage_entries: list[dict[str, Any]]) -> dict[str, Any]:
+    try:
+        contract_path = root / "skills/core/delivery-runner/scripts/workflow_contract.py"
+        contract_spec = importlib.util.spec_from_file_location("health_workflow_contract", contract_path)
+        contract = importlib.util.module_from_spec(contract_spec)
+        assert contract_spec and contract_spec.loader
+        contract_spec.loader.exec_module(contract)
+        fail_closed_results = []
+        for stage in stage_entries:
+            normalized = dict(stage)
+            normalized.setdefault("validator", "builtin:artifact-contract")
+            accepted = as_list(normalized.get("accepted_decisions"))
+            placeholder = {"schema": "placeholder", "decision": accepted[0] if accepted else "pass"}
+            issues = contract.validate_artifact_contract(normalized, placeholder)
+            fail_closed_results.append({"stage": stage.get("name"), "rejected": bool(issues), "issues": issues})
+
+        synthetic_path = root / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py"
+        synthetic_spec = importlib.util.spec_from_file_location("health_synthetic_e2e", synthetic_path)
+        synthetic = importlib.util.module_from_spec(synthetic_spec)
+        assert synthetic_spec and synthetic_spec.loader
+        synthetic_spec.loader.exec_module(synthetic)
+        with tempfile.TemporaryDirectory() as tmp:
+            synthetic_result = synthetic.run(Path(tmp))
+        case_results = {
+            str(item.get("case")): bool(item.get("passed"))
+            for item in as_list(synthetic_result.get("cases"))
+            if isinstance(item, dict)
+        }
+        required_cases = {
+            "blocked_case",
+            "happy_path_case",
+            "frontend_happy_path",
+            "data_migration_blocked_path",
+            "release_readiness_blocked_path",
+            "release_readiness_happy_path",
+            "release_followup_chain_path",
+        }
+        return {
+            "decision": "pass" if all(item["rejected"] for item in fail_closed_results) and synthetic_result.get("decision") == "pass" and required_cases.issubset({name for name, passed in case_results.items() if passed}) else "block",
+            "fail_closed_stage_count": sum(1 for item in fail_closed_results if item["rejected"]),
+            "stage_count": len(fail_closed_results),
+            "fail_closed_results": fail_closed_results,
+            "synthetic_decision": synthetic_result.get("decision"),
+            "case_results": case_results,
+        }
+    except Exception as exc:
+        return {"decision": "block", "error": str(exc), "fail_closed_results": [], "case_results": {}}
 
 
 def parse_frontmatter(text: str) -> dict[str, str]:
@@ -209,7 +281,7 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
-def skill_expert_score(skill_text: str, script_text: str, script_count: int, test_refs: int) -> dict[str, Any]:
+def skill_expert_score(skill_text: str, script_text: str, script_count: int, test_refs: int, maturity: str) -> dict[str, Any]:
     combined = f"{skill_text}\n{script_text}".lower()
     bash_examples = len(re.findall(r"```bash", skill_text))
     schema_mentions = len(set(re.findall(r"codex-[a-z0-9-]+-v\d+", combined)))
@@ -238,7 +310,8 @@ def skill_expert_score(skill_text: str, script_text: str, script_count: int, tes
     score += 8 if dimensions["test_coverage_signal"] else 0
     score += 7 if dimensions["evidence_orientation"] else 0
     score += 7 if dimensions["failure_path"] else 0
-    level = "expert" if score >= 90 else "advanced" if score >= 82 else "standard" if score >= 72 else "basic"
+    raw_level = "expert" if score >= 90 else "advanced" if score >= 82 else "standard" if score >= 72 else "basic"
+    level = raw_level if maturity in GATE_MATURITY else "advanced" if raw_level == "expert" else raw_level
     return {
         "score": min(score, 100),
         "level": level,
@@ -306,7 +379,7 @@ def check(root: Path) -> dict[str, Any]:
         expert_scores.append({
             "skill": name or skill.parent.name,
             "path": rel,
-            **skill_expert_score(skill_text, script_text, len(scripts), test_refs),
+            **skill_expert_score(skill_text, script_text, len(scripts), test_refs, fm.get("maturity", "")),
         })
         for script in scripts:
             try:
@@ -405,6 +478,7 @@ def check(root: Path) -> dict[str, Any]:
                 for post_implementation_skill in ["frontend-acceptance-runner", "test-evidence-gate"]:
                     if post_implementation_skill in required:
                         blockers.append({"source": f"workflow_profile.{profile_name}", "message": f"frontend_change must not require post-implementation skill {post_implementation_skill}"})
+    stage_entries: list[dict[str, Any]] = []
     stage_path = root / "config/workflow-stages.example.yaml"
     if stage_path.exists():
         stages_doc = load_restricted_yaml(stage_path)
@@ -414,6 +488,10 @@ def check(root: Path) -> dict[str, Any]:
         phase_rank = {phase: idx for idx, phase in enumerate(phase_order)}
         if not phase_order:
             blockers.append({"source": "config/workflow-stages.example.yaml", "message": "phase_order is required"})
+        if stages_doc.get("default_validator") != "builtin:artifact-contract":
+            blockers.append({"source": "config/workflow-stages.example.yaml", "message": "default_validator must be builtin:artifact-contract"})
+        if stages_doc.get("default_lineage_schema") != "codex-workflow-artifact-lineage-v1":
+            blockers.append({"source": "config/workflow-stages.example.yaml", "message": "default_lineage_schema must be codex-workflow-artifact-lineage-v1"})
         seen_stages: set[str] = set()
         seen_artifacts: set[str] = set()
         stage_entries = stages_doc.get("stages", []) if isinstance(stages_doc.get("stages"), list) else []
@@ -431,6 +509,13 @@ def check(root: Path) -> dict[str, Any]:
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage phase is missing or unknown", "stage": name, "phase": phase})
             if not isinstance(stage.get("depends_on"), list):
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage depends_on must be a list", "stage": name})
+            accepted_schemas = as_list(stage.get("accepted_schemas"))
+            if not stage.get("expected_schema") and not accepted_schemas:
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage must declare expected_schema or accepted_schemas", "stage": name})
+            if not isinstance(stage.get("required_fields"), list) or not stage.get("required_fields"):
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage required_fields must be a non-empty list", "stage": name})
+            if (stage.get("implementation_required") or stage.get("release_required")) and not as_list(stage.get("accepted_decisions")):
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "readiness stage must declare accepted_decisions", "stage": name})
             if name in seen_stages:
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "duplicate stage name", "stage": name})
             if artifact_name in seen_artifacts:
@@ -438,6 +523,10 @@ def check(root: Path) -> dict[str, Any]:
             seen_stages.add(name)
             seen_artifacts.add(artifact_name)
         for name, stage in stage_by_name.items():
+            declared_dependencies = {str(item) for item in as_list(stage.get("depends_on"))}
+            missing_semantic = REQUIRED_SEMANTIC_DEPENDENCIES.get(name, set()) - declared_dependencies
+            if missing_semantic:
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage is missing required semantic dependencies", "stage": name, "dependencies": sorted(missing_semantic)})
             for dependency in [str(item) for item in as_list(stage.get("depends_on"))]:
                 if dependency not in stage_by_name:
                     blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage dependency does not exist", "stage": name, "dependency": dependency})
@@ -470,14 +559,34 @@ def check(root: Path) -> dict[str, Any]:
                     artifact_name = str(gate.get("artifact") or "") if isinstance(gate, dict) else ""
                     if artifact_name and artifact_name not in seen_artifacts:
                         blockers.append({"source": f"workflow_profile.{profile.get('name')}", "message": "required gate artifact is not registered in workflow stages", "artifact": artifact_name})
+                if profile.get("profile_stage_mode") == "release_only":
+                    continue
+                required_skills = {str(item) for item in as_list(profile.get("required_skills"))}
+                impacts = {str(item) for item in as_list(profile.get("trigger_impacts"))}
+                expected_artifacts = {str(item) for item in as_list(profile.get("expected_artifacts"))}
+                applicable_artifacts: set[str] = set()
+                for stage in stage_entries:
+                    if not isinstance(stage, dict) or not stage.get("implementation_required"):
+                        continue
+                    conditional_skill = str(stage.get("conditional_skill") or "")
+                    if conditional_skill and conditional_skill not in required_skills:
+                        continue
+                    conditional_impacts = {str(item) for item in as_list(stage.get("conditional_impacts"))}
+                    if conditional_impacts and not conditional_impacts.intersection(impacts):
+                        continue
+                    applicable_artifacts.add(str(stage.get("artifact")))
+                missing_expected = applicable_artifacts - expected_artifacts
+                if missing_expected:
+                    blockers.append({"source": f"workflow_profile.{profile.get('name')}", "message": "profile expected_artifacts omits applicable implementation stages", "artifacts": sorted(missing_expected)})
     expert_level_count = sum(1 for item in expert_scores if item["level"] == "expert")
     advanced_or_better_count = sum(1 for item in expert_scores if item["level"] in {"expert", "advanced"})
     content_quality_scores = [int(item.get("content_quality", {}).get("score") or 0) for item in expert_scores]
     content_quality_average = round(sum(content_quality_scores) / len(content_quality_scores), 2) if content_quality_scores else 0
     stage_blockers = [item for item in blockers if item.get("source") == "config/workflow-stages.example.yaml"]
     gate_blockers = [item for item in blockers if str(item.get("source") or "").startswith("workflow_profile.")]
-    synthetic_source = (root / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py").read_text(encoding="utf-8") if (root / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py").exists() else ""
+    runtime_assessment = workflow_runtime_assessment(root, stage_entries)
     real_replay_count = 0
+    real_replay_families: set[str] = set()
     for replay_path in (root / "examples/replay-cases").glob("*.json") if (root / "examples/replay-cases").exists() else []:
         try:
             replay = json.loads(replay_path.read_text(encoding="utf-8"))
@@ -485,15 +594,17 @@ def check(root: Path) -> dict[str, Any]:
             continue
         if isinstance(replay, dict) and replay.get("source_type") == "anonymized_real_project":
             real_replay_count += 1
+            if replay.get("scenario"):
+                real_replay_families.add(str(replay["scenario"]))
     framework_dimensions = {
-        "skill_contract_quality": round(100 * expert_level_count / len(skills), 2) if skills else 0,
+        "skill_contract_quality": round(100 * advanced_or_better_count / len(skills), 2) if skills else 0,
         "dag_integrity": 100 if not stage_blockers else 0,
-        "gate_semantics": 100 if not gate_blockers else 0,
-        "happy_blocked_path_reality": 100 if 'happy_ready_status.get("can_implement") is True' in synthetic_source and 'release_ready_status.get("can_release") is True' in synthetic_source else 0,
-        "real_project_calibration": 100 if real_replay_count else 40,
+        "gate_semantics": 100 if not gate_blockers and runtime_assessment.get("fail_closed_stage_count") == runtime_assessment.get("stage_count") else 0,
+        "happy_blocked_path_reality": 100 if runtime_assessment.get("decision") == "pass" else 0,
+        "real_project_calibration": 100 if real_replay_count >= 3 and len(real_replay_families) >= 3 else 60 if real_replay_count else 0,
     }
     framework_overall = round(sum(framework_dimensions.values()) / len(framework_dimensions), 2)
-    framework_level = "expert" if framework_overall >= 90 and framework_dimensions["real_project_calibration"] >= 80 else "advanced" if framework_overall >= 80 else "mixed"
+    framework_level = "expert" if framework_overall >= 90 and real_replay_count >= 3 and len(real_replay_families) >= 3 else "advanced" if framework_overall >= 80 else "mixed"
     return {
         "schema": "codex-skill-health-v1",
         "decision": "block" if blockers else "warn" if warnings else "pass",
@@ -508,8 +619,10 @@ def check(root: Path) -> dict[str, Any]:
             "level": framework_level,
             "dimensions": framework_dimensions,
             "real_project_replay_count": real_replay_count,
-            "expert_rule": "expert requires overall>=90 and at least one anonymized real-project replay",
+            "real_project_replay_family_count": len(real_replay_families),
+            "expert_rule": "expert requires overall>=90 plus at least three anonymized real-project replays across three scenario families",
         },
+        "workflow_runtime_assessment": runtime_assessment,
         "integrated_quality_gates": {
             "artifact_schema_inventory": {
                 "decision": schema_inventory.get("decision"),

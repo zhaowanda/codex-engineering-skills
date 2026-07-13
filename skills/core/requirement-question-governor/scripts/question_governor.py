@@ -40,7 +40,7 @@ def canonical_spec_digest(spec: dict[str, Any]) -> str:
             return {
                 key: strip_volatile(item)
                 for key, item in sorted(value.items())
-                if key not in {"generated_at", "updated_at"}
+                if key not in {"generated_at", "updated_at", "producer", "producer_version", "lineage_schema", "input_digests"}
             }
         if isinstance(value, list):
             return [strip_volatile(item) for item in value]

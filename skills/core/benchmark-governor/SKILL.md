@@ -30,6 +30,7 @@ python3 scripts/codex_eng.py run benchmark --root .
 - Count skills, schemas, prompts, scenarios, and tests.
 - Run privacy scan and skill health as subprocesses.
 - Report pass/warn/block without mutating repository files.
+- Report structural readiness separately from expert readiness. Expert readiness must remain false without anonymized real-project replay evidence.
 
 ## Output
 

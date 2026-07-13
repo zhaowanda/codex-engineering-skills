@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -10,6 +11,18 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[4]
+
+
+def load_delivery_runner() -> Any:
+    path = ROOT / "skills/core/delivery-runner/scripts/delivery_runner.py"
+    spec = importlib.util.spec_from_file_location("synthetic_delivery_runner", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+DELIVERY_RUNNER = load_delivery_runner()
 
 
 def run_step(name: str, args: list[str], allow_fail: bool = False) -> dict[str, Any]:
@@ -62,7 +75,11 @@ def resolve_required_questions(out_dir: Path) -> None:
 def canonical_digest(data: dict[str, Any]) -> str:
     def strip_volatile(value: Any) -> Any:
         if isinstance(value, dict):
-            return {key: strip_volatile(item) for key, item in sorted(value.items()) if key not in {"generated_at", "updated_at"}}
+            return {
+                key: strip_volatile(item)
+                for key, item in sorted(value.items())
+                if key not in {"generated_at", "updated_at", "producer", "producer_version", "lineage_schema", "input_digests"}
+            }
         if isinstance(value, list):
             return [strip_volatile(item) for item in value]
         return value
@@ -71,23 +88,50 @@ def canonical_digest(data: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def bind_workflow_lineage(out_dir: Path) -> None:
+    for stage in DELIVERY_RUNNER.load_stage_registry():
+        path = out_dir / str(stage["artifact"])
+        if not path.exists():
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        recorded = data.get("input_digests") if isinstance(data.get("input_digests"), dict) else {}
+        for artifact in stage.get("input_artifacts", []):
+            source = out_dir / str(artifact)
+            if source.exists():
+                recorded[source.name] = DELIVERY_RUNNER.CONTRACT.path_digest(source)
+        data.update({
+            "producer": "synthetic-e2e",
+            "producer_version": "workflow-v3",
+            "lineage_schema": "codex-workflow-artifact-lineage-v1",
+            "input_digests": recorded,
+        })
+        write_json(path, data)
+
+
 def write_preimplementation_happy_evidence(out_dir: Path) -> None:
     spec = json.loads((out_dir / "spec.json").read_text(encoding="utf-8"))
     questions = json.loads((out_dir / "open_questions.json").read_text(encoding="utf-8"))
     questions["spec_digest"] = canonical_digest(spec)
     questions["decision"] = "pass"
     write_json(out_dir / "open_questions.json", questions)
-    for artifact in [
-        "domain_model_design.json",
-        "architecture_framing.json",
-        "test_design.json",
-        "test_data_plan.json",
-        "traceability_matrix.json",
-        "docs_quality.json",
-    ]:
-        write_json(out_dir / artifact, {"decision": "pass", "blockers": []})
+    defaults = {
+        "domain_model_design.json": {"schema": "codex-domain-model-design-v1", "decision": "pass", "blockers": []},
+        "architecture_framing.json": {"schema": "codex-architecture-framing-v1", "decision": "pass", "blockers": [], "system_boundary": {}, "repo_responsibilities": []},
+        "test_design.json": {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [], "evidence_required": []},
+        "test_data_plan.json": {"schema": "codex-test-data-plan-v1", "decision": "pass", "datasets": [], "case_data_matrix": []},
+        "traceability_matrix.json": {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": []},
+        "docs_quality.json": {"schema": "codex-docs-quality-aggregate-v1", "decision": "pass", "blockers": []},
+    }
+    for artifact, fallback in defaults.items():
+        current = json.loads((out_dir / artifact).read_text(encoding="utf-8")) if (out_dir / artifact).exists() else fallback
+        current.update({key: value for key, value in fallback.items() if key not in current or key in {"decision", "blockers"}})
+        write_json(out_dir / artifact, current)
     technical = json.loads((out_dir / "technical_design.json").read_text(encoding="utf-8"))
     architecture = json.loads((out_dir / "architecture_design.json").read_text(encoding="utf-8"))
+    technical.update({"decision": "pass", "blockers": []})
+    architecture.update({"decision": "pass", "blockers": []})
+    write_json(out_dir / "technical_design.json", technical)
+    write_json(out_dir / "architecture_design.json", architecture)
     review_inputs = {
         "technical_design.json": technical,
         "architecture_design.json": architecture,
@@ -107,15 +151,21 @@ def write_preimplementation_happy_evidence(out_dir: Path) -> None:
         if path.exists():
             review_inputs[artifact] = json.loads(path.read_text(encoding="utf-8"))
     write_json(out_dir / "design_architecture_review.json", {
+        "schema": "codex-design-architecture-review-v1",
         "decision": "pass",
         "blockers": [],
+        "score": 100,
         "readiness_gate": {"implementation_allowed": True},
         "input_digests": {name: canonical_digest(data) for name, data in review_inputs.items()},
     })
-    write_json(out_dir / "delivery_plan.json", {"decision": "pass", "doc_id": "REQ-SYN-HAPPY", "blockers": []})
-    write_json(out_dir / "delivery_plan_review.json", {"decision": "pass", "blockers": [], "readiness_gate": {"implementation_allowed": True}})
-    write_json(out_dir / "git_worktree_evidence.json", {"decision": "ready", "fetched": True, "base_updated": True, "branch": "feature/REQ-SYN-HAPPY"})
-    write_json(out_dir / "edit_permit.json", {"decision": "ready", "doc_id": "REQ-SYN-HAPPY", "branch": "feature/REQ-SYN-HAPPY"})
+    plan = json.loads((out_dir / "delivery_plan.json").read_text(encoding="utf-8")) if (out_dir / "delivery_plan.json").exists() else {}
+    plan.update({"schema": "codex-delivery-plan-v1", "decision": "ready", "doc_id": "REQ-SYN-HAPPY", "repo_tasks": plan.get("repo_tasks", []), "validation_plan": plan.get("validation_plan", {}), "release_plan": plan.get("release_plan", {}), "rollback_plan": plan.get("rollback_plan", {}), "open_gates": []})
+    write_json(out_dir / "delivery_plan.json", plan)
+    write_json(out_dir / "delivery_plan_review.json", {"schema": "codex-delivery-plan-review-v1", "decision": "pass", "blockers": [], "readiness_gate": {"implementation_allowed": True}})
+    write_json(out_dir / "git_worktree_evidence.json", {"schema": "codex-git-baseline-evidence-v1", "decision": "ready", "fetched": True, "base_updated": True, "branch": "feature/REQ-SYN-HAPPY"})
+    write_json(out_dir / "edit_permit.json", {"schema": "codex-edit-permit-v1", "decision": "ready", "doc_id": "REQ-SYN-HAPPY", "branch": "feature/REQ-SYN-HAPPY", "allowed_files": ["app/main.py"]})
+    write_json(out_dir / "write_guard_snapshot.json", {"schema": "codex-write-guard-snapshot-v1", "decision": "ready", "doc_id": "REQ-SYN-HAPPY", "branch": "feature/REQ-SYN-HAPPY", "permit_id": "EDIT-SYN-HAPPY"})
+    bind_workflow_lineage(out_dir)
 
 
 def write_release_governance_examples(out_dir: Path) -> None:
@@ -171,20 +221,21 @@ def write_frontend_happy_evidence(out_dir: Path) -> None:
 def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "delivery_plan.json", {"decision": "pass", "rollback_order": ["rollback synthetic"], "post_release_checks": ["check synthetic metric"]})
     write_json(out_dir / "design_architecture_review.json", {"decision": "pass", "blockers": [], "warnings": []})
-    write_json(out_dir / "implementation_completion_gate.json", {"decision": "pass", "blockers": []})
+    write_json(out_dir / "implementation_completion_gate.json", {"schema": "codex-implementation-completion-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"], "evidence_followups": []})
     write_json(out_dir / "post_change_implementation_report.json", {"schema": "codex-post-change-implementation-report-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"]})
-    write_json(out_dir / "write_guard_audit.json", {"decision": "ready", "blockers": []})
-    write_json(out_dir / "diff_impact.json", {"decision": "pass", "impact_areas": [], "blockers": []})
-    write_json(out_dir / "post_implementation_traceability_matrix.json", {"decision": "pass", "blockers": []})
-    write_json(out_dir / "change_risk.json", {"decision": "pass", "risk_level": "low", "blockers": []})
-    write_json(out_dir / "evidence_gap_summary.json", {"decision": "pass", "missing_evidence": [], "blockers": []})
-    write_json(out_dir / "code_design_quality.json", {"decision": "pass", "findings": [], "blockers": []})
-    write_json(out_dir / "code_review_gate.json", {"decision": "approve", "active_blockers": [], "active_concerns": []})
-    write_json(out_dir / "test_evidence_gate.json", {"decision": "pass", "blockers": [], "warnings": []})
+    write_json(out_dir / "write_guard_audit.json", {"schema": "codex-write-guard-audit-v1", "decision": "ready", "blockers": [], "changed_files": ["synthetic.py"], "snapshot": "write_guard_snapshot.json"})
+    write_json(out_dir / "diff_impact.json", {"schema": "codex-diff-impact-v1", "decision": "pass", "impact_areas": [], "blockers": []})
+    write_json(out_dir / "post_implementation_traceability_matrix.json", {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": []})
+    write_json(out_dir / "change_risk.json", {"schema": "codex-change-risk-v1", "decision": "pass", "risk_level": "low", "blockers": []})
+    write_json(out_dir / "evidence_gap_summary.json", {"schema": "codex-evidence-gap-summary-v1", "decision": "pass", "missing_evidence": [], "blockers": []})
+    write_json(out_dir / "code_design_quality.json", {"schema": "codex-code-design-quality-review-v1", "decision": "pass", "findings": [], "blockers": []})
+    write_json(out_dir / "code_review_gate.json", {"schema": "codex-code-review-gate-v1", "decision": "approve", "active_blockers": [], "active_concerns": [], "missing_evidence": []})
+    write_json(out_dir / "test_evidence_gate.json", {"schema": "codex-test-evidence-gate-v1", "decision": "pass", "blockers": [], "warnings": [], "evidence_summary": {}})
     write_json(out_dir / "ci_execution_evidence.json", {"failed_commands": [], "unknown_commands": [], "executed_commands": [{"command": "pytest", "status": "passed"}]})
-    write_json(out_dir / "environment_promotion.json", {"decision": "pass", "blockers": [], "environments": [{"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke"], "approver": "release-owner", "rollback_ready": True}, {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke"], "approver": "release-owner", "rollback_ready": True}]})
-    write_json(out_dir / "uat_acceptance.json", {"decision": "pass", "blockers": []})
-    write_json(out_dir / "release_change.json", {"decision": "pass", "blockers": [], "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"}, "approvers": ["release-owner"], "rollback_plan": ["rollback synthetic"], "rollback_owner": "release-owner", "post_release_checks": ["check synthetic metric"]})
+    write_json(out_dir / "environment_promotion.json", {"schema": "codex-environment-promotion-v1", "decision": "pass", "blockers": [], "environments": [{"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke"], "approver": "release-owner", "rollback_ready": True}, {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke"], "approver": "release-owner", "rollback_ready": True}]})
+    write_json(out_dir / "uat_acceptance.json", {"schema": "codex-uat-acceptance-v1", "decision": "pass", "blockers": []})
+    write_json(out_dir / "release_change.json", {"schema": "codex-release-change-v1", "decision": "pass", "blockers": [], "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"}, "approvers": ["release-owner"], "rollback_plan": ["rollback synthetic"], "rollback_owner": "release-owner", "post_release_checks": ["check synthetic metric"]})
+    bind_workflow_lineage(out_dir)
 
 
 def write_release_followup_chain_evidence(out_dir: Path) -> None:
@@ -366,6 +417,7 @@ def run(out_dir: Path) -> dict[str, Any]:
         ["python3", "skills/core/release-evidence-binder/scripts/bind_release.py", "--artifact-dir", str(release_happy_dir), "--out", str(release_happy_dir / "release_gate.json")],
     )
     steps.append(release_happy_step)
+    bind_workflow_lineage(release_happy_dir)
     release_ready_step = run_json_step(
         "release_happy_delivery_ready",
         [

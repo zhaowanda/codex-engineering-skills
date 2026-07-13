@@ -52,6 +52,8 @@ def analyze(diff: str) -> dict[str, Any]:
         evidence_required.append("frontend_acceptance")
     return {
         "schema": "codex-diff-impact-v1",
+        "decision": "pass",
+        "blockers": [],
         "changed_files": files,
         "impact_areas": sorted(set(areas)),
         "evidence_required": sorted(set(evidence_required)),

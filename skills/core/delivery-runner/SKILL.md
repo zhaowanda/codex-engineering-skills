@@ -24,14 +24,16 @@ python3 scripts/delivery_runner.py \
 
 - Prefer `delivery_state.json` when present.
 - Also inspect key artifacts directly so users can see missing files.
-- Evaluate the lifecycle registry in `config/workflow-stages.example.yaml` using schema `codex-workflow-stages-v2`, its phase order, explicit dependencies, profile-selected skills, and detected impacts.
+- Evaluate the lifecycle registry in `config/workflow-stages.example.yaml` using schema `codex-workflow-stages-v3`, its phase order, semantic dependencies, profile-selected skills, and detected impacts.
+- Fail closed unless every applicable artifact has the registered schema, required fields, accepted decision, empty blockers, and current input digests.
 - Apply `conditional_skill` stages only when the selected profile requires that skill, and `conditional_impacts` stages only when the artifact set signals a matching impact.
 - Block on dependency violations, including an artifact that exists while an applicable prerequisite is missing or not accepted.
-- Compare recorded `input_digests` with the current design and specialty artifacts; block when an aggregate design review is stale.
+- Compare recorded `input_digests` with every declared stage input; recursively block downstream artifacts when any input is stale, removed, or replaced.
 - Validate profile digest bindings such as `open_questions.json.spec_digest` against the current `spec.json`.
 - Block implementation until spec, technical design, architecture design, test design, delivery plan, delivery plan review, design review, docs quality, delivery docs readiness, git, and edit readiness are complete.
 - Delivery docs readiness requires a docs root, doc manifest, and Git repository.
 - Git readiness requires evidence that each modify repository fetched the remote and updated the base branch with `pull --ff-only`.
+- Require `write_guard_snapshot.json` after the edit permit and before implementation completion can become the next valid stage.
 - Report `delivery_plan_review` as the next stage before Git or edit readiness when `delivery_plan_review.json` is missing or blocked.
 - Block release until the complete applicable post-implementation chain passes: implementation completion, post-change report, write audit, diff impact, post-implementation traceability, change risk, evidence collection, code design quality, code review, frontend acceptance when UI changed, tests, environment promotion, UAT, release change, and release binding.
 - Treat `can_implement=true` and `can_release=true` as earned terminal readiness states, not merely absence of a single missing file. Required stages, dependencies, profile gates, readiness fields, decisions, digests, and blockers must all agree.

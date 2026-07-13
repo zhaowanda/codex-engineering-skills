@@ -4,9 +4,9 @@ This assessment records the current quality level, orchestration fit, and remain
 
 ## Summary
 
-Current level: **advanced framework with structurally validated orchestration; expert status awaits real-project calibration**.
+Current level: **advanced fail-closed framework with runtime-validated orchestration; expert status awaits real-project calibration**.
 
-The health report separates skill contract quality, DAG integrity, gate semantics, synthetic path reality, and real-project calibration. Static skill quality no longer makes the whole framework `expert`; at least one privacy-reviewed anonymized real-project replay is required for that level.
+The health report separates skill contract quality, DAG integrity, gate semantics, synthetic path reality, and real-project calibration. Static skill quality no longer makes the whole framework `expert`; at least three privacy-reviewed anonymized real-project replays across three scenario families are required for that level.
 
 The repository has a coherent delivery framework rather than a loose prompt collection. Skills are grouped by lifecycle stage, most commands produce machine-readable artifacts, and the main gates expose `decision`, `blockers`, and readiness fields. The unified CLI, workflow profiles, scenario catalog, forward tests, privacy scan, and health checks make the system operable as a repeatable workflow.
 
@@ -16,20 +16,21 @@ The main remaining risk is real-project calibration. The lifecycle now has a pha
 
 `skill_health` reports five independent framework dimensions:
 
-- `skill_contract_quality`: per-skill documentation, scripts, and direct test contract quality.
+- `skill_contract_quality`: per-skill documentation, scripts, and direct test contract quality; only expert/advisory gates may receive an expert-level skill classification.
 - `dag_integrity`: lifecycle phases, dependencies, cycles, artifact uniqueness, and profile-to-stage registration.
 - `gate_semantics`: required gates accept only non-blocking decisions and enforce declared readiness fields.
-- `happy_blocked_path_reality`: forward tests prove both blocking behavior and genuine implementation/release readiness.
+- `happy_blocked_path_reality`: `skill_health` actually runs the synthetic E2E suite and proves both blocking behavior and genuine implementation/release readiness.
 - `real_project_calibration`: privacy-reviewed anonymized real-project replay evidence, kept distinct from synthetic fixtures.
 
-The whole framework is `expert` only when its weighted score is at least 90 and at least one validated replay declares `source_type=anonymized_real_project`. High static skill scores or synthetic happy paths alone cannot award framework-level expert status.
+The whole framework is `expert` only when its weighted score is at least 90 and at least three validated replays across three scenario families declare `source_type=anonymized_real_project`. High static skill scores or synthetic happy paths alone cannot award framework-level expert status.
 
 ## Verified Baseline
 
-- `skill_health`: pass, 84 skills, 84 expert-level skill-contract scores; framework score 88 (`advanced`).
-- Framework dimensions: skill contract quality 100, DAG integrity 100, gate semantics 100, happy/blocked path reality 100, real-project calibration 40.
-- `benchmark`: pass, 84 skills, 88 scripts, 130 schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated replay cases.
-- `pytest`: pass, 383 tests.
+- `skill_health`: pass, 84 skills, 33 expert-level gate contracts and 84 advanced-or-better contracts; framework score 80 (`advanced`).
+- Framework dimensions: skill contract quality 100, DAG integrity 100, gate semantics 100, happy/blocked path reality 100, real-project calibration 0.
+- Runtime assessment: all 45 workflow stages reject placeholder artifacts and all 7 synthetic blocked/happy paths pass.
+- `benchmark`: pass, 84 skills, 89 scripts, 133 schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated synthetic replay cases.
+- `pytest`: pass, 388 tests.
 - `compileall`: pass for `scripts`, `skills`, and `tests`.
 - `privacy_scan`: pass, no hits.
 - `forward_test`: pass for all 8 scenarios and all 7 synthetic blocked/happy-path cases, including genuine implementation and release readiness.

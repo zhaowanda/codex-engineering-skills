@@ -1006,6 +1006,8 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     data_model_design = render_data_model_design(signals, spec, breakdown, owner_file)
     return {
         "schema": "codex-technical-design-v1",
+        "decision": "pass" if design_allowed else "block",
+        "blockers": understanding_blockers,
         "doc_id": doc_id,
         "title": title,
         "project_context": {
