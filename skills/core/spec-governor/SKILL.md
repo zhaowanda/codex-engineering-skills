@@ -48,6 +48,8 @@ python3 scripts/spec_governor.py \
 - Model business flow as structured steps with actor, entrypoint, trigger, system actions, downstream effects, result, and branch signals.
 - Capture current business state evidence when available: existing UI/API/task/MQ/manual entrypoints, existing data ownership, downstream dependencies, and whether the change reuses, modifies, or adds capability.
 - When `--project-understanding` is provided, read `baseline.json`, `api_surface.json`, `code_index.json`, `config_surface.json`, `dependency_surface.json`, and `repository_analysis.json` to bind current-state facts to real artifact sources.
+- Treat broad code-index matches as candidates, not confirmed current-state facts.
+- Use only `source_location_evidence.confirmed_anchors` as confirmed code entrypoints; block design when supplied source-location evidence has no confirmed anchor.
 - Produce `evidence_match_table` with `evidence_match_score` and `match_reason` for project evidence used by current-state and dependency reasoning.
 - Build `business_closure_model` from actor/external trigger through UI/API/task/consumer, domain behavior, DB/MQ/cache/downstream effects, and visible business result.
 - Build `runtime_dependency_graph` with nodes/edges, `degree`, and `source_evidence` from dependency chain, closure model, and project evidence.

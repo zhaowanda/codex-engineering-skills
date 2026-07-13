@@ -287,6 +287,34 @@ def rank_files_for_subject(subject: str, ctx: dict[str, Any]) -> list[dict[str, 
 
 
 def select_owner_file(summary: str, breakdown: list[dict[str, Any]], ctx: dict[str, Any], fallback: str) -> tuple[str, dict[str, Any]]:
+    location_evidence = ctx.get("source_location_evidence") if isinstance(ctx.get("source_location_evidence"), dict) else {}
+    confirmed = [item for item in as_list(location_evidence.get("confirmed_anchors")) if isinstance(item, dict) and item.get("path") and item.get("role", "modify_candidate") != "reference_only"]
+    rejected = [str(item.get("path")) for item in as_list(location_evidence.get("rejected_candidates")) if isinstance(item, dict) and item.get("path")]
+    if confirmed:
+        selected = confirmed[0]
+        return str(selected["path"]), {
+            "level": str(selected.get("confidence") or "high"),
+            "selected_entrypoint": str(selected["path"]),
+            "score": int(selected.get("index_score") or 0),
+            "evidence": ["direct_source_confirmation", *[str(item.get("term")) for item in as_list(selected.get("evidence_chain")) if isinstance(item, dict) and item.get("term")]],
+            "ranked_candidates": confirmed[:8],
+            "confirmed_anchors": [str(item.get("path")) for item in confirmed],
+            "rejected_candidates": rejected,
+            "source_location_decision": location_evidence.get("decision"),
+            "source_digest": selected.get("source_digest"),
+        }
+    if location_evidence:
+        return fallback, {
+            "level": "low",
+            "selected_entrypoint": fallback,
+            "score": 0,
+            "evidence": ["source_location_evidence_blocked"],
+            "ranked_candidates": [],
+            "confirmed_anchors": [],
+            "rejected_candidates": rejected,
+            "source_location_decision": location_evidence.get("decision") or "block",
+            "blocker": "no requirement-specific source location was confirmed; do not infer an owner from the broad repository index",
+        }
     subject = " ".join([summary, " ".join(str(item.get("summary")) for item in breakdown)])
     ranked = rank_files_for_subject(subject, ctx)
     if ranked and ranked[0]["score"] >= 4 and not ranked[0]["generic"]:
@@ -726,7 +754,7 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
     if not base.exists():
         return {}
     result: dict[str, Any] = {}
-    for name in ["repository_analysis", "api_surface", "config_surface", "dependency_surface", "code_index", "baseline", "baseline_quality"]:
+    for name in ["repository_analysis", "api_surface", "config_surface", "dependency_surface", "code_index", "source_location_evidence", "baseline", "baseline_quality"]:
         file = base / f"{name}.json"
         if file.exists():
             result[name] = load_json(file)
@@ -740,6 +768,7 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
     deps = project_understanding.get("dependency_surface", {})
     index = project_understanding.get("code_index", {})
     baseline = project_understanding.get("baseline", {})
+    source_locations = project_understanding.get("source_location_evidence", {})
     project = str(repo.get("project") or api.get("project") or baseline.get("project") or "target-repo")
     repo_root = str(index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
     entrypoints = [str(item) for item in as_list(repo.get("entrypoint_hints"))]
@@ -766,6 +795,7 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
         "test_hints": test_hints,
         "test_file_hints": test_file_hints[:20],
         "framework_hints": [str(item) for item in as_list(repo.get("framework_hints"))],
+        "source_location_evidence": source_locations if isinstance(source_locations, dict) else {},
     }
 
 
@@ -969,8 +999,15 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     implementation_allowed = bool(spec.get("implementation_allowed", requirements_understanding.get("implementation_allowed", design_allowed)))
     ambiguities = [item for item in as_list(spec.get("ambiguities")) if isinstance(item, dict)]
     understanding_blockers = [item for item in as_list(requirements_understanding.get("blockers")) if isinstance(item, dict)]
+    location_evidence = ctx.get("source_location_evidence") if isinstance(ctx.get("source_location_evidence"), dict) else {}
+    if location_evidence and location_evidence.get("decision") != "pass":
+        understanding_blockers.extend(
+            item for item in as_list(location_evidence.get("blockers")) if isinstance(item, dict)
+        )
+        design_allowed = False
+        implementation_allowed = False
     requirements_understanding_gate = {
-        "decision": requirements_understanding.get("decision") or ("pass" if design_allowed else "needs_clarification"),
+        "decision": "block" if location_evidence and location_evidence.get("decision") != "pass" else requirements_understanding.get("decision") or ("pass" if design_allowed else "needs_clarification"),
         "design_allowed": design_allowed,
         "implementation_allowed": implementation_allowed and design_allowed,
         "understanding_confidence": spec.get("understanding_confidence") or requirements_understanding.get("confidence") or ("high" if design_allowed else "low"),
@@ -1004,6 +1041,30 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     technical_options, comparison_matrix, score_summary, selected_solution = build_technical_options(spec, summary, owner_file, breakdown, route_refs, test_evidence, problem)
     signals = impact_signals(spec, breakdown, route_refs)
     data_model_design = render_data_model_design(signals, spec, breakdown, owner_file)
+    module_decomposition = [{
+        "module": owner_file,
+        "responsibility": str(item.get("summary") or summary),
+        "input": "request data",
+        "output": "updated behavior",
+        "dependencies": route_refs + config_refs or ["none confirmed"],
+        "cohesion_reason": f"Keep requirement behavior in {ctx['project']} owner file/module.",
+        "coupling_control": "Use existing contracts and avoid duplicating upstream business rules.",
+        "requirement_breakdown_id": item.get("id"),
+        "entrypoint_confidence": entrypoint_confidence.get("level"),
+    } for item in breakdown]
+    for path in as_list(entrypoint_confidence.get("confirmed_anchors")):
+        if path and path != owner_file:
+            module_decomposition.append({
+                "module": str(path),
+                "responsibility": f"Support {summary} through the directly confirmed source call chain.",
+                "input": f"state or call from {owner_file}",
+                "output": "updated behavior",
+                "dependencies": [owner_file],
+                "cohesion_reason": "The source-location evidence confirms this module participates directly in the requirement flow.",
+                "coupling_control": "Keep the existing boundary and contract between confirmed modules.",
+                "requirement_breakdown_id": breakdown[0].get("id") if breakdown else "BRK-1",
+                "entrypoint_confidence": entrypoint_confidence.get("level"),
+            })
     return {
         "schema": "codex-technical-design-v1",
         "decision": "pass" if design_allowed else "block",
@@ -1018,6 +1079,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             "test_command_hints": ctx["test_hints"],
             "test_file_hints": ctx["test_file_hints"],
         },
+        "source_location_evidence": location_evidence,
         "design_scope": spec.get("scope") or {"in_scope": [summary], "out_of_scope": [], "assumptions": [], "non_goals": []},
         "requirements_understanding": requirements_understanding,
         "requirements_understanding_gate": requirements_understanding_gate,
@@ -1047,17 +1109,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             "failure_end_states": ["Validation failure", "Dependency unavailable"],
             "requirement_breakdown_id": item.get("id"),
         } for item in breakdown],
-        "module_decomposition": [{
-            "module": owner_file,
-            "responsibility": str(item.get("summary") or summary),
-            "input": "request data",
-            "output": "updated behavior",
-            "dependencies": route_refs + config_refs or ["none confirmed"],
-            "cohesion_reason": f"Keep requirement behavior in {ctx['project']} owner file/module.",
-            "coupling_control": "Use existing contracts and avoid duplicating upstream business rules.",
-            "requirement_breakdown_id": item.get("id"),
-            "entrypoint_confidence": entrypoint_confidence.get("level"),
-        } for item in breakdown],
+        "module_decomposition": module_decomposition,
         "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": str(item.get("summary") or summary), "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
         "api_contracts": [{"contract": route_refs[0] if route_refs else f"{item.get('id')}: No API impact confirmed yet", "compatibility": "preserve existing consumers unless design updates contract", "old_consumer_impact": "review route consumers before implementation", "requirement_breakdown_id": item.get("id"), "api_impact": item.get("api_impact")} for item in breakdown],

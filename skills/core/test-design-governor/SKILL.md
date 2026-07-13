@@ -41,6 +41,8 @@ python3 scripts/test_design.py \
 - Cases must declare `execution_mode` so later evidence can distinguish automated, manual, browser, API, integration, or blocked execution paths.
 - Generate `test_data_plan.json` with `test-data-governor` before real execution when test data refs exist.
 - Do not treat generated test cases as executable while requirement understanding is blocked; clarify business purpose, flow, entrypoints/triggers, and acceptance criteria first.
+- Build execution paths from confirmed source anchors when source-location evidence is available.
+- Block executable test design when code locations are unconfirmed; never copy rejected candidates into page, API, or data paths.
 
 ## Output
 

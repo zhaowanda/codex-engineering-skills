@@ -65,6 +65,27 @@ def test_traceability_passes_when_acceptance_and_scope_are_covered() -> None:
         assert result["coverage"]["covered_acceptance_count"] == 1
 
 
+def test_traceability_blocks_unconfirmed_source_scope() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact = Path(tmp)
+        write_json(artifact / "spec.json", {"doc_id": "REQ-LOC", "acceptance_criteria": [{"id": "AC-1", "criteria": "playback works"}]})
+        write_json(artifact / "technical_design.json", {
+            "doc_id": "REQ-LOC",
+            "source_location_evidence": {
+                "decision": "pass",
+                "confirmed_anchors": [{"path": "src/views/plugIn/accidentAnalysis.vue"}],
+                "rejected_candidates": [{"path": "src/views/device/replacementSettlement.vue"}],
+            },
+        })
+        write_json(artifact / "architecture_design.json", {"doc_id": "REQ-LOC"})
+        write_json(artifact / "delivery_plan.json", {"repo_tasks": [{"id": "TASK-1", "repo": "web", "role": "modify", "allowed_files": ["src/views/device/replacementSettlement.vue"], "validation": ["unit test"]}]})
+        write_json(artifact / "test_design.json", {"test_cases": [{"id": "TC-1", "acceptance_id": "AC-1"}]})
+        result = traceability.build(artifact)
+        assert result["decision"] == "block"
+        assert any(item["source"] == "delivery_plan" and "confirmed" in item["message"] for item in result["blockers"])
+        assert any(item["source"] == "delivery_plan" and "rejected" in item["message"] for item in result["blockers"])
+
+
 def test_change_risk_marks_cross_repo_database_permission_as_high_or_critical() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         artifact = Path(tmp)

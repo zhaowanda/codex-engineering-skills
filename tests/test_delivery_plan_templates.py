@@ -61,6 +61,30 @@ def test_project_understanding_fills_repo_path_files_and_tests() -> None:
     assert not any("repo_path is required" in item for item in plan["open_gates"])
 
 
+def test_delivery_plan_excludes_unconfirmed_and_rejected_files() -> None:
+    technical = {
+        "doc_id": "REQ-LOC",
+        "source_location_evidence": {
+            "decision": "pass",
+            "confirmed_anchors": [{"path": "src/views/plugIn/accidentAnalysis.vue"}],
+            "rejected_candidates": [{"path": "src/views/device/replacementSettlement.vue"}],
+        },
+        "test_strategy": [{"case": "playback", "evidence": ["test"]}],
+        "acceptance_mapping": [{"acceptance_id": "AC-1", "evidence_required": ["test"]}],
+    }
+    architecture = {
+        "doc_id": "REQ-LOC",
+        "repo_responsibilities": [{"repo": "web", "repo_path": "/workspace/web", "role": "modify", "responsibility": "playback"}],
+        "module_topology": [
+            {"repo": "web", "module": "src/views/plugIn/accidentAnalysis.vue", "change_type": "modify"},
+            {"repo": "web", "module": "src/views/device/replacementSettlement.vue", "change_type": "modify"},
+        ],
+    }
+    plan = render_delivery_plan.render_from_design("REQ-LOC", technical, architecture)
+    assert plan["repo_tasks"][0]["allowed_files"] == ["src/views/plugIn/accidentAnalysis.vue"]
+    assert any("rejected source candidates" in item for item in plan["open_gates"])
+
+
 def test_requirement_understanding_gate_keeps_delivery_plan_incomplete() -> None:
     gate = {
         "decision": "needs_clarification",

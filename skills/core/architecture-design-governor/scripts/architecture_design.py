@@ -462,6 +462,17 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
     else:
         architecture_confidence = "high"
     architecture_options, architecture_fit_matrix, architecture_score_summary, selected_architecture = build_architecture_options(owner_repo, owner_module, producer, route_contract, breakdown, technical, summary)
+    technical_modules = [item for item in as_list(technical.get("module_decomposition")) if isinstance(item, dict) and item.get("module")]
+    module_topology = [{
+        "repo": owner_repo,
+        "module": str(item.get("module")),
+        "responsibility": str(item.get("responsibility") or summary),
+        "depends_on": as_list(item.get("dependencies")) or ["existing API/config dependencies"],
+        "boundary_rule": "keep change inside confirmed source modules unless reviewed evidence expands scope",
+        "change_type": "modify",
+        "requirement_breakdown_id": item.get("requirement_breakdown_id"),
+        "entrypoint_confidence": entrypoint_confidence.get("level"),
+    } for item in technical_modules]
     result = {
         "schema": "codex-architecture-design-v1",
         "decision": "pass" if design_allowed else "block",
@@ -484,6 +495,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         },
         "requirement_breakdown": breakdown,
         "code_entrypoint_confidence": entrypoint_confidence,
+        "source_location_evidence": technical.get("source_location_evidence") or {},
         "architecture_options": architecture_options,
         "architecture_fit_matrix": architecture_fit_matrix,
         "architecture_score_summary": architecture_score_summary,
@@ -506,7 +518,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             for item in reqs
         ] or [{"requirement_id": req_id, "requirement_breakdown_refs": [row.get("id") for row in breakdown], "component_boundary_refs": [f"{owner_repo} owns change"], "module_topology_refs": [owner_module], "data_flow_refs": [f"{route_contract or 'existing source'}->{owner_repo}"], "integration_sequence_refs": ["load/execute affected behavior"], "contract_refs": [route_contract or "preserve existing contracts"], "selected_architecture_option_id": selected_architecture.get("selected_option_id"), "decision_reason": selected_architecture.get("selection_reason")}],
         "component_boundaries": [{"component": owner_repo, "role": "owner", "exclusion": "do not move unrelated responsibilities"}],
-        "module_topology": [{"repo": owner_repo, "module": owner_module, "responsibility": str(item.get("summary") or summary), "depends_on": ["existing API/config dependencies"], "boundary_rule": "keep change inside owner module unless this slice requires contract change", "change_type": "modify", "requirement_breakdown_id": item.get("id"), "entrypoint_confidence": entrypoint_confidence.get("level")} for item in breakdown],
+        "module_topology": module_topology or [{"repo": owner_repo, "module": owner_module, "responsibility": str(item.get("summary") or summary), "depends_on": ["existing API/config dependencies"], "boundary_rule": "keep change inside owner module unless this slice requires contract change", "change_type": "modify", "requirement_breakdown_id": item.get("id"), "entrypoint_confidence": entrypoint_confidence.get("level")} for item in breakdown],
         "repo_responsibilities": [{"repo": owner_repo, "repo_path": repo_path, "role": "modify", "responsibility": summary, "requirement_breakdown_refs": [item.get("id") for item in breakdown], "owner_tasks": [str(item.get("summary") or summary) for item in breakdown]}],
         "cross_repo_contracts": [{"producer": producer, "consumer": owner_repo, "contract": route_contract or f"{owner_repo} internal contract", "compatibility": "backward compatible", "failure_mode": "fallback/error state"}],
         "cross_repo_dependency_graph": [{"from": producer, "to": owner_repo, "contract": route_contract or f"{owner_repo} internal contract", "change": "confirm only unless implementation proves contract change is required"}],

@@ -31,6 +31,8 @@ user requirement
 - Skip existing artifacts unless `--force` is provided.
 - `--force` must not downgrade previously captured expert evidence; docs sync is expected to preserve source-backed supplemental artifacts such as runtime sequence evidence from the delivery docs repository.
 - Run project understanding only when both `--repo` and `--project` are provided.
+- For repository-backed runs, generate requirement-specific source-location evidence after project understanding and before spec/design.
+- Continue artifact generation when location confirmation fails, but keep design and implementation blocked.
 - Human-readable delivery docs default to automatic language detection: if the requirement asks for Chinese docs, generate Chinese; otherwise generate English.
 - Use `--doc-language en|zh|auto` to force or auto-detect the human doc language.
 - After docs sync, run human documentation review and write `docs_quality.json`.

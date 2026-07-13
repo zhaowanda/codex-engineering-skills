@@ -371,6 +371,34 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     assert arch["repo_responsibilities"][0]["role"] == "modify"
 
 
+def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> None:
+    spec = spec_governor.normalize(
+        "REQ-LOC",
+        "Playback",
+        "业务目的: 改善设备视频回放。\n流程: 用户在事故分析页快进回放。\n入口: 视频回放弹窗。\nReq: playbackStreamControl 后刷新播放器。\nAC: 快进后画面恢复。",
+    )
+    understanding = {
+        "repository_analysis": {"project": "web", "entrypoint_hints": ["src/views/device/replacementSettlement.vue"]},
+        "code_index": {"files": [
+            {"path": "src/views/device/replacementSettlement.vue", "symbols": ["device"]},
+            {"path": "src/views/plugIn/accidentAnalysis.vue", "symbols": ["controlPlayback"]},
+        ]},
+        "source_location_evidence": {
+            "decision": "pass",
+            "confirmed_anchors": [
+                {"path": "src/views/plugIn/accidentAnalysis.vue", "confidence": "high", "evidence_chain": [{"term": "playbackStreamControl"}]},
+                {"path": "src/components/DualCameraLivePlayer.vue", "confidence": "high", "evidence_chain": [{"term": "DualCameraLivePlayer"}]},
+            ],
+            "rejected_candidates": [{"path": "src/views/device/replacementSettlement.vue"}],
+        },
+    }
+    tech = technical_design.render(spec, understanding)
+    assert tech["code_entrypoint_confidence"]["selected_entrypoint"] == "src/views/plugIn/accidentAnalysis.vue"
+    assert tech["code_entrypoint_confidence"]["level"] == "high"
+    assert tech["source_location_evidence"]["decision"] == "pass"
+    assert {item["module"] for item in tech["module_decomposition"]} == {"src/views/plugIn/accidentAnalysis.vue", "src/components/DualCameraLivePlayer.vue"}
+
+
 def test_design_options_are_generated_from_impact_surface() -> None:
     spec = spec_governor.normalize(
         "REQ-DYNAMIC",

@@ -24,6 +24,8 @@ code-index-builder
 
 - Query an existing index before broad file searches in large repositories.
 - Return ranked hints only; do not treat lookup results as proof that no matching code exists.
+- Treat index hits as candidates; only direct source matches may become `confirmed_anchors`.
+- Record plausible but irrelevant files in `rejected_candidates` so downstream generators cannot select them again.
 - If the index is missing, stale, or from another project, rebuild it instead of guessing.
 - Use lookup output to choose files for direct reading, not to replace source inspection.
 - Avoid exposing private project terms outside the private overlay or local working context.
@@ -36,6 +38,16 @@ code-index-builder
 python3 scripts/lookup_index.py \
   --index overlay/indexes/web-app.index.json \
   --query "checkout route"
+```
+
+Confirm requirement-specific locations:
+
+```bash
+python3 scripts/source_location_evidence.py \
+  --repo /path/to/repo \
+  --index overlay/indexes/web-app.index.json \
+  --requirement artifacts/requirement.normalized.txt \
+  --out artifacts/project_understanding/source_location_evidence.json
 ```
 
 ## Output
