@@ -43,7 +43,7 @@ stages:
     evidence_fields: [requirements, acceptance_criteria]
     phase: requirement
     depends_on: [requirement_ingestion, project_understanding]
-    input_artifacts: [requirement.normalized.txt]
+    input_artifacts: [requirement.normalized.txt, project_understanding, project_understanding/source_location_evidence.json]
     implementation_required: true
     accepted_decisions: [ready_for_design, pass]
     next_command: python3 skills/core/spec-governor/scripts/spec_governor.py normalize --doc-id REQ-001 --title "Title" --input requirement.normalized.txt --out artifacts/REQ-001/spec.json
@@ -153,7 +153,7 @@ stages:
     evidence_fields: [design_scope, process_flow, selected_solution]
     phase: pre_implementation_design
     depends_on: [requirement_questions, domain_model_design, architecture_framing, ui_ue_design, api_contract_design, data_model_design, observability_design]
-    input_artifacts: [spec.json, domain_model_design.json, architecture_framing.json, ui_ue_design.json, api_contract_design.json, data_model_design.json, observability_design.json, project_understanding]
+    input_artifacts: [spec.json, domain_model_design.json, architecture_framing.json, ui_ue_design.json, api_contract_design.json, data_model_design.json, observability_design.json, project_understanding, project_understanding/source_location_evidence.json]
     implementation_required: true
     accepted_decisions: [pass]
   - name: frontend_implementation_plan

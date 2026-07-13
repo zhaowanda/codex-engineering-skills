@@ -472,6 +472,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[s
     requirements = [item for item in as_list(spec.get("requirements")) if isinstance(item, dict)]
     signals = text_of(spec, technical, architecture)
     gate = requirements_understanding_gate(spec, technical, architecture)
+    source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
     cases: list[dict[str, Any]] = []
     for idx, ac in enumerate(acceptance or [{"id": "AC-1", "criteria": spec.get("requirement_summary", "")}]):
         ac_id = str(ac.get("id") or f"AC-{idx + 1}")
@@ -492,8 +493,9 @@ def render(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[s
         "schema": SCHEMA,
         "doc_id": spec.get("doc_id") or technical.get("doc_id") or architecture.get("doc_id"),
         "title": spec.get("title") or technical.get("title") or architecture.get("title"),
-        "decision": "block" if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False else "pass",
+        "decision": "block" if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False or (source_locations and source_locations.get("decision") != "pass") else "pass",
         "requirements_understanding_gate": gate,
+        "source_location_evidence": source_locations,
         "requirement_count": len(requirements),
         "acceptance_count": len(acceptance),
         "test_cases": cases,
@@ -508,9 +510,10 @@ def render(spec: dict[str, Any], technical: dict[str, Any], architecture: dict[s
         "evidence_required": sorted({e for case in cases for e in as_list(case.get("evidence_required"))}),
         "test_data_required": any(as_list(case.get("test_data_refs")) for case in cases),
         "test_data_plan_ref": "test_data_plan.json",
-        "open_risks": [
+        "open_risks": ([
             {"source": "requirements_understanding_gate", "message": "requirement understanding is not sufficient for executable test design", "gate": gate}
-        ] if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False else [],
+        ] if gate.get("design_allowed") is False or gate.get("implementation_allowed") is False else [])
+        + ([{"source": "source_location_evidence", "message": "test entrypoints are blocked until source locations are confirmed"}] if source_locations and source_locations.get("decision") != "pass" else []),
     }
 
 

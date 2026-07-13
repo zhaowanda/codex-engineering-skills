@@ -643,6 +643,31 @@ def review(
         findings.append(finding("underdesign_risks", "high", "complex requirement is flattened into one module row", {"breakdown_count": len(requirement_breakdown), "module_count": len(modules)}, "Map each major business slice to module responsibility or explicitly justify shared owner-module handling."))
     confidence_level = str(entrypoint_confidence.get("level") or arch_entrypoint_confidence.get("level") or "").lower()
     selected_entrypoint = str(entrypoint_confidence.get("selected_entrypoint") or arch_entrypoint_confidence.get("selected_entrypoint") or "")
+    source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+    if source_locations:
+        confirmed_paths = {
+            str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
+            if isinstance(item, dict) and item.get("path") and item.get("role", "modify_candidate") != "reference_only"
+        }
+        rejected_paths = {
+            str(item.get("path")) for item in as_list(source_locations.get("rejected_candidates"))
+            if isinstance(item, dict) and item.get("path")
+        }
+        if source_locations.get("decision") != "pass" or not confirmed_paths:
+            findings.append(finding("technical_design_quality", "high", "requirement-specific source location evidence did not pass", source_locations, "Inspect source and confirm at least one requirement-specific entrypoint before design."))
+        if selected_entrypoint and selected_entrypoint not in confirmed_paths:
+            findings.append(finding("technical_design_quality", "high", "selected entrypoint is not a confirmed source anchor", selected_entrypoint, "Select an entrypoint from source_location_evidence.confirmed_anchors."))
+        design_text = text_of([technical.get("module_decomposition"), architecture.get("module_topology"), technical.get("selected_solution"), architecture.get("selected_architecture")])
+        leaked_rejected = sorted(path for path in rejected_paths if path and path.lower() in design_text)
+        if leaked_rejected:
+            findings.append(finding("technical_design_quality", "high", "rejected source candidates leaked into implementation-facing design", leaked_rejected, "Remove rejected paths from modules, selected options, rollback, and delivery scope."))
+        module_paths = {
+            str(item.get("module")) for item in [*as_list(technical.get("module_decomposition")), *as_list(architecture.get("module_topology"))]
+            if isinstance(item, dict) and item.get("module")
+        }
+        unconfirmed_modules = sorted(path for path in module_paths if looks_like_path(path) and path not in confirmed_paths)
+        if unconfirmed_modules:
+            findings.append(finding("technical_design_quality", "high", "implementation modules are not confirmed by source location evidence", unconfirmed_modules, "Confirm each modify module directly or keep it read-only/reference-only."))
     if confidence_level == "low":
         findings.append(finding("technical_design_quality", "high", "primary code entrypoint confidence is low", entrypoint_confidence or arch_entrypoint_confidence, "Inspect project understanding/code index and revise owner module before implementation."))
     elif confidence_level == "medium":

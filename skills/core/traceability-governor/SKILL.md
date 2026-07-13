@@ -31,6 +31,8 @@ python3 scripts/traceability.py \
 - Every modify task should have allowed file scope and validation evidence.
 - Implementation diff should not exist without a delivery plan.
 - Release should not proceed with uncovered acceptance criteria or changed files outside traceability evidence.
+- Verify delivery `allowed_files` and changed files are covered by confirmed source anchors.
+- Block rejected candidates and unconfirmed code locations at planning, implementation, and release stages.
 
 ## Output
 

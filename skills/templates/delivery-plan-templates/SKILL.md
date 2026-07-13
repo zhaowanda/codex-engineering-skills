@@ -32,6 +32,7 @@ technical_design + architecture_design
 - Every `modify` repository should include `tasks`, `allowed_files`, `read_first`, `test_commands`, and `acceptance_evidence`.
 - Every modify task should include files to read/edit, implementation notes, evidence to collect, rollback check, dependencies, blocking conditions, and exit criteria.
 - `allowed_files` and `files_to_edit` should be real file paths from code index, module topology, or explicit human confirmation; do not broaden edit scope with unrelated read-first files.
+- When source-location evidence exists, restrict `allowed_files` to confirmed anchors and emit an open gate for every unconfirmed or rejected module.
 - Include Git preparation steps before edits: fetch, `pull --ff-only`, branch preparation, and clean worktree verification.
 - File scope should be narrow enough for `edit-readiness-governor` and `workspace-write-guard`.
 - Include cross-repo order, validation order, release order, rollback order, and open gates.

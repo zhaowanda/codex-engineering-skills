@@ -81,6 +81,15 @@ def build(artifact_dir: Path) -> dict[str, Any]:
     tasks = [item for item in as_list(plan.get("repo_tasks")) if isinstance(item, dict)]
     files = changed_files(artifact_dir, implementation)
     scopes = allowed_files(plan)
+    source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+    confirmed_paths = {
+        str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
+        if isinstance(item, dict) and item.get("path") and item.get("role", "modify_candidate") != "reference_only"
+    }
+    rejected_paths = {
+        str(item.get("path")) for item in as_list(source_locations.get("rejected_candidates"))
+        if isinstance(item, dict) and item.get("path")
+    }
 
     test_by_ac: dict[str, list[str]] = {}
     for case in tests:
@@ -91,6 +100,15 @@ def build(artifact_dir: Path) -> dict[str, Any]:
     ac_rows: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
+    if source_locations:
+        if source_locations.get("decision") != "pass" or not confirmed_paths:
+            blockers.append({"source": "source_location_evidence", "message": "no requirement-specific source location is confirmed"})
+        unconfirmed_scope = sorted(path for path in scopes if path not in confirmed_paths)
+        rejected_scope = sorted(path for path in scopes if path in rejected_paths)
+        if unconfirmed_scope:
+            blockers.append({"source": "delivery_plan", "message": "allowed_files are not confirmed source anchors", "files": unconfirmed_scope})
+        if rejected_scope:
+            blockers.append({"source": "delivery_plan", "message": "rejected source candidates entered allowed_files", "files": rejected_scope})
     for idx, ac in enumerate(acceptance):
         ac_id = str(ac.get("id") or f"AC-{idx + 1}")
         mapped_tests = sorted(set(test_by_ac.get(ac_id, [])))
@@ -130,6 +148,10 @@ def build(artifact_dir: Path) -> dict[str, Any]:
         blockers.append({"source": "delivery_plan", "message": "changed files exist but delivery_plan.json is missing"})
     if out_of_scope:
         blockers.append({"source": "changed_files", "message": "changed files outside allowed scope", "files": out_of_scope})
+    if source_locations:
+        unconfirmed_changes = sorted(file for file in files if not file_in_scope(file, list(confirmed_paths)))
+        if unconfirmed_changes:
+            blockers.append({"source": "changed_files", "message": "changed files are not backed by confirmed source anchors", "files": unconfirmed_changes})
     if not technical:
         warnings.append({"source": "technical_design", "message": "technical_design.json is missing"})
     if not architecture:
@@ -154,6 +176,7 @@ def build(artifact_dir: Path) -> dict[str, Any]:
         "task_trace": task_rows,
         "changed_files": files,
         "out_of_scope_files": out_of_scope,
+        "source_location_evidence": source_locations,
         "test_gate_decision": test_gate.get("decision") or test_gate.get("status") or "",
         "blockers": blockers,
         "warnings": warnings,

@@ -37,6 +37,9 @@ spec
 - Require weighted comparison matrices and score summaries so selected and rejected options are visibly comparable.
 - Require explicit selected option, decision criteria, tradeoffs, and rejected alternative reasoning.
 - Require current-state analysis with concrete code entrypoints, interface examples for API changes, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
+- When source-location evidence exists, block selected entrypoints and implementation modules outside `confirmed_anchors`.
+- Block rejected candidates that leak into modules, selected options, deployment, rollback, or implementation scope.
+- Do not accept manually asserted high entrypoint confidence without direct source confirmation.
 - Require data model/table schema detail when data changes are signaled.
 - Require multi-system sequence, timeout/retry, idempotency, and consistency handling when API/cross-system interaction is signaled.
 - Require MQ producer, consumer, topic/queue, trigger timing, payload, idempotency key, retry policy, and dead-letter/compensation when asynchronous messaging is signaled.

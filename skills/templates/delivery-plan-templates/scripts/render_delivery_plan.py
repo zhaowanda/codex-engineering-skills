@@ -212,6 +212,17 @@ def render_from_design(
     tests = tests_from_design(technical)
     repo_tasks: list[dict[str, Any]] = []
     open_gates: list[str] = []
+    source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+    confirmed_paths = {
+        str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
+        if isinstance(item, dict) and item.get("path") and item.get("role", "modify_candidate") != "reference_only"
+    }
+    rejected_paths = {
+        str(item.get("path")) for item in as_list(source_locations.get("rejected_candidates"))
+        if isinstance(item, dict) and item.get("path")
+    }
+    if source_locations and (source_locations.get("decision") != "pass" or not confirmed_paths):
+        open_gates.append("source_location_evidence: no requirement-specific source location is confirmed")
     if source_design_gate and source_design_gate.get("design_allowed") is False:
         open_gates.append("requirements_understanding_gate: design is blocked until requirement clarification is resolved")
     if source_design_gate and source_design_gate.get("implementation_allowed") is False:
@@ -223,6 +234,14 @@ def render_from_design(
         modules = topology.get(repo_name, [])
         allowed = allowed_files_hint(repo_name, architecture)
         allowed = narrow_allowed_files(allowed)
+        if source_locations:
+            rejected_in_scope = sorted(path for path in allowed if path in rejected_paths)
+            unconfirmed_in_scope = sorted(path for path in allowed if path not in confirmed_paths)
+            if rejected_in_scope:
+                open_gates.append(f"{repo_name}: rejected source candidates cannot enter allowed_files: {', '.join(rejected_in_scope)}")
+            if unconfirmed_in_scope:
+                open_gates.append(f"{repo_name}: allowed_files lack source confirmation: {', '.join(unconfirmed_in_scope)}")
+            allowed = [path for path in allowed if path in confirmed_paths]
         read_first = read_first_hint(repo_name, architecture, ctx)
         test_commands = ctx["tests"] if repo_name in {ctx["project"], "target-repo"} else []
         task = {
@@ -280,6 +299,7 @@ def render_from_design(
             "cross_repo_readiness_decision": (cross_repo_readiness or {}).get("decision", ""),
         },
         "source_design_gate": source_design_gate,
+        "source_location_evidence": source_locations,
         "repo_tasks": repo_tasks,
         "parallel_groups": [
             {

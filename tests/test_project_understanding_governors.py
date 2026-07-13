@@ -20,6 +20,7 @@ def load_module(name: str, path: Path):
 
 build_index = load_module("build_index", ROOT / "skills/core/code-index-builder/scripts/build_index.py")
 lookup_index = load_module("lookup_index", ROOT / "skills/core/code-index-lookup/scripts/lookup_index.py")
+source_location_evidence = load_module("source_location_evidence", ROOT / "skills/core/code-index-lookup/scripts/source_location_evidence.py")
 project_onboard = load_module("project_onboard", ROOT / "skills/core/project-onboard/scripts/project_onboard.py")
 docs_governor = load_module("docs_governor", ROOT / "skills/core/docs-governor/scripts/docs_governor.py")
 reverse_baseline = load_module("reverse_baseline", ROOT / "skills/core/project-baseline-reverser/scripts/reverse_baseline.py")
@@ -65,6 +66,60 @@ def test_code_index_build_and_lookup() -> None:
         assert result["schema"] == "codex-code-index-lookup-v1"
         assert result["matches"]
         assert result["matches"][0]["score"] > 0
+
+
+def test_source_location_evidence_rejects_generic_device_matches() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "web"
+        (repo / "src/views/plugIn").mkdir(parents=True)
+        (repo / "src/views/device").mkdir(parents=True)
+        (repo / "src/components").mkdir(parents=True)
+        (repo / "src/views/plugIn/accidentAnalysis.vue").write_text(
+            "视频回放 openPlaybackDialog controlPlayback playbackStreamControl DualCameraLivePlayer",
+            encoding="utf-8",
+        )
+        (repo / "src/components/DualCameraLivePlayer.vue").write_text(
+            "DualCameraLivePlayer playbackStreamControl refreshPlaybackStream flvjs",
+            encoding="utf-8",
+        )
+        (repo / "src/views/device/replacementSettlement.vue").write_text(
+            "设备 页面 replacement settlement pool",
+            encoding="utf-8",
+        )
+        index = build_index.build(repo, "web")
+        index_path = root / "code_index.json"
+        index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+        requirement = root / "requirement.md"
+        requirement.write_text(
+            "设备视频回放：从 openPlaybackDialog 调用 playbackStreamControl，并复用 DualCameraLivePlayer。",
+            encoding="utf-8",
+        )
+        result = source_location_evidence.build(repo, index_path, requirement)
+        confirmed = {item["path"] for item in result["confirmed_anchors"]}
+        rejected = {item["path"] for item in result["rejected_candidates"]}
+        assert result["schema"] == "codex-source-location-evidence-v1"
+        assert "src/views/plugIn/accidentAnalysis.vue" in confirmed
+        assert "src/components/DualCameraLivePlayer.vue" in confirmed
+        assert "src/views/device/replacementSettlement.vue" not in confirmed
+        assert "src/views/device/replacementSettlement.vue" in rejected
+
+
+def test_source_location_evidence_blocks_reference_only_matches() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "web"
+        repo.mkdir()
+        (repo / "diagnostic.js").write_text("playbackStreamControl DualCameraLivePlayer", encoding="utf-8")
+        index = build_index.build(repo, "web")
+        index_path = root / "code_index.json"
+        index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+        requirement = root / "requirement.md"
+        requirement.write_text("诊断参考：`diagnostic.js`，包含 playbackStreamControl 和 DualCameraLivePlayer。", encoding="utf-8")
+        result = source_location_evidence.build(repo, index_path, requirement)
+        assert result["confirmed_anchors"][0]["role"] == "reference_only"
+        assert result["decision"] == "block"
+        assert result["blockers"]
 
 
 def test_project_onboard_writes_skill_and_manifest() -> None:
@@ -317,6 +372,8 @@ def test_baseline_quality_blocks_private_paths_and_secrets() -> None:
 
 def run_all() -> None:
     test_code_index_build_and_lookup()
+    test_source_location_evidence_rejects_generic_device_matches()
+    test_source_location_evidence_blocks_reference_only_matches()
     test_project_onboard_writes_skill_and_manifest()
     test_project_understanding_can_write_standard_project_skill()
     test_project_runner_new_and_legacy_manage_project_assets()

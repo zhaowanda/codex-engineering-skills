@@ -1362,23 +1362,48 @@ def run(
     else:
         project_out = None
 
+    if project_out and repo:
+        run_if_needed(
+            "source_location_evidence",
+            project_out / "source_location_evidence.json",
+            [
+                "python3",
+                "skills/core/code-index-lookup/scripts/source_location_evidence.py",
+                "--repo",
+                str(repo),
+                "--index",
+                str(project_out / "code_index.json"),
+                "--requirement",
+                str(normalized),
+                "--out",
+                str(project_out / "source_location_evidence.json"),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
+
     spec = out / "spec.json"
+    spec_command = [
+        "python3",
+        "skills/core/spec-governor/scripts/spec_governor.py",
+        "normalize",
+        "--doc-id",
+        doc_id,
+        "--title",
+        title,
+        "--input",
+        str(normalized),
+        "--out",
+        str(spec),
+    ]
+    if project_out:
+        spec_command.extend(["--project-understanding", str(project_out)])
     run_if_needed(
         "spec",
         spec,
-        [
-            "python3",
-            "skills/core/spec-governor/scripts/spec_governor.py",
-            "normalize",
-            "--doc-id",
-            doc_id,
-            "--title",
-            title,
-            "--input",
-            str(normalized),
-            "--out",
-            str(spec),
-        ],
+        spec_command,
         force,
         generated,
         skipped,

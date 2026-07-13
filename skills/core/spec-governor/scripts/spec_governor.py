@@ -512,6 +512,7 @@ def evidence_match_table(project_items: list[dict[str, Any]]) -> list[dict[str, 
             "source_evidence": item.get("source_evidence", "project_evidence"),
             "evidence_match_score": item.get("score", 0),
             "match_reason": item.get("match_reason", ""),
+            "status": item.get("status", "confirmed"),
         })
     return sorted(rows, key=lambda row: int(row.get("evidence_match_score") or 0), reverse=True)
 
@@ -720,13 +721,14 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
         kind = str(item.get("kind") or "")
         name = str(item.get("name") or "")
         source = str(item.get("source_evidence") or "project_evidence")
-        if kind in {"api_route", "mq_consumer", "scheduled_task", "manual_task", "module"}:
+        if item.get("status", "confirmed") == "confirmed" and kind in {"api_route", "mq_consumer", "scheduled_task", "manual_task", "module", "source_anchor"}:
             entry_type = {
                 "api_route": "backend_api",
                 "mq_consumer": "mq_consumer",
                 "scheduled_task": "scheduled_job",
                 "manual_task": "manual_task",
                 "module": "project_module",
+                "source_anchor": "confirmed_source_anchor",
             }.get(kind, kind)
             add(entry_type, name, source, "high")
     return entries
@@ -1342,6 +1344,13 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     readiness_gaps = expert_readiness_gaps(impact_surface, acceptance, objectives, scenarios, risks, compatibility_constraints)
     ambiguities = detect_ambiguities(text, acceptance, intent, business_flow, entrypoints, state_transitions, closure_model, state_model, dependency_chain, repo_impact, goal_quality, runtime_graph)
     requirements_understanding = understanding_decision(ambiguities, acceptance, intent, business_flow, entrypoints, current_business_state, success_metrics, closure_model, state_model, dependency_chain, goal_quality, runtime_graph)
+    source_location_evidence = (project_evidence.get("artifacts") or {}).get("source_location_evidence", {}) if isinstance(project_evidence, dict) else {}
+    if isinstance(source_location_evidence, dict) and source_location_evidence and source_location_evidence.get("decision") != "pass":
+        location_blocker = {"source": "source_location_evidence", "message": "no requirement-specific source location is confirmed"}
+        requirements_understanding["blockers"] = [*as_list(requirements_understanding.get("blockers")), location_blocker]
+        requirements_understanding["decision"] = "needs_clarification"
+        requirements_understanding["design_allowed"] = False
+        requirements_understanding["implementation_allowed"] = False
     understanding_evidence = fact_assumption_split(intent, business_flow, entrypoints, acceptance, assumptions)
     decision_blocked = bool(questions or rule_conflicts or not requirements_understanding["design_allowed"])
     return {
@@ -1365,6 +1374,7 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
         "trigger_conditions": [item.get("trigger") for item in entrypoints if isinstance(item, dict) and item.get("trigger")],
         "current_business_state": current_business_state,
         "current_state_evidence": current_state_evidence,
+        "source_location_evidence": source_location_evidence,
         "evidence_match_table": evidence_match_table(project_items),
         "repo_impact_map": repo_impact,
         "dependency_chain": dependency_chain,
@@ -1516,6 +1526,7 @@ PROJECT_EVIDENCE_FILES = (
     "config_surface.json",
     "dependency_surface.json",
     "repository_analysis.json",
+    "source_location_evidence.json",
 )
 
 
@@ -1633,7 +1644,16 @@ def project_evidence_items(project_evidence: dict[str, Any], requirement_text: s
                 kind = "scheduled_task"
             elif any(term in lower for term in ["controller", "endpoint", "route", "api"]):
                 kind = "api_route"
-            add(kind, value, "code_index.json", extra=evidence_match(value, requirement_text))
+            add(kind, value, "code_index.json", status="candidate", extra=evidence_match(value, requirement_text))
+
+    source_locations = artifacts.get("source_location_evidence") if isinstance(artifacts.get("source_location_evidence"), dict) else {}
+    for anchor in as_list(source_locations.get("confirmed_anchors")):
+        if isinstance(anchor, dict) and anchor.get("path"):
+            status = "reference_only" if anchor.get("role") == "reference_only" else "confirmed"
+            add("source_anchor", str(anchor["path"]), "source_location_evidence.json", status=status, extra={"symbol": anchor.get("symbol", ""), "confidence": anchor.get("confidence", ""), "role": anchor.get("role", "modify_candidate"), "source_digest": anchor.get("source_digest", "")})
+    for candidate in as_list(source_locations.get("rejected_candidates")):
+        if isinstance(candidate, dict) and candidate.get("path"):
+            add("source_candidate", str(candidate["path"]), "source_location_evidence.json", status="rejected", extra={"reason": candidate.get("reason", "")})
 
     config = artifacts.get("config_surface") if isinstance(artifacts.get("config_surface"), dict) else {}
     for value in deep_values(config):

@@ -343,6 +343,31 @@ def test_low_confidence_generic_entrypoint_needs_revision() -> None:
     assert "generic bootstrap/config/asset file" in messages
 
 
+def test_rejected_source_candidate_blocks_design_even_with_high_confidence() -> None:
+    technical, architecture = complete_design()
+    evidence = {
+        "schema": "codex-source-location-evidence-v1",
+        "decision": "pass",
+        "confirmed_anchors": [{"path": "src/views/plugIn/accidentAnalysis.vue", "confidence": "high"}],
+        "rejected_candidates": [{"path": "src/views/device/replacementSettlement.vue", "reason": "weak device-only match"}],
+    }
+    technical["source_location_evidence"] = evidence
+    architecture["source_location_evidence"] = evidence
+    technical["code_entrypoint_confidence"] = {
+        "level": "high",
+        "selected_entrypoint": "src/views/device/replacementSettlement.vue",
+        "evidence": ["manually_marked_high"],
+    }
+    architecture["code_entrypoint_confidence"] = technical["code_entrypoint_confidence"]
+    technical["module_decomposition"][0]["module"] = "src/views/device/replacementSettlement.vue"
+    architecture["module_topology"][0]["module"] = "src/views/device/replacementSettlement.vue"
+    result = design_arch_review.review(technical, architecture)
+    assert result["decision"] in {"needs_revision", "block"}
+    messages = json_dumps(result)
+    assert "selected entrypoint is not a confirmed source anchor" in messages
+    assert "rejected source candidates leaked" in messages
+
+
 def test_complex_breakdown_flattened_to_one_module_needs_revision() -> None:
     technical, architecture = complete_design()
     technical["requirement_breakdown"] = [

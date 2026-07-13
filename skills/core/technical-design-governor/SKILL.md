@@ -41,6 +41,8 @@ Then run `design-architecture-reviewer` after architecture design exists.
 - Requirement understanding gate: carry `requirements_understanding`, `requirements_understanding_gate`, `business_intent`, `business_flow`, `business_flow_model`, `business_closure_model`, `entrypoints`, `current_business_state`, `current_state_evidence`, `evidence_match_table`, `state_machine`, `business_goal_quality`, `repo_impact_map`, `dependency_chain`, and `runtime_dependency_graph` from `spec-governor` into the technical design. If `spec.design_allowed=false`, set design confidence low, mark the checklist blocked, preserve blockers/ambiguities, and do not present the design as implementation-ready.
 - Failure path: if current behavior, owner entrypoint, API contract, data model, runtime sequence, test mapping, or option comparison cannot be grounded in requirement/project evidence, keep that uncertainty explicit and require review revision instead of presenting a guessed design as ready.
 - When project-understanding artifacts are available, populate current-state analysis, code entrypoints, modules, routes, tests, and compatibility notes from real repository facts.
+- When source-location evidence exists, select owner modules only from `confirmed_anchors` and block when none are confirmed.
+- Never promote `rejected_candidates` or broad repository-index hints into implementation modules.
 - Do not present fallback phrases such as `target module to be confirmed` as expert-ready facts; keep them as review-blocking uncertainty.
 - Preserve open questions; do not hide uncertainty.
 - Include at least two solution options and a selected option.
