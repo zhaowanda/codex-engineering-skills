@@ -16,9 +16,9 @@ The main remaining risk is real-project calibration. The lifecycle now has a pha
 
 `skill_health` reports five independent framework dimensions:
 
-- `skill_contract_quality`: per-skill documentation, scripts, and direct test contract quality; only expert/advisory gates may receive an expert-level skill classification.
+- `skill_contract_quality`: per-skill documentation, scripts, and positive/negative behavior tests. `expert_contract` records a strong gate contract; `expert_proven` additionally requires real-project calibration.
 - `dag_integrity`: lifecycle phases, dependencies, cycles, artifact uniqueness, and profile-to-stage registration.
-- `gate_semantics`: required gates accept only non-blocking decisions and enforce declared readiness fields.
+- `gate_semantics`: required gates enforce schema, type, non-empty evidence, cardinality, constants, readiness fields, provenance, and non-blocking decisions.
 - `happy_blocked_path_reality`: `skill_health` actually runs the synthetic E2E suite and proves both blocking behavior and genuine implementation/release readiness.
 - `real_project_calibration`: privacy-reviewed anonymized real-project replay evidence, kept distinct from synthetic fixtures.
 
@@ -26,11 +26,11 @@ The whole framework is `expert` only when its weighted score is at least 90 and 
 
 ## Verified Baseline
 
-- `skill_health`: pass, 84 skills, 33 expert-level gate contracts and 84 advanced-or-better contracts; framework score 80 (`advanced`).
+- `skill_health`: pass, 84 skills, 22 `expert_contract`, 0 `expert_proven`, and 84 advanced-or-better contracts; framework score 80 (`advanced`).
 - Framework dimensions: skill contract quality 100, DAG integrity 100, gate semantics 100, happy/blocked path reality 100, real-project calibration 0.
-- Runtime assessment: all 45 workflow stages reject placeholder artifacts and all 7 synthetic blocked/happy paths pass.
-- `benchmark`: pass, 84 skills, 89 scripts, 133 schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated synthetic replay cases.
-- `pytest`: pass, 388 tests.
+- Runtime assessment: all 45 workflow stages reject correct-schema artifacts whose required evidence is semantically vacuous, and all 7 synthetic blocked/happy paths pass.
+- `benchmark`: pass, 84 skills, 89 scripts, 134 schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated synthetic replay cases.
+- `pytest`: pass, 394 tests; measured branch-aware repository coverage is 73% with a 70% enforced baseline.
 - `compileall`: pass for `scripts`, `skills`, and `tests`.
 - `privacy_scan`: pass, no hits.
 - `forward_test`: pass for all 8 scenarios and all 7 synthetic blocked/happy-path cases, including genuine implementation and release readiness.

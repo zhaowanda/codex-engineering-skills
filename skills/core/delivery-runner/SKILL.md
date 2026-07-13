@@ -25,6 +25,8 @@ python3 scripts/delivery_runner.py \
 - Prefer `delivery_state.json` when present.
 - Also inspect key artifacts directly so users can see missing files.
 - Evaluate the lifecycle registry in `config/workflow-stages.example.yaml` using schema `codex-workflow-stages-v3`, its phase order, semantic dependencies, profile-selected skills, and detected impacts.
+- Reject vacuous evidence even when schema and decision are valid by enforcing `evidence_fields`, typed constraints, cardinality, constants, patterns, and cross-field rules.
+- Require lineage v2 semantic artifact digests, producer/command provenance, and fresh deterministic input digests.
 - Fail closed unless every applicable artifact has the registered schema, required fields, accepted decision, empty blockers, and current input digests.
 - Apply `conditional_skill` stages only when the selected profile requires that skill, and `conditional_impacts` stages only when the artifact set signals a matching impact.
 - Block on dependency violations, including an artifact that exists while an applicable prerequisite is missing or not accepted.

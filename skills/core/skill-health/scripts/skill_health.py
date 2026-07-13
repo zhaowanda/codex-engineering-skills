@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import json
 import py_compile
@@ -37,6 +38,8 @@ VALID_STAGES = {
 GATE_MATURITY = {"expert-gate", "advisory-review"}
 PROFILE_SCHEMA = "codex-workflow-profiles-v2"
 STAGE_SCHEMA = "codex-workflow-stages-v3"
+DEFAULT_ARTIFACT_VALIDATOR = "builtin:artifact-contract-v2"
+DEFAULT_LINEAGE_SCHEMA = "codex-workflow-artifact-lineage-v2"
 DEPRECATED_PROFILE_SCHEMAS = {"codex-workflow-profiles-v1"}
 # Retained in the public schema inventory so v1 consumers receive an explicit
 # migration contract instead of an unannounced schema removal.
@@ -146,9 +149,23 @@ def workflow_runtime_assessment(root: Path, stage_entries: list[dict[str, Any]])
         fail_closed_results = []
         for stage in stage_entries:
             normalized = dict(stage)
-            normalized.setdefault("validator", "builtin:artifact-contract")
+            normalized.setdefault("validator", DEFAULT_ARTIFACT_VALIDATOR)
             accepted = as_list(normalized.get("accepted_decisions"))
-            placeholder = {"schema": "placeholder", "decision": accepted[0] if accepted else "pass"}
+            schemas = as_list(normalized.get("accepted_schemas"))
+            schema = normalized.get("expected_schema") or (schemas[0] if schemas else "placeholder")
+            placeholder: dict[str, Any] = {
+                "schema": schema,
+                "decision": accepted[0] if accepted else "pass",
+                "blockers": [],
+            }
+            for field in as_list(normalized.get("required_fields")):
+                if field in {"schema", "decision", "blockers"}:
+                    continue
+                current = placeholder
+                parts = str(field).split(".")
+                for part in parts[:-1]:
+                    current = current.setdefault(part, {})
+                current[parts[-1]] = []
             issues = contract.validate_artifact_contract(normalized, placeholder)
             fail_closed_results.append({"stage": stage.get("name"), "rejected": bool(issues), "issues": issues})
 
@@ -176,7 +193,9 @@ def workflow_runtime_assessment(root: Path, stage_entries: list[dict[str, Any]])
         return {
             "decision": "pass" if all(item["rejected"] for item in fail_closed_results) and synthetic_result.get("decision") == "pass" and required_cases.issubset({name for name, passed in case_results.items() if passed}) else "block",
             "fail_closed_stage_count": sum(1 for item in fail_closed_results if item["rejected"]),
+            "semantic_fail_closed_stage_count": sum(1 for item in fail_closed_results if item["rejected"]),
             "stage_count": len(fail_closed_results),
+            "adversarial_artifact_shape": "correct schema and accepted decision with vacuous required fields",
             "fail_closed_results": fail_closed_results,
             "synthetic_decision": synthetic_result.get("decision"),
             "case_results": case_results,
@@ -281,40 +300,69 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
-def skill_expert_score(skill_text: str, script_text: str, script_count: int, test_refs: int, maturity: str) -> dict[str, Any]:
+def behavior_test_signals(root: Path, skill_name: str) -> tuple[int, int]:
+    identifiers = {skill_name, skill_name.replace("-", "_")}
+    positive = 0
+    negative = 0
+    negative_terms = {"block", "reject", "invalid", "missing", "stale", "tamper", "empty", "fail", "deny"}
+    for path in (root / "tests").glob("test_*.py"):
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
+                continue
+            segment = ast.get_source_segment(source, node) or ""
+            if not any(identifier and identifier in segment for identifier in identifiers):
+                continue
+            positive += 1
+            if any(term in node.name.lower() for term in negative_terms):
+                negative += 1
+    return positive, negative
+
+
+def skill_expert_score(
+    skill_text: str,
+    script_text: str,
+    script_count: int,
+    positive_tests: int,
+    negative_tests: int,
+    maturity: str,
+) -> dict[str, Any]:
     combined = f"{skill_text}\n{script_text}".lower()
     bash_examples = len(re.findall(r"```bash", skill_text))
     schema_mentions = len(set(re.findall(r"codex-[a-z0-9-]+-v\d+", combined)))
     dimensions = {
-        "instruction_structure": all(section in skill_text for section in ["## Rules", "## Output"]),
+        "documented_contract": all(section in skill_text for section in ["## Rules", "## Output"]),
         "execution_surface": script_count > 0,
         "schema_contract": schema_mentions > 0,
-        "decision_contract": "decision" in combined and ("blockers" in combined or "warnings" in combined),
-        "test_coverage_signal": test_refs > 0,
-        "evidence_orientation": any(term in combined for term in ["evidence", "traceability", "readiness", "rollback", "gate"]),
-        "failure_path": any(term in combined for term in ["block", "blocked", "no_go", "needs_revision", "missing"]),
+        "positive_behavior_tests": positive_tests > 0,
+        "negative_behavior_tests": negative_tests > 0,
+        "real_project_calibration": False,
     }
     content_quality = {
         "command_example": bash_examples > 0,
         "specific_schema_names": schema_mentions > 0,
-        "explicit_failure_mode": dimensions["failure_path"],
+        "explicit_failure_mode": negative_tests > 0,
         "artifact_or_evidence_boundary": any(term in combined for term in ["artifact", "evidence", "summary", "review", "gate"]),
         "concise_instruction_body": len(re.findall(r"\w+", skill_text)) <= 700,
     }
     quality_score = sum(20 for passed in content_quality.values() if passed)
-    score = 50
-    score += 10 if dimensions["instruction_structure"] else 0
-    score += 10 if dimensions["execution_surface"] else 0
-    score += 10 if dimensions["schema_contract"] else 0
-    score += 8 if dimensions["decision_contract"] else 0
-    score += 8 if dimensions["test_coverage_signal"] else 0
-    score += 7 if dimensions["evidence_orientation"] else 0
-    score += 7 if dimensions["failure_path"] else 0
-    raw_level = "expert" if score >= 90 else "advanced" if score >= 82 else "standard" if score >= 72 else "basic"
-    level = raw_level if maturity in GATE_MATURITY else "advanced" if raw_level == "expert" else raw_level
+    score = 25
+    score += 15 if dimensions["documented_contract"] else 0
+    score += 15 if dimensions["execution_surface"] else 0
+    score += 15 if dimensions["schema_contract"] else 0
+    score += 15 if dimensions["positive_behavior_tests"] else 0
+    score += 15 if dimensions["negative_behavior_tests"] else 0
+    raw_level = "expert_contract" if score >= 80 else "advanced" if score >= 65 else "standard" if score >= 50 else "basic"
+    level = raw_level if maturity in GATE_MATURITY else "advanced" if raw_level == "expert_contract" else raw_level
     return {
         "score": min(score, 100),
         "level": level,
+        "expert_proven": False,
+        "test_evidence": {"positive_behavior_tests": positive_tests, "negative_behavior_tests": negative_tests},
         "dimensions": dimensions,
         "content_quality": {
             "score": quality_score,
@@ -375,11 +423,11 @@ def check(root: Path) -> dict[str, Any]:
             test_ref_count = sum(1 for pattern in [name, name.replace("-", "_")] if pattern and pattern in tests_text)
             if test_ref_count == 0:
                 blockers.append({"source": rel, "message": "expert-gate skills require direct test coverage"})
-        test_refs = sum(1 for pattern in [name, name.replace("-", "_")] if pattern and pattern in tests_text)
+        positive_tests, negative_tests = behavior_test_signals(root, name)
         expert_scores.append({
             "skill": name or skill.parent.name,
             "path": rel,
-            **skill_expert_score(skill_text, script_text, len(scripts), test_refs, fm.get("maturity", "")),
+            **skill_expert_score(skill_text, script_text, len(scripts), positive_tests, negative_tests, fm.get("maturity", "")),
         })
         for script in scripts:
             try:
@@ -418,6 +466,8 @@ def check(root: Path) -> dict[str, Any]:
                 continue
             if profile_name not in workflow_docs:
                 warnings.append({"source": f"workflow_profile.{profile_name}", "message": "profile is not documented in workflow guide"})
+            if profile.get("governance_level") not in {"light", "standard", "heavy", "critical"}:
+                blockers.append({"source": f"workflow_profile.{profile_name}", "message": "governance_level must be light, standard, heavy, or critical"})
             required = [str(item) for item in as_list(profile.get("required_skills"))]
             if not required:
                 blockers.append({"source": f"workflow_profile.{profile_name}", "message": "required_skills is required"})
@@ -488,10 +538,10 @@ def check(root: Path) -> dict[str, Any]:
         phase_rank = {phase: idx for idx, phase in enumerate(phase_order)}
         if not phase_order:
             blockers.append({"source": "config/workflow-stages.example.yaml", "message": "phase_order is required"})
-        if stages_doc.get("default_validator") != "builtin:artifact-contract":
-            blockers.append({"source": "config/workflow-stages.example.yaml", "message": "default_validator must be builtin:artifact-contract"})
-        if stages_doc.get("default_lineage_schema") != "codex-workflow-artifact-lineage-v1":
-            blockers.append({"source": "config/workflow-stages.example.yaml", "message": "default_lineage_schema must be codex-workflow-artifact-lineage-v1"})
+        if stages_doc.get("default_validator") != DEFAULT_ARTIFACT_VALIDATOR:
+            blockers.append({"source": "config/workflow-stages.example.yaml", "message": f"default_validator must be {DEFAULT_ARTIFACT_VALIDATOR}"})
+        if stages_doc.get("default_lineage_schema") != DEFAULT_LINEAGE_SCHEMA:
+            blockers.append({"source": "config/workflow-stages.example.yaml", "message": f"default_lineage_schema must be {DEFAULT_LINEAGE_SCHEMA}"})
         seen_stages: set[str] = set()
         seen_artifacts: set[str] = set()
         stage_entries = stages_doc.get("stages", []) if isinstance(stages_doc.get("stages"), list) else []
@@ -514,6 +564,8 @@ def check(root: Path) -> dict[str, Any]:
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage must declare expected_schema or accepted_schemas", "stage": name})
             if not isinstance(stage.get("required_fields"), list) or not stage.get("required_fields"):
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage required_fields must be a non-empty list", "stage": name})
+            if not isinstance(stage.get("evidence_fields"), list) or not stage.get("evidence_fields"):
+                blockers.append({"source": "config/workflow-stages.example.yaml", "message": "stage evidence_fields must be a non-empty list for semantic validation", "stage": name})
             if (stage.get("implementation_required") or stage.get("release_required")) and not as_list(stage.get("accepted_decisions")):
                 blockers.append({"source": "config/workflow-stages.example.yaml", "message": "readiness stage must declare accepted_decisions", "stage": name})
             if name in seen_stages:
@@ -578,8 +630,9 @@ def check(root: Path) -> dict[str, Any]:
                 missing_expected = applicable_artifacts - expected_artifacts
                 if missing_expected:
                     blockers.append({"source": f"workflow_profile.{profile.get('name')}", "message": "profile expected_artifacts omits applicable implementation stages", "artifacts": sorted(missing_expected)})
-    expert_level_count = sum(1 for item in expert_scores if item["level"] == "expert")
-    advanced_or_better_count = sum(1 for item in expert_scores if item["level"] in {"expert", "advanced"})
+    expert_contract_count = sum(1 for item in expert_scores if item["level"] == "expert_contract")
+    expert_level_count = sum(1 for item in expert_scores if item.get("expert_proven") is True)
+    advanced_or_better_count = sum(1 for item in expert_scores if item["level"] in {"expert_proven", "expert_contract", "advanced"})
     content_quality_scores = [int(item.get("content_quality", {}).get("score") or 0) for item in expert_scores]
     content_quality_average = round(sum(content_quality_scores) / len(content_quality_scores), 2) if content_quality_scores else 0
     stage_blockers = [item for item in blockers if item.get("source") == "config/workflow-stages.example.yaml"]
@@ -610,6 +663,7 @@ def check(root: Path) -> dict[str, Any]:
         "decision": "block" if blockers else "warn" if warnings else "pass",
         "skill_count": len(skills),
         "expert_level_count": expert_level_count,
+        "expert_contract_count": expert_contract_count,
         "advanced_or_better_count": advanced_or_better_count,
         "content_quality_average": content_quality_average,
         "content_quality_expert_count": sum(1 for score in content_quality_scores if score >= 80),

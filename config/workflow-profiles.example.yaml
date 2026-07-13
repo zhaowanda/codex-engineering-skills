@@ -1,6 +1,8 @@
 schema: codex-workflow-profiles-v2
 profiles:
   - name: bugfix
+    governance_level: light
+    target_artifact_reduction_percent: 30
     trigger_lanes:
       - bugfix
     required_skills:
@@ -89,6 +91,7 @@ profiles:
       - git evidence is ready
       - edit permit is ready
   - name: small_feature
+    governance_level: standard
     trigger_lanes:
       - small_change
       - standard_requirement
@@ -187,6 +190,7 @@ profiles:
       - git evidence is ready
       - edit permit is ready
   - name: frontend_change
+    governance_level: standard
     trigger_impacts:
       - ui
       - frontend
@@ -355,6 +359,7 @@ profiles:
       - delivery plan review passes
       - edit permit is ready
   - name: cross_repo_api
+    governance_level: heavy
     trigger_impacts:
       - api
     required_skills:
@@ -538,6 +543,7 @@ profiles:
       - cross-repo graph/readiness is generated before delivery plan review so repo order, contracts, and rollback boundaries can change the plan
       - delivery plan review passes
   - name: data_migration
+    governance_level: critical
     trigger_impacts:
       - data
     required_skills:
@@ -753,6 +759,7 @@ profiles:
       - data design and rollback are reviewed
       - configuration/security/performance evidence is planned
   - name: release_readiness
+    governance_level: critical
     trigger_lanes:
       - release
     required_skills:

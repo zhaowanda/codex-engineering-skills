@@ -45,11 +45,8 @@ def write_bound_questions(root: Path) -> None:
         "questions": [],
         "decision": "pass",
         "spec_digest": delivery_runner.canonical_artifact_digest(spec),
-        "producer": "test-fixture",
-        "producer_version": "workflow-v3",
-        "lineage_schema": "codex-workflow-artifact-lineage-v1",
-        "input_digests": {"spec.json": delivery_runner.CONTRACT.path_digest(root / "spec.json")},
     })
+    delivery_runner.CONTRACT.bind_lineage(root / "open_questions.json", "test-fixture", [root / "spec.json"], command=["test-fixture", "open_questions"])
 
 
 def write_bound_design_review(root: Path, implementation_allowed: bool = True) -> None:
@@ -66,26 +63,32 @@ def write_bound_design_review(root: Path, implementation_allowed: bool = True) -
             "architecture_design.json": delivery_runner.canonical_artifact_digest(architecture),
         },
     })
+    delivery_runner.CONTRACT.bind_lineage(
+        root / "design_architecture_review.json",
+        "test-fixture",
+        [root / "technical_design.json", root / "architecture_design.json"],
+        command=["test-fixture", "design_review"],
+    )
 
 
 def write_ready_small_feature(root: Path, docs_root: Path, doc_id: str = "REQ-1") -> None:
     (root / "requirement.normalized.txt").write_text("Requirement\n", encoding="utf-8")
     payloads = {
         "requirement_ingestion.json": {"schema": "codex-requirement-ingestion-v1", "doc_id": doc_id, "normalized_text": str(root / "requirement.normalized.txt"), "decision": "ready", "blockers": []},
-        "spec.json": {"schema": "codex-spec-v1", "doc_id": doc_id, "decision": "pass"},
+        "spec.json": {"schema": "codex-spec-v1", "doc_id": doc_id, "decision": "pass", "requirements": [{"id": "REQ-1", "statement": "Update the synthetic feature"}], "acceptance_criteria": [{"id": "AC-1", "statement": "The synthetic feature is updated"}]},
         "open_questions.json": {"schema": "codex-open-questions-v1", "questions": [], "decision": "pass"},
-        "domain_model_design.json": {"schema": "codex-domain-model-design-v1", "decision": "pass", "blockers": []},
-        "architecture_framing.json": {"schema": "codex-architecture-framing-v1", "decision": "pass", "blockers": [], "system_boundary": {}, "repo_responsibilities": []},
-        "technical_design.json": {"schema": "codex-technical-design-v1", "decision": "pass", "blockers": [], "design_scope": {}, "process_flow": [], "solution_options": [], "selected_solution": {}, "test_strategy": []},
-        "architecture_design.json": {"schema": "codex-architecture-design-v1", "decision": "pass", "blockers": [], "architecture_scope": {}, "architecture_options": [], "selected_architecture": {}, "component_boundaries": []},
+        "domain_model_design.json": {"schema": "codex-domain-model-design-v1", "decision": "pass", "blockers": [], "business_objects": [{"name": "SyntheticFeature"}], "rules": [{"id": "RULE-1", "statement": "Keep behavior compatible"}]},
+        "architecture_framing.json": {"schema": "codex-architecture-framing-v1", "decision": "pass", "blockers": [], "system_boundary": {"inside": ["target-repo"]}, "repo_responsibilities": [{"repo": "target-repo", "responsibility": "Own the feature"}]},
+        "technical_design.json": {"schema": "codex-technical-design-v1", "decision": "pass", "blockers": [], "design_scope": {"modules": ["app"]}, "process_flow": [{"step": "Apply the change"}], "solution_options": [{"id": "option-a"}], "selected_solution": {"id": "option-a"}, "test_strategy": [{"type": "regression"}]},
+        "architecture_design.json": {"schema": "codex-architecture-design-v1", "decision": "pass", "blockers": [], "architecture_scope": {"repos": ["target-repo"]}, "architecture_options": [{"id": "in-place"}], "selected_architecture": {"id": "in-place"}, "component_boundaries": [{"component": "app", "owns": "feature"}]},
         "design_architecture_review.json": {"schema": "codex-design-architecture-review-v1", "decision": "pass", "blockers": [], "score": 100, "readiness_gate": {"implementation_allowed": True}},
-        "test_design.json": {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [], "evidence_required": []},
-        "test_data_plan.json": {"schema": "codex-test-data-plan-v1", "decision": "pass", "datasets": [], "case_data_matrix": []},
-        "delivery_plan.json": {"schema": "codex-delivery-plan-v1", "doc_id": doc_id, "decision": "ready", "repo_tasks": [], "validation_plan": {}, "release_plan": {}, "rollback_plan": {}},
-        "traceability_matrix.json": {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": []},
+        "test_design.json": {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [{"id": "TC-1", "expected": "feature passes"}], "evidence_required": ["pytest output"]},
+        "test_data_plan.json": {"schema": "codex-test-data-plan-v1", "decision": "pass", "datasets": [{"id": "DATA-1", "type": "synthetic"}], "case_data_matrix": [{"case_id": "TC-1", "dataset_ids": ["DATA-1"]}]},
+        "delivery_plan.json": {"schema": "codex-delivery-plan-v1", "doc_id": doc_id, "decision": "ready", "repo_tasks": [{"repo": "target-repo", "allowed_files": ["src/app.py"]}], "validation_plan": {"commands": ["pytest"]}, "release_plan": {"order": ["target-repo"]}, "rollback_plan": {"steps": ["revert commit"]}},
+        "traceability_matrix.json": {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": [], "coverage": {"acceptance_covered": True}, "acceptance_trace": [{"acceptance": "AC-1", "test": "TC-1"}], "task_trace": [{"task": "target-repo", "acceptance": "AC-1"}]},
         "delivery_plan_review.json": {"schema": "codex-delivery-plan-review-v1", "decision": "pass", "blockers": [], "readiness_gate": {"implementation_allowed": True}},
-        "docs_quality.json": {"schema": "codex-docs-quality-aggregate-v1", "decision": "pass", "blockers": []},
-        "git_worktree_evidence.json": {"schema": "codex-git-baseline-evidence-v1", "decision": "ready", "fetched": True, "base_updated": True},
+        "docs_quality.json": {"schema": "codex-docs-quality-aggregate-v1", "decision": "pass", "blockers": [], "reviews": [{"document": "design", "decision": "pass"}]},
+        "git_worktree_evidence.json": {"schema": "codex-git-baseline-evidence-v1", "decision": "ready", "fetched": True, "base_updated": True, "branch": "feature/test"},
         "edit_permit.json": {"schema": "codex-edit-permit-v1", "decision": "ready", "doc_id": doc_id, "branch": "feature/test", "allowed_files": ["src/app.py"]},
         "write_guard_snapshot.json": {"schema": "codex-write-guard-snapshot-v1", "decision": "ready", "doc_id": doc_id, "branch": "feature/test", "permit_id": "EDIT-TEST"},
     }
@@ -98,14 +101,12 @@ def write_ready_small_feature(root: Path, docs_root: Path, doc_id: str = "REQ-1"
         path = root / str(stage["artifact"])
         if not path.exists():
             continue
-        data = json.loads(path.read_text(encoding="utf-8"))
-        inputs = {}
+        inputs = []
         for artifact in stage.get("input_artifacts", []):
             source = root / str(artifact)
             if source.exists():
-                inputs[source.name] = delivery_runner.CONTRACT.path_digest(source)
-        data.update({"producer": "test-fixture", "producer_version": "workflow-v3", "lineage_schema": "codex-workflow-artifact-lineage-v1", "input_digests": inputs})
-        write_json(path, data)
+                inputs.append(source)
+        delivery_runner.CONTRACT.bind_lineage(path, "test-fixture", inputs, command=["test-fixture", str(stage["name"])])
     write_json(root / "auto_run_summary.json", {
         "doc_id": doc_id,
         "docs_readiness": {"decision": "pass", "docs_root": str(docs_root), "manifest": str(docs_root / f"indexes/{doc_id}.manifest.json")},
@@ -620,8 +621,10 @@ def test_delivery_runner_reports_next_stage() -> None:
 
         write_json(root / "requirement_ingestion.json", {"schema": "codex-requirement-ingestion-v1", "doc_id": "REQ-4", "normalized_text": "requirement.normalized.txt", "decision": "ready", "blockers": []})
         (root / "requirement.normalized.txt").write_text("Requirement\n", encoding="utf-8")
-        spec = {"schema": "codex-spec-v1", "doc_id": "REQ-4", "decision": "pass", "lineage_schema": "codex-workflow-artifact-lineage-v1", "input_digests": {"requirement.normalized.txt": delivery_runner.CONTRACT.path_digest(root / "requirement.normalized.txt")}}
+        spec = {"schema": "codex-spec-v1", "doc_id": "REQ-4", "decision": "pass", "requirements": [{"id": "REQ-4", "statement": "Synthetic requirement"}], "acceptance_criteria": [{"id": "AC-1", "statement": "Synthetic acceptance"}]}
         write_json(root / "spec.json", spec)
+        delivery_runner.CONTRACT.bind_lineage(root / "requirement_ingestion.json", "test-fixture", [], command=["test-fixture", "requirement_ingestion"])
+        delivery_runner.CONTRACT.bind_lineage(root / "spec.json", "test-fixture", [root / "requirement.normalized.txt"], command=["test-fixture", "spec"])
         write_bound_questions(root)
         status = delivery_runner.inspect(root)
         assert status["next_stage"] == "domain_model_design"
@@ -742,6 +745,42 @@ def test_delivery_runner_rejects_placeholder_artifact_even_with_pass_decisions()
         status = delivery_runner.inspect(root, profile_name="small_feature")
         assert status["can_implement"] is False
         assert any(item["source"] == "technical_design" and "contract" in item["message"] for item in status["blockers"])
+
+
+def test_delivery_runner_rejects_vacuous_artifact_with_correct_schema() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        write_json(root / "technical_design.json", {
+            "schema": "codex-technical-design-v1",
+            "decision": "pass",
+            "blockers": [],
+            "design_scope": {},
+            "process_flow": [],
+            "solution_options": [],
+            "selected_solution": {},
+            "test_strategy": [],
+        })
+        delivery_runner.CONTRACT.bind_lineage(root / "technical_design.json", "test-fixture", [root / "spec.json"], command=["test-fixture", "technical_design"])
+        write_bound_design_review(root)
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+        assert status["can_implement"] is False
+        issues = next(item["issues"] for item in status["blockers"] if item["source"] == "technical_design")
+        assert any("evidence field" in issue for issue in issues)
+
+
+def test_delivery_runner_rejects_tampered_lineage_digest() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        technical = json.loads((root / "technical_design.json").read_text(encoding="utf-8"))
+        technical["selected_solution"] = {"id": "tampered-after-generation"}
+        write_json(root / "technical_design.json", technical)
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+        issues = next(item["issues"] for item in status["blockers"] if item["source"] == "technical_design")
+        assert "artifact_digest does not match artifact content" in issues
 
 
 def test_delivery_runner_requires_write_guard_snapshot() -> None:

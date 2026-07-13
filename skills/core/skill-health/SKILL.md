@@ -33,8 +33,8 @@ skill/documentation changes
 - Tests must exist for the repository.
 - Roadmap should contain completion markers for release tracking.
 - Validate workflow v3 schemas, required fields, semantic dependencies, profile applicability, and the default fail-closed validator.
-- Execute the synthetic E2E suite and reject placeholder artifacts for every registered stage; source-string presence is not runtime evidence.
-- Reserve expert-level skill classification for expert/advisory gates. Helpers, orchestrators, and templates may score advanced but not expert.
+- Execute the synthetic E2E suite and reject correct-schema artifacts with vacuous semantic evidence for every registered stage; source-string presence is not runtime evidence.
+- Reserve `expert_contract` for expert/advisory gates with positive and negative behavior tests. Reserve `expert_proven` for privacy-reviewed real-project calibration. Helpers, orchestrators, and templates may score advanced but not expert.
 - Set real-project calibration to zero until privacy-reviewed replays declare `source_type=anonymized_real_project`; framework expert requires at least three such replays across three scenario families.
 
 ## Command

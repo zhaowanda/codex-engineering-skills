@@ -2,6 +2,7 @@
   "schema": "codex-delivery-replay-skeleton-v1",
   "case_id": "REPLAY-RELEASE-READINESS-001",
   "anonymized": true,
+  "source_type": "synthetic",
   "scenario": "release_readiness",
   "source": "artifact_summaries_only",
   "artifacts": [

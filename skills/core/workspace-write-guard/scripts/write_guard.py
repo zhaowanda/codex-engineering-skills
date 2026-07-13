@@ -241,7 +241,7 @@ def main() -> int:
     result = create_snapshot(args) if args.cmd == "snapshot" else audit(args)
     if args.out:
         output = Path(args.out)
-        WORKFLOW_CONTRACT.bind_lineage(output, f"workspace-write-guard:{args.cmd}", WORKFLOW_CONTRACT.command_input_paths(sys.argv, output))
+        WORKFLOW_CONTRACT.bind_lineage(output, f"workspace-write-guard:{args.cmd}", WORKFLOW_CONTRACT.command_input_paths(sys.argv, output), command=sys.argv)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") == "ready" else 1
 

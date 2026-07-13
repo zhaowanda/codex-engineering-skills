@@ -67,6 +67,9 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert result["profile_selection_candidates"]
         assert result["workflow_strictness"]["tier"] in {"light", "standard", "regulated"}
         assert result["effective_workflow_controls"]["required_skills"]
+        assert result["workflow_metrics"]["governance_level"] in {"light", "standard", "heavy", "critical"}
+        assert result["workflow_metrics"]["executed_step_count"] > 0
+        assert result["workflow_metrics"]["total_command_duration_ms"] >= 0
         assert "strictness_gate_gaps" in result
         assert result["docs_readiness"]["decision"] == "block"
         assert result["next_stage"]

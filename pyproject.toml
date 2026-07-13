@@ -4,14 +4,45 @@ version = "0.1.0"
 description = "Open engineering-delivery skill framework for Codex-style coding agents"
 requires-python = ">=3.10"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 
 [project.optional-dependencies]
 dev = [
+    "bandit>=1.7",
+    "hypothesis>=6",
+    "mypy>=1.10",
     "pytest>=7",
+    "pytest-cov>=5",
+    "ruff>=0.5",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+
+[tool.coverage.run]
+branch = true
+source = ["scripts", "skills"]
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[tool.setuptools]
+packages = []

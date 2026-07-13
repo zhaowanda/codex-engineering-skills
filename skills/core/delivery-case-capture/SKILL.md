@@ -29,6 +29,8 @@ python3 scripts/capture_case.py \
 
 ## Rules
 
+- Mark synthetic fixtures with `source_type=synthetic`.
+- Accept `source_type=anonymized_real_project` only with approved privacy review, reviewer/timestamp, expert and framework decisions, risk level, and a boolean agreement label.
 - Capture only artifact summaries, not secrets or local-only paths.
 - Record what worked, what blocked, and which skill/gate should improve.
 - Keep real organization details in a private overlay.

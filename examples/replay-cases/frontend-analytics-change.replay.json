@@ -2,6 +2,7 @@
   "schema": "codex-delivery-replay-skeleton-v1",
   "case_id": "REPLAY-FRONTEND-ANALYTICS-001",
   "anonymized": true,
+  "source_type": "synthetic",
   "scenario": "frontend_analytics_change",
   "source": "artifact_summaries_only",
   "artifacts": [
