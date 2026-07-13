@@ -467,7 +467,7 @@ def main() -> int:
     write_json(getattr(args, "out", None), result)
     if getattr(args, "out", None):
         output = Path(args.out)
-        WORKFLOW_CONTRACT.bind_lineage(output, f"edit-readiness:{args.cmd}", WORKFLOW_CONTRACT.command_input_paths(sys.argv, output))
+        WORKFLOW_CONTRACT.bind_lineage(output, f"edit-readiness:{args.cmd}", WORKFLOW_CONTRACT.command_input_paths(sys.argv, output), command=sys.argv)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") == "ready" else 1
 

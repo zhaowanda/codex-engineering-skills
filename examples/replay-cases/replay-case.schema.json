@@ -4,6 +4,7 @@
     "schema",
     "case_id",
     "anonymized",
+    "source_type",
     "scenario",
     "source",
     "artifacts",
@@ -21,6 +22,16 @@
     "No local absolute paths",
     "No customer or project names",
     "No source code body",
-    "Only artifact summaries and decisions"
+    "Only artifact summaries and decisions",
+    "anonymized_real_project requires approved privacy_review and expert ground_truth"
+  ],
+  "real_project_required_fields": [
+    "privacy_review.decision=approved",
+    "privacy_review.reviewer",
+    "privacy_review.reviewed_at",
+    "ground_truth.expert_decision",
+    "ground_truth.framework_decision",
+    "ground_truth.match",
+    "ground_truth.risk_level"
   ]
 }

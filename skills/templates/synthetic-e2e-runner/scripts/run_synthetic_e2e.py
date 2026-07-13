@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import subprocess
@@ -73,19 +72,7 @@ def resolve_required_questions(out_dir: Path) -> None:
 
 
 def canonical_digest(data: dict[str, Any]) -> str:
-    def strip_volatile(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {
-                key: strip_volatile(item)
-                for key, item in sorted(value.items())
-                if key not in {"generated_at", "updated_at", "producer", "producer_version", "lineage_schema", "input_digests"}
-            }
-        if isinstance(value, list):
-            return [strip_volatile(item) for item in value]
-        return value
-
-    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return DELIVERY_RUNNER.CONTRACT.canonical_digest(data)
 
 
 def bind_workflow_lineage(out_dir: Path) -> None:
@@ -93,19 +80,18 @@ def bind_workflow_lineage(out_dir: Path) -> None:
         path = out_dir / str(stage["artifact"])
         if not path.exists():
             continue
-        data = json.loads(path.read_text(encoding="utf-8"))
-        recorded = data.get("input_digests") if isinstance(data.get("input_digests"), dict) else {}
+        inputs = []
         for artifact in stage.get("input_artifacts", []):
             source = out_dir / str(artifact)
             if source.exists():
-                recorded[source.name] = DELIVERY_RUNNER.CONTRACT.path_digest(source)
-        data.update({
-            "producer": "synthetic-e2e",
-            "producer_version": "workflow-v3",
-            "lineage_schema": "codex-workflow-artifact-lineage-v1",
-            "input_digests": recorded,
-        })
-        write_json(path, data)
+                inputs.append(source)
+        DELIVERY_RUNNER.CONTRACT.bind_lineage(
+            path,
+            "synthetic-e2e",
+            inputs,
+            command=["synthetic-e2e", str(stage["name"])],
+            workspace=ROOT,
+        )
 
 
 def write_preimplementation_happy_evidence(out_dir: Path) -> None:
@@ -223,17 +209,17 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "design_architecture_review.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(out_dir / "implementation_completion_gate.json", {"schema": "codex-implementation-completion-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"], "evidence_followups": []})
     write_json(out_dir / "post_change_implementation_report.json", {"schema": "codex-post-change-implementation-report-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"]})
-    write_json(out_dir / "write_guard_audit.json", {"schema": "codex-write-guard-audit-v1", "decision": "ready", "blockers": [], "changed_files": ["synthetic.py"], "snapshot": "write_guard_snapshot.json"})
-    write_json(out_dir / "diff_impact.json", {"schema": "codex-diff-impact-v1", "decision": "pass", "impact_areas": [], "blockers": []})
-    write_json(out_dir / "post_implementation_traceability_matrix.json", {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": []})
+    write_json(out_dir / "write_guard_audit.json", {"schema": "codex-write-guard-audit-v1", "decision": "ready", "blockers": [], "changed_files": ["synthetic.py"], "snapshot": {"artifact": "write_guard_snapshot.json", "verified": True}})
+    write_json(out_dir / "diff_impact.json", {"schema": "codex-diff-impact-v1", "decision": "pass", "impact_areas": ["code"], "changed_files": ["synthetic.py"], "blockers": []})
+    write_json(out_dir / "post_implementation_traceability_matrix.json", {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": [], "coverage": {"acceptance_covered": True}, "acceptance_trace": [{"acceptance": "synthetic behavior", "status": "covered"}], "task_trace": [{"task": "synthetic.py", "status": "implemented"}]})
     write_json(out_dir / "change_risk.json", {"schema": "codex-change-risk-v1", "decision": "pass", "risk_level": "low", "blockers": []})
-    write_json(out_dir / "evidence_gap_summary.json", {"schema": "codex-evidence-gap-summary-v1", "decision": "pass", "missing_evidence": [], "blockers": []})
-    write_json(out_dir / "code_design_quality.json", {"schema": "codex-code-design-quality-review-v1", "decision": "pass", "findings": [], "blockers": []})
-    write_json(out_dir / "code_review_gate.json", {"schema": "codex-code-review-gate-v1", "decision": "approve", "active_blockers": [], "active_concerns": [], "missing_evidence": []})
-    write_json(out_dir / "test_evidence_gate.json", {"schema": "codex-test-evidence-gate-v1", "decision": "pass", "blockers": [], "warnings": [], "evidence_summary": {}})
+    write_json(out_dir / "evidence_gap_summary.json", {"schema": "codex-evidence-gap-summary-v1", "decision": "pass", "required_evidence": ["tests"], "found_evidence": ["tests:test_execution_evidence.json"], "command_logs": [{"command": "pytest", "status": "passed"}], "missing_evidence": [], "blockers": []})
+    write_json(out_dir / "code_design_quality.json", {"schema": "codex-code-design-quality-review-v1", "decision": "pass", "changed_files": ["synthetic.py"], "findings": [], "blockers": []})
+    write_json(out_dir / "code_review_gate.json", {"schema": "codex-code-review-gate-v1", "decision": "approve", "active_blockers": [], "active_concerns": [], "missing_evidence": [], "evidence_summary": {"reviewed_files": ["synthetic.py"], "test_gate": "pass"}})
+    write_json(out_dir / "test_evidence_gate.json", {"schema": "codex-test-evidence-gate-v1", "decision": "pass", "blockers": [], "warnings": [], "evidence_summary": {"executed_cases": 1, "ci_commands": 1}})
     write_json(out_dir / "ci_execution_evidence.json", {"failed_commands": [], "unknown_commands": [], "executed_commands": [{"command": "pytest", "status": "passed"}]})
     write_json(out_dir / "environment_promotion.json", {"schema": "codex-environment-promotion-v1", "decision": "pass", "blockers": [], "environments": [{"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke"], "approver": "release-owner", "rollback_ready": True}, {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke"], "approver": "release-owner", "rollback_ready": True}]})
-    write_json(out_dir / "uat_acceptance.json", {"schema": "codex-uat-acceptance-v1", "decision": "pass", "blockers": []})
+    write_json(out_dir / "uat_acceptance.json", {"schema": "codex-uat-acceptance-v1", "decision": "pass", "blockers": [], "scope": ["synthetic behavior"], "acceptors": ["synthetic-owner"], "cases": [{"name": "synthetic UAT", "status": "passed"}], "signoff": {"accepted": True, "by": "synthetic-owner", "at": "2026-07-03T10:30:00+08:00"}})
     write_json(out_dir / "release_change.json", {"schema": "codex-release-change-v1", "decision": "pass", "blockers": [], "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"}, "approvers": ["release-owner"], "rollback_plan": ["rollback synthetic"], "rollback_owner": "release-owner", "post_release_checks": ["check synthetic metric"]})
     bind_workflow_lineage(out_dir)
 

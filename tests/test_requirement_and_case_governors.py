@@ -339,9 +339,29 @@ def test_delivery_case_capture_can_emit_anonymized_replay_skeleton() -> None:
         result = capture_case.replay_skeleton(root, "CASE-REPLAY")
         assert result["schema"] == "codex-delivery-replay-skeleton-v1"
         assert result["anonymized"] is True
+        assert result["source_type"] == "synthetic"
         assert result["artifacts"][0]["artifact"] == "spec.json"
         rendered = json.dumps(result)
         assert str(root) not in rendered
+
+
+def test_real_project_replay_requires_privacy_review_and_ground_truth() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "real.replay.json"
+        write_json(path, {
+            "schema": "codex-delivery-replay-skeleton-v1",
+            "case_id": "REAL-1",
+            "anonymized": True,
+            "source_type": "anonymized_real_project",
+            "scenario": "bugfix",
+            "source": "artifact_summaries_only",
+            "artifacts": [{"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0}],
+            "replay_steps": [{"step": "spec", "expected_artifact": "spec.json"}],
+            "privacy_note": "Reviewed summary only.",
+        })
+        result = capture_case.validate_replay_case(path)
+        assert result["valid"] is False
+        assert {item["source"] for item in result["blockers"]} >= {"privacy_review", "ground_truth"}
 
 
 def run_all() -> None:
@@ -362,6 +382,7 @@ def run_all() -> None:
     test_question_governor_asks_from_weak_understanding_dimensions()
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
+    test_real_project_replay_requires_privacy_review_and_ground_truth()
 
 
 if __name__ == "__main__":

@@ -94,6 +94,10 @@ Profile `artifact_steps` declare profile-specific artifact generation or inspect
 
 Every applicable artifact records its direct input digests. Updating an input recursively invalidates downstream readiness. Cross-repo work uses a draft plan before aggregate design review, so final test and delivery artifacts are generated only after `cross_repo_readiness.json` exists.
 
+The shared artifact contract also declares `evidence_fields` and optional typed field constraints. Correct schema and an accepted decision are insufficient when evidence is empty, has the wrong type, violates cardinality, or conflicts with a readiness constant. Lineage v2 binds the semantic artifact digest, deterministic direct inputs, producer version, command digest, Git context, and permit when available.
+
+Profiles declare `governance_level` as `light`, `standard`, `heavy`, or `critical`. Auto-run summaries report executed/skipped steps, generated/reused artifact counts, and command duration so teams can measure whether light bugfix paths reduce artifact cost without weakening elevated controls.
+
 Traceability is intentionally two-pass. The initial pass (`traceability_matrix.json`) runs before implementation and proves that requirements, design, tests, and delivery tasks line up. The post-implementation pass (`post_implementation_traceability_matrix.json`) runs after changes exist and binds requirements to diff, test evidence, review evidence, and release evidence.
 
 ## Coding Is Allowed Only When

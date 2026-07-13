@@ -341,6 +341,7 @@ def report(root: Path) -> dict[str, Any]:
             "privacy_decision": privacy["json"].get("decision"),
             "skill_health_decision": health["json"].get("decision"),
             "skill_expert_level_count": health["json"].get("expert_level_count", 0),
+            "skill_expert_contract_count": health["json"].get("expert_contract_count", 0),
             "skill_advanced_or_better_count": health["json"].get("advanced_or_better_count", 0),
             "skill_expert_readiness": health["json"].get("expert_readiness", ""),
             "skill_content_quality_average": health["json"].get("content_quality_average", 0),

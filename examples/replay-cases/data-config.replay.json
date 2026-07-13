@@ -2,6 +2,7 @@
   "schema": "codex-delivery-replay-skeleton-v1",
   "case_id": "REPLAY-DATA-CONFIG-001",
   "anonymized": true,
+  "source_type": "synthetic",
   "scenario": "data_config",
   "source": "artifact_summaries_only",
   "artifacts": [

@@ -1,6 +1,6 @@
 schema: codex-workflow-stages-v3
-default_validator: builtin:artifact-contract
-default_lineage_schema: codex-workflow-artifact-lineage-v1
+default_validator: builtin:artifact-contract-v2
+default_lineage_schema: codex-workflow-artifact-lineage-v2
 phase_order:
   - requirement
   - pre_implementation_design
@@ -14,6 +14,14 @@ stages:
     artifact: requirement_ingestion.json
     expected_schema: codex-requirement-ingestion-v1
     required_fields: [doc_id, normalized_text, decision, blockers]
+    evidence_fields: [normalized_text]
+    field_constraints:
+      doc_id:
+        type: string
+        non_empty: true
+      normalized_text:
+        type: string
+        min_length: 10
     phase: requirement
     depends_on: []
     implementation_required: true
@@ -22,6 +30,7 @@ stages:
     artifact: project_understanding/baseline_quality.json
     expected_schema: codex-baseline-quality-v1
     required_fields: [decision, blockers]
+    evidence_fields: [baseline]
     phase: requirement
     depends_on: [requirement_ingestion]
     conditional_skill: project-understanding-runner
@@ -31,6 +40,7 @@ stages:
     artifact: spec.json
     expected_schema: codex-spec-v1
     required_fields: [doc_id, decision]
+    evidence_fields: [requirements, acceptance_criteria]
     phase: requirement
     depends_on: [requirement_ingestion, project_understanding]
     input_artifacts: [requirement.normalized.txt]
@@ -41,6 +51,13 @@ stages:
     artifact: open_questions.json
     expected_schema: codex-open-questions-v1
     required_fields: [spec_digest, questions, decision]
+    evidence_fields: [spec_digest]
+    field_constraints:
+      spec_digest:
+        type: string
+        min_length: 32
+      questions:
+        type: array
     phase: requirement
     depends_on: [spec]
     input_artifacts: [spec.json]
@@ -51,6 +68,7 @@ stages:
     artifact: domain_model_design.json
     expected_schema: codex-domain-model-design-v1
     required_fields: [decision, blockers]
+    evidence_fields: [business_objects, rules]
     phase: pre_implementation_design
     depends_on: [requirement_questions]
     input_artifacts: [spec.json]
@@ -62,6 +80,7 @@ stages:
     artifact: architecture_framing.json
     expected_schema: codex-architecture-framing-v1
     required_fields: [decision, blockers, system_boundary, repo_responsibilities]
+    evidence_fields: [system_boundary, repo_responsibilities]
     phase: pre_implementation_design
     depends_on: [domain_model_design]
     input_artifacts: [spec.json, domain_model_design.json, project_understanding]
@@ -72,6 +91,7 @@ stages:
     artifact: ui_ue_design.json
     expected_schema: codex-ui-ue-design-v1
     required_fields: [decision, blockers]
+    evidence_fields: [screens, state_matrix, applicable]
     phase: pre_implementation_design
     depends_on: [architecture_framing]
     input_artifacts: [spec.json, architecture_framing.json]
@@ -82,6 +102,11 @@ stages:
     artifact: ui_ue_review.json
     expected_schema: codex-ui-ue-review-v1
     required_fields: [decision, blockers, readiness_gate.frontend_implementation_allowed]
+    evidence_fields: [score, findings, readiness_gate]
+    field_constraints:
+      readiness_gate.frontend_implementation_allowed:
+        type: boolean
+        const: true
     phase: pre_implementation_design
     depends_on: [ui_ue_design]
     input_artifacts: [ui_ue_design.json]
@@ -92,6 +117,7 @@ stages:
     artifact: api_contract_design.json
     expected_schema: codex-api-contract-design-v1
     required_fields: [decision, blockers]
+    evidence_fields: [contracts, applicable]
     phase: pre_implementation_design
     depends_on: [architecture_framing]
     input_artifacts: [spec.json, architecture_framing.json]
@@ -102,6 +128,7 @@ stages:
     artifact: data_model_design.json
     expected_schema: codex-data-model-design-v1
     required_fields: [decision, blockers]
+    evidence_fields: [entities, tables, applicable]
     phase: pre_implementation_design
     depends_on: [architecture_framing]
     input_artifacts: [spec.json, architecture_framing.json]
@@ -112,6 +139,7 @@ stages:
     artifact: observability_design.json
     expected_schema: codex-observability-design-v1
     required_fields: [decision, blockers]
+    evidence_fields: [metrics, logs, post_release_checks]
     phase: pre_implementation_design
     depends_on: [architecture_framing]
     input_artifacts: [spec.json, architecture_framing.json]
@@ -122,6 +150,7 @@ stages:
     artifact: technical_design.json
     expected_schema: codex-technical-design-v1
     required_fields: [decision, blockers, design_scope, process_flow, solution_options, selected_solution, test_strategy]
+    evidence_fields: [design_scope, process_flow, selected_solution]
     phase: pre_implementation_design
     depends_on: [requirement_questions, domain_model_design, architecture_framing, ui_ue_design, api_contract_design, data_model_design, observability_design]
     input_artifacts: [spec.json, domain_model_design.json, architecture_framing.json, ui_ue_design.json, api_contract_design.json, data_model_design.json, observability_design.json, project_understanding]
@@ -131,6 +160,7 @@ stages:
     artifact: frontend_implementation_plan.json
     expected_schema: codex-frontend-implementation-plan-v1
     required_fields: [decision, blockers]
+    evidence_fields: [candidate_files, component_work, routes, applicable]
     phase: pre_implementation_design
     depends_on: [ui_ue_review, technical_design]
     input_artifacts: [ui_ue_design.json, ui_ue_review.json, technical_design.json]
@@ -141,6 +171,7 @@ stages:
     artifact: architecture_design.json
     expected_schema: codex-architecture-design-v1
     required_fields: [decision, blockers, architecture_scope, architecture_options, selected_architecture, component_boundaries]
+    evidence_fields: [architecture_scope, selected_architecture, component_boundaries]
     phase: pre_implementation_design
     depends_on: [technical_design, architecture_framing]
     input_artifacts: [spec.json, technical_design.json, architecture_framing.json, project_understanding]
@@ -150,6 +181,7 @@ stages:
     artifact: configuration_readiness.json
     expected_schema: codex-configuration-readiness-v1
     required_fields: [decision, blockers]
+    evidence_fields: [configuration_items, next_action]
     phase: pre_implementation_design
     depends_on: [architecture_design]
     input_artifacts: [spec.json, technical_design.json, architecture_design.json]
@@ -160,6 +192,7 @@ stages:
     artifact: data_security_review.json
     expected_schema: codex-data-security-review-v1
     required_fields: [decision, blockers]
+    evidence_fields: [sensitive_signals, controls_required, warnings]
     phase: pre_implementation_design
     depends_on: [architecture_design]
     input_artifacts: [spec.json, technical_design.json, architecture_design.json]
@@ -170,6 +203,7 @@ stages:
     artifact: performance_review.json
     expected_schema: codex-performance-review-v1
     required_fields: [decision, blockers]
+    evidence_fields: [evidence_plan, risk_level, warnings]
     phase: pre_implementation_design
     depends_on: [architecture_design]
     input_artifacts: [spec.json, technical_design.json, architecture_design.json]
@@ -180,6 +214,11 @@ stages:
     artifact: delivery_plan_draft.json
     expected_schema: codex-delivery-plan-v1
     required_fields: [decision, repo_tasks, validation_plan]
+    evidence_fields: [repo_tasks]
+    field_constraints:
+      repo_tasks:
+        type: array
+        min_items: 1
     phase: pre_implementation_design
     depends_on: [architecture_design]
     input_artifacts: [technical_design.json, architecture_design.json]
@@ -190,6 +229,7 @@ stages:
     artifact: cross_repo_readiness.json
     expected_schema: codex-cross-repo-readiness-v1
     required_fields: [decision, blockers]
+    evidence_fields: [repo_states, required_before_parallel_execution]
     phase: pre_implementation_design
     depends_on: [delivery_plan_draft]
     input_artifacts: [spec.json, delivery_plan_draft.json]
@@ -200,6 +240,14 @@ stages:
     artifact: design_architecture_review.json
     expected_schema: codex-design-architecture-review-v1
     required_fields: [decision, blockers, score, readiness_gate.implementation_allowed, input_digests]
+    evidence_fields: [score, readiness_gate]
+    field_constraints:
+      score:
+        type: number
+        min_value: 80
+      readiness_gate.implementation_allowed:
+        type: boolean
+        const: true
     phase: pre_implementation_design
     depends_on: [architecture_design, frontend_implementation_plan, configuration_design_review, data_security_design_review, performance_design_review, cross_repo_plan]
     input_artifacts: [technical_design.json, architecture_design.json, ui_ue_review.json, api_contract_design.json, data_model_design.json, observability_design.json, configuration_readiness.json, data_security_review.json, performance_review.json, cross_repo_readiness.json]
@@ -209,6 +257,11 @@ stages:
     artifact: test_design.json
     expected_schema: codex-test-design-v1
     required_fields: [decision, test_cases, evidence_required]
+    evidence_fields: [test_cases]
+    field_constraints:
+      test_cases:
+        type: array
+        min_items: 1
     phase: pre_implementation_design
     depends_on: [design_review]
     input_artifacts: [spec.json, technical_design.json, architecture_design.json, design_architecture_review.json]
@@ -219,6 +272,14 @@ stages:
     artifact: test_data_plan.json
     expected_schema: codex-test-data-plan-v1
     required_fields: [decision, datasets, case_data_matrix]
+    evidence_fields: [datasets, case_data_matrix]
+    field_constraints:
+      datasets:
+        type: array
+        min_items: 1
+      case_data_matrix:
+        type: array
+        min_items: 1
     phase: pre_implementation_design
     depends_on: [test_design]
     input_artifacts: [test_design.json]
@@ -228,6 +289,14 @@ stages:
     artifact: delivery_plan.json
     expected_schema: codex-delivery-plan-v1
     required_fields: [decision, repo_tasks, validation_plan, release_plan, rollback_plan]
+    evidence_fields: [repo_tasks, validation_plan, rollback_plan]
+    field_constraints:
+      repo_tasks:
+        type: array
+        min_items: 1
+      rollback_plan:
+        type: object
+        non_empty: true
     phase: pre_implementation_design
     depends_on: [test_data_plan, cross_repo_plan]
     input_artifacts: [technical_design.json, architecture_design.json, design_architecture_review.json, test_design.json, test_data_plan.json, cross_repo_readiness.json]
@@ -237,6 +306,7 @@ stages:
     artifact: traceability_matrix.json
     expected_schema: codex-traceability-matrix-v1
     required_fields: [decision, blockers]
+    evidence_fields: [coverage, acceptance_trace, task_trace]
     phase: pre_implementation_design
     depends_on: [delivery_plan]
     input_artifacts: [spec.json, technical_design.json, architecture_design.json, test_design.json, delivery_plan.json]
@@ -247,6 +317,11 @@ stages:
     artifact: delivery_plan_review.json
     expected_schema: codex-delivery-plan-review-v1
     required_fields: [decision, blockers, readiness_gate.implementation_allowed]
+    evidence_fields: [readiness_gate]
+    field_constraints:
+      readiness_gate.implementation_allowed:
+        type: boolean
+        const: true
     phase: pre_implementation_design
     depends_on: [initial_traceability]
     input_artifacts: [delivery_plan.json, traceability_matrix.json]
@@ -256,6 +331,7 @@ stages:
     artifact: docs_quality.json
     expected_schema: codex-docs-quality-aggregate-v1
     required_fields: [decision, blockers]
+    evidence_fields: [reviews]
     phase: implementation_readiness
     depends_on: [delivery_plan_review]
     input_artifacts: [delivery_plan_review.json]
@@ -265,6 +341,17 @@ stages:
     artifact: git_worktree_evidence.json
     accepted_schemas: [codex-git-baseline-evidence-v1, codex-git-edit-readiness-v1]
     required_fields: [decision, fetched, base_updated]
+    evidence_fields: [branch]
+    field_constraints:
+      fetched:
+        type: boolean
+        const: true
+      base_updated:
+        type: boolean
+        const: true
+      branch:
+        type: string
+        non_empty: true
     phase: implementation_readiness
     depends_on: [docs_quality]
     input_artifacts: [delivery_plan.json]
@@ -274,6 +361,11 @@ stages:
     artifact: edit_permit.json
     expected_schema: codex-edit-permit-v1
     required_fields: [decision, doc_id, branch, allowed_files]
+    evidence_fields: [allowed_files]
+    field_constraints:
+      allowed_files:
+        type: array
+        min_items: 1
     phase: implementation_readiness
     depends_on: [git]
     input_artifacts: [delivery_plan.json, git_worktree_evidence.json]
@@ -283,6 +375,11 @@ stages:
     artifact: write_guard_snapshot.json
     expected_schema: codex-write-guard-snapshot-v1
     required_fields: [decision, doc_id, branch, permit_id]
+    evidence_fields: [permit_id]
+    field_constraints:
+      permit_id:
+        type: string
+        non_empty: true
     phase: implementation_readiness
     depends_on: [edit_permit]
     input_artifacts: [edit_permit.json]
@@ -292,6 +389,11 @@ stages:
     artifact: implementation_completion_gate.json
     expected_schema: codex-implementation-completion-v1
     required_fields: [decision, blockers, changed_files, evidence_followups]
+    evidence_fields: [changed_files]
+    field_constraints:
+      changed_files:
+        type: array
+        min_items: 1
     phase: implementation
     depends_on: [write_guard_snapshot]
     input_artifacts: [delivery_plan.json, edit_permit.json, write_guard_snapshot.json]
@@ -301,6 +403,11 @@ stages:
     artifact: post_change_implementation_report.json
     expected_schema: codex-post-change-implementation-report-v1
     required_fields: [decision, blockers, changed_files]
+    evidence_fields: [changed_files]
+    field_constraints:
+      changed_files:
+        type: array
+        min_items: 1
     phase: post_implementation_evidence
     depends_on: [implementation]
     input_artifacts: [implementation_completion_gate.json, delivery_plan.json]
@@ -311,6 +418,14 @@ stages:
     artifact: write_guard_audit.json
     expected_schema: codex-write-guard-audit-v1
     required_fields: [decision, blockers, changed_files, snapshot]
+    evidence_fields: [changed_files, snapshot]
+    field_constraints:
+      changed_files:
+        type: array
+        min_items: 1
+      snapshot:
+        type: object
+        non_empty: true
     phase: post_implementation_evidence
     depends_on: [implementation]
     input_artifacts: [implementation_completion_gate.json, edit_permit.json, write_guard_snapshot.json]
@@ -321,6 +436,7 @@ stages:
     artifact: diff_impact.json
     expected_schema: codex-diff-impact-v1
     required_fields: [decision, blockers, impact_areas]
+    evidence_fields: [impact_areas, changed_files]
     phase: post_implementation_evidence
     depends_on: [implementation]
     input_artifacts: [implementation_completion_gate.json]
@@ -331,6 +447,11 @@ stages:
     artifact: change_risk.json
     expected_schema: codex-change-risk-v1
     required_fields: [decision, blockers, risk_level]
+    evidence_fields: [risk_level, signals]
+    field_constraints:
+      risk_level:
+        type: string
+        enum: [low, medium, high, critical]
     phase: post_implementation_evidence
     depends_on: [diff_impact]
     input_artifacts: [diff_impact.json, delivery_plan.json]
@@ -341,6 +462,7 @@ stages:
     artifact: evidence_gap_summary.json
     expected_schema: codex-evidence-gap-summary-v1
     required_fields: [decision, missing_evidence]
+    evidence_fields: [required_evidence, found_evidence, command_logs]
     phase: post_implementation_evidence
     depends_on: [post_change, change_risk]
     input_artifacts: [implementation_completion_gate.json, post_change_implementation_report.json, diff_impact.json, change_risk.json]
@@ -351,6 +473,7 @@ stages:
     artifact: code_design_quality.json
     expected_schema: codex-code-design-quality-review-v1
     required_fields: [decision, blockers, findings]
+    evidence_fields: [changed_files, findings]
     phase: post_implementation_evidence
     depends_on: [diff_impact]
     input_artifacts: [implementation_completion_gate.json, diff_impact.json]
@@ -361,6 +484,7 @@ stages:
     artifact: frontend_acceptance.json
     expected_schema: codex-frontend-acceptance-v1
     required_fields: [decision, blockers]
+    evidence_fields: [evidence_summary]
     phase: post_implementation_evidence
     depends_on: [implementation, diff_impact]
     input_artifacts: [implementation_completion_gate.json, diff_impact.json]
@@ -371,6 +495,11 @@ stages:
     artifact: test_evidence_gate.json
     expected_schema: codex-test-evidence-gate-v1
     required_fields: [decision, blockers, evidence_summary]
+    evidence_fields: [evidence_summary]
+    field_constraints:
+      evidence_summary:
+        type: object
+        non_empty: true
     phase: post_implementation_evidence
     depends_on: [implementation, frontend_acceptance]
     input_artifacts: [test_design.json, test_data_plan.json, implementation_completion_gate.json, frontend_acceptance.json, test_execution_evidence.json, ci_execution_evidence.json]
@@ -380,6 +509,7 @@ stages:
     artifact: post_implementation_traceability_matrix.json
     expected_schema: codex-traceability-matrix-v1
     required_fields: [decision, blockers]
+    evidence_fields: [coverage, acceptance_trace, task_trace]
     phase: post_implementation_evidence
     depends_on: [post_change, diff_impact, test]
     input_artifacts: [spec.json, delivery_plan.json, implementation_completion_gate.json, diff_impact.json, test_evidence_gate.json]
@@ -390,6 +520,11 @@ stages:
     artifact: code_review_gate.json
     expected_schema: codex-code-review-gate-v1
     required_fields: [decision, active_blockers, active_concerns, missing_evidence]
+    evidence_fields: [evidence_summary]
+    field_constraints:
+      evidence_summary:
+        type: object
+        non_empty: true
     phase: post_implementation_evidence
     depends_on: [write_guard_audit, evidence_collection, code_design_quality, test, post_implementation_traceability]
     input_artifacts: [implementation_completion_gate.json, write_guard_audit.json, evidence_gap_summary.json, code_design_quality.json, frontend_acceptance.json, test_evidence_gate.json, test_execution_evidence.json, ci_execution_evidence.json]
@@ -399,6 +534,11 @@ stages:
     artifact: environment_promotion.json
     expected_schema: codex-environment-promotion-v1
     required_fields: [decision, blockers, environments]
+    evidence_fields: [environments]
+    field_constraints:
+      environments:
+        type: array
+        min_items: 1
     phase: release_readiness
     depends_on: [review]
     input_artifacts: [code_review_gate.json, test_evidence_gate.json, change_risk.json]
@@ -408,6 +548,7 @@ stages:
     artifact: uat_acceptance.json
     expected_schema: codex-uat-acceptance-v1
     required_fields: [decision, blockers]
+    evidence_fields: [scope, cases, signoff]
     phase: release_readiness
     depends_on: [environment]
     input_artifacts: [environment_promotion.json, test_evidence_gate.json]
@@ -417,6 +558,7 @@ stages:
     artifact: release_change.json
     expected_schema: codex-release-change-v1
     required_fields: [decision, blockers, rollback_plan]
+    evidence_fields: [rollback_plan, release_window, approvers]
     phase: release_readiness
     depends_on: [uat]
     input_artifacts: [change_risk.json, environment_promotion.json, uat_acceptance.json]
@@ -426,6 +568,7 @@ stages:
     artifact: release_gate.json
     expected_schema: codex-release-gate-v1
     required_fields: [decision, blockers, evidence_summary, rollback_plan, post_release_checks]
+    evidence_fields: [evidence_summary, rollback_plan, post_release_checks]
     phase: release_readiness
     depends_on: [release_change]
     input_artifacts: [design_architecture_review.json, implementation_completion_gate.json, write_guard_audit.json, evidence_gap_summary.json, code_review_gate.json, test_evidence_gate.json, environment_promotion.json, uat_acceptance.json, release_change.json]
@@ -435,6 +578,7 @@ stages:
     artifact: post_release_observation.json
     expected_schema: codex-post-release-observation-v1
     required_fields: [decision, blockers]
+    evidence_fields: [metrics, logs_checked, business_checks, observation_window]
     phase: post_release
     depends_on: [release]
     input_artifacts: [release_gate.json, release_change.json]

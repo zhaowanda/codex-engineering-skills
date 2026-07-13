@@ -223,7 +223,7 @@ Every skill declares `category`, `maturity`, `stage`, and `gate` in `SKILL.md` f
 - `skills/core/observability-design-governor`: designs logs, metrics, traces, alerts, dashboards, MQ/task/cache signals, and post-release validation.
 - `skills/core/cross-repo-planner`: generates a cross-repository execution graph, readiness gate, and release plan for multi-repo requirements with provider/consumer dependencies.
 - `skills/core/delivery-plan-reviewer`: reviews delivery plans for executable task depth, narrow file scope, evidence mapping, rollback controls, and unresolved gates before Git or edit readiness.
-- `skills/core/delivery-runner`: canonical v3 workflow authority that validates artifact schemas, decisions, dependencies, lineage, current stage, and whether implementation/release is allowed.
+- `skills/core/delivery-runner`: canonical v3 workflow authority that validates artifact schemas, semantic evidence constraints, decisions, dependencies, lineage v2 provenance, current stage, and whether implementation/release is allowed.
 - `skills/core/test-design-governor`: generates and validates test design before implementation, including acceptance mapping, regression, integration, permission, and frontend scope.
 - `skills/core/test-data-governor`: generates and validates `test_data_plan.json` so test cases have synthetic/anonymized fixtures, accounts, roles, cleanup, and privacy controls before execution.
 - `skills/core/configuration-governor`: detects and gates runtime configuration readiness for database, MQ, email, SMS, payment, callbacks, secrets, certificates, and feature flags.

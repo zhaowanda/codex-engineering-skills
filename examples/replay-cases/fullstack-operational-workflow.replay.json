@@ -2,6 +2,7 @@
   "schema": "codex-delivery-replay-skeleton-v1",
   "case_id": "REPLAY-FULLSTACK-WORKFLOW-001",
   "anonymized": true,
+  "source_type": "synthetic",
   "scenario": "fullstack_operational_workflow",
   "source": "artifact_summaries_only",
   "artifacts": [

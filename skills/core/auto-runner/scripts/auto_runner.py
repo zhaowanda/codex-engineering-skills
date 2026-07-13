@@ -6,6 +6,7 @@ import importlib.util
 import json
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -303,14 +304,28 @@ def load_profile_registry(path: Path = PROFILE_REGISTRY) -> dict[str, dict[str, 
 
 
 def run_command(name: str, args: list[str]) -> dict[str, Any]:
+    started = time.monotonic()
     proc = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
     return {
         "name": name,
         "command": args,
         "returncode": proc.returncode,
         "passed": proc.returncode == 0,
+        "duration_ms": round((time.monotonic() - started) * 1000, 2),
         "stdout_tail": proc.stdout[-2000:],
         "stderr_tail": proc.stderr[-2000:],
+    }
+
+
+def workflow_metrics(steps: list[dict[str, Any]], generated: list[str], skipped: list[str], profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "governance_level": str(profile.get("governance_level") or "standard"),
+        "executed_step_count": sum(1 for step in steps if not step.get("skipped")),
+        "skipped_step_count": sum(1 for step in steps if step.get("skipped")),
+        "generated_artifact_count": len(set(generated)),
+        "reused_artifact_count": len(set(skipped)),
+        "total_command_duration_ms": round(sum(float(step.get("duration_ms") or 0) for step in steps), 2),
+        "target_artifact_reduction_percent": int(profile.get("target_artifact_reduction_percent") or 0),
     }
 
 
@@ -341,7 +356,7 @@ def run_if_needed(name: str, output: Path, command: list[str], force: bool, gene
     result = run_command(name, command)
     steps.append(result | {"output": str(output)})
     if output.exists():
-        WORKFLOW_CONTRACT.bind_lineage(output, name, inputs)
+        WORKFLOW_CONTRACT.bind_lineage(output, name, inputs, command=command, workspace=ROOT)
         generated.append(output.name)
 
 
@@ -749,7 +764,7 @@ def run_registry_artifact_steps(
             result["passed"] = True
         steps.append(result | {"output": str(target)})
         if target.exists():
-            WORKFLOW_CONTRACT.bind_lineage(target, name, inputs)
+            WORKFLOW_CONTRACT.bind_lineage(target, name, inputs, command=command, workspace=ROOT)
             generated.append(target.name)
     return True
 
@@ -1275,6 +1290,7 @@ def run(
             "generated_artifacts": sorted(set(generated)),
             "skipped_artifacts": skipped,
             "steps": steps,
+            "workflow_metrics": workflow_metrics(steps, generated, skipped, selected_profile),
             "workflow_profile": selected_profile,
             "profile_selection_reason": profile_selection_reason,
             "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
@@ -1601,6 +1617,8 @@ def run(
         out / "docs_quality.json",
         "docs_quality",
         workflow_stage_inputs(out / "docs_quality.json"),
+        command=["docs_quality", str(effective_docs_root or "")],
+        workspace=ROOT,
     )
     generated.append("docs_quality.json")
 
@@ -1652,6 +1670,7 @@ def run(
         "generated_artifacts": sorted(set(generated)),
         "skipped_artifacts": skipped,
         "steps": steps,
+        "workflow_metrics": workflow_metrics(steps, generated, skipped, selected_profile),
         "workflow_profile": selected_profile,
         "profile_selection_reason": profile_selection_reason,
         "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
