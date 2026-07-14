@@ -160,7 +160,7 @@ def infer_artifact_doc_language(artifact_dir: Path, requested: str = "auto", cur
     return current
 
 
-def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifact_dir: Path, doc_language: str = "en") -> dict[str, Any]:
+def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifact_dir: Path, doc_language: str = "en", human_section: str = "all") -> dict[str, Any]:
     if not docs_root:
         return {"decision": "skipped", "reason": "docs_root is not configured"}
     if not docs_root.exists():
@@ -169,7 +169,7 @@ def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifac
     if proc.returncode != 0 or proc.stdout.strip() != "true":
         return {"decision": "skipped", "reason": "docs_root is not a git repository"}
     try:
-        return load_docs_governor_module().sync(docs_root, doc_id, artifact_dir, title, doc_language=doc_language)
+        return load_docs_governor_module().sync(docs_root, doc_id, artifact_dir, title, doc_language=doc_language, human_section=human_section)
     except Exception as exc:
         return {"decision": "block", "reason": str(exc), "blockers": [{"source": "docs_sync", "message": str(exc)}]}
 
@@ -306,11 +306,20 @@ def load_profile_registry(path: Path = PROFILE_REGISTRY) -> dict[str, dict[str, 
 def run_command(name: str, args: list[str]) -> dict[str, Any]:
     started = time.monotonic()
     proc = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
+    payload: dict[str, Any] = {}
+    try:
+        parsed = json.loads(proc.stdout)
+        payload = parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        payload = {}
+    decision = str(payload.get("decision") or payload.get("status") or "")
+    passed = proc.returncode == 0 and decision not in {"block", "blocked", "error", "failed"}
     return {
         "name": name,
         "command": args,
         "returncode": proc.returncode,
-        "passed": proc.returncode == 0,
+        "passed": passed,
+        "decision": decision,
         "duration_ms": round((time.monotonic() - started) * 1000, 2),
         "stdout_tail": proc.stdout[-2000:],
         "stderr_tail": proc.stderr[-2000:],
@@ -366,6 +375,9 @@ def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any]
         if step.get("skipped"):
             continue
         if step.get("name") == "inspect":
+            continue
+        if str(step.get("decision") or "") in {"block", "blocked", "error", "failed"}:
+            blockers.append({"source": step.get("name"), "message": f"step decision is {step.get('decision')}", "returncode": step.get("returncode")})
             continue
         if step.get("output") and Path(str(step["output"])).exists():
             continue
@@ -432,7 +444,7 @@ def profile_selection_confidence(candidates: list[dict[str, Any]]) -> str:
 
 def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidence: str = "") -> dict[str, Any]:
     lane = str(spec.get("lane") or "")
-    impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
+    impacts = required_impacts(spec)
     profile_name = str(profile.get("name") or "")
     regulated_impacts = {"data", "database", "security", "permission", "tenant", "payment", "performance", "configuration", "release"}
     standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo", "mq", "async", "scheduler", "task", "job", "cache", "integration"}
@@ -568,10 +580,25 @@ def impact_overlay_profile_names(impacts: set[str], has_repo: bool) -> list[str]
     return names
 
 
+def applicability_decisions(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    declared = as_list(spec.get("impact_applicability"))
+    if declared:
+        return [item for item in declared if isinstance(item, dict) and item.get("area")]
+    return [
+        {"area": str(item.get("area")), "status": "required", "reason": "legacy spec impact surface"}
+        for item in as_list(spec.get("impact_surface"))
+        if isinstance(item, dict) and item.get("area")
+    ]
+
+
+def required_impacts(spec: dict[str, Any]) -> set[str]:
+    return {str(item["area"]) for item in applicability_decisions(spec) if item.get("status") == "required"}
+
+
 def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = False, explicit_profile: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     profiles = load_profile_registry()
     lane = str(spec.get("lane") or "")
-    impacts = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
+    impacts = required_impacts(spec)
     candidates = sorted(
         (profile_score(profile, lane, impacts, has_repo, explicit_profile) for profile in profiles.values()),
         key=lambda item: int(item.get("score") or 0),
@@ -655,6 +682,7 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
         base_profile=str(base_profile.get("name") or ""),
         overlay_profiles=overlay_names,
         composition_mode=selected.get("composition_mode", "single"),
+        applicability=applicability_decisions(spec),
     )
     if overlay_names:
         base_name = str(base_profile.get("name") or "")
@@ -1280,6 +1308,8 @@ def run(
         blockers.extend(strictness_gaps)
         missing_profile = missing_profile_artifacts(effective_profile, out)
         gate_gaps = profile_gate_gaps(effective_profile, out)
+        blockers.extend({"source": "profile_artifact", "message": f"missing required artifact {name}"} for name in missing_profile)
+        blockers.extend({"source": "profile_gate", **item} for item in gate_gaps)
         summary = {
             "schema": SCHEMA,
             "decision": "block" if blockers else "pass",
@@ -1337,6 +1367,8 @@ def run(
         skipped,
         steps,
     )
+    if (out / "requirement_ir.json").exists():
+        generated.append("requirement_ir.json")
 
     if repo and project:
         project_out = out / "project_understanding"
@@ -1377,12 +1409,16 @@ def run(
                 str(normalized),
                 "--out",
                 str(project_out / "source_location_evidence.json"),
+                "--bundle-out",
+                str(project_out / "evidence_bundle.json"),
             ],
             force,
             generated,
             skipped,
             steps,
         )
+        if (project_out / "evidence_bundle.json").exists():
+            generated.append("evidence_bundle.json")
 
     spec = out / "spec.json"
     spec_command = [
@@ -1400,6 +1436,8 @@ def run(
     ]
     if project_out:
         spec_command.extend(["--project-understanding", str(project_out)])
+    if (out / "requirement_ir.json").exists():
+        spec_command.extend(["--requirement-ir", str(out / "requirement_ir.json")])
     run_if_needed(
         "spec",
         spec,
@@ -1413,6 +1451,53 @@ def run(
     selected_profile, profile_selection_reason = select_workflow_profile_with_reason(spec_data, bool(repo and project), profile)
 
     questions = run_requirement_questions(selected_profile, out, spec, force, generated, skipped, steps)
+
+    if spec_data.get("decision") == "blocked" or spec_data.get("design_allowed") is False:
+        strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+        effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
+        docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language, human_section="spec")
+        if docs_sync.get("decision") == "pass":
+            docs_status = docs_readiness(effective_docs_root, doc_id)
+        blockers = collect_blockers(steps, {}, include_inspect=False)
+        blockers.extend(
+            item for item in as_list((spec_data.get("requirements_understanding") or {}).get("blockers"))
+            if isinstance(item, dict)
+        )
+        if not blockers:
+            blockers.append({"source": "spec", "message": "spec blocks downstream design"})
+        summary = {
+            "schema": SCHEMA,
+            "decision": "block",
+            "stage_result": {"decision": "block", "can_continue": False, "exit_code": 2, "blockers": blockers},
+            "doc_id": doc_id,
+            "title": title,
+            "input": str(input_path),
+            "out_dir": str(out),
+            "generated_artifacts": sorted(set(generated)),
+            "skipped_artifacts": skipped,
+            "steps": steps,
+            "workflow_metrics": workflow_metrics(steps, generated, skipped, selected_profile),
+            "workflow_profile": selected_profile,
+            "profile_selection_reason": profile_selection_reason,
+            "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
+            "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
+            "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
+            "impact_applicability": applicability_decisions(spec_data),
+            "workflow_strictness": strictness,
+            "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
+            "required_gates": selected_profile.get("required_skills", []),
+            "docs_readiness": docs_status,
+            "docs_sync": docs_sync,
+            "doc_language": effective_doc_language,
+            "blockers": blockers,
+            "next_stage": "requirements_clarification",
+            "next_command": f"Resolve required questions in {questions}",
+            "can_implement": False,
+            "can_release": False,
+            "safety_boundary": "requirements_and_questions_only",
+        }
+        write_json(out / "auto_run_summary.json", summary)
+        return summary
 
     run_pre_technical_design_steps(selected_profile, out, spec, project_out, force, generated, skipped, steps)
 
@@ -1497,6 +1582,29 @@ def run(
         )
         run_pre_review_planning_steps(selected_profile, out, spec, delivery_plan_draft, force, generated, skipped, steps)
 
+    test_design = out / "test_design.json"
+    run_if_needed(
+        "test_design",
+        test_design,
+        [
+            "python3",
+            "skills/core/test-design-governor/scripts/test_design.py",
+            "render",
+            "--spec",
+            str(spec),
+            "--technical-design",
+            str(technical),
+            "--architecture-design",
+            str(architecture),
+            "--out",
+            str(test_design),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
+
     design_review = out / "design_architecture_review.json"
     design_review_command = [
         "python3",
@@ -1519,6 +1627,7 @@ def run(
         ("--data-security-review", "data_security_review.json"),
         ("--performance-review", "performance_review.json"),
         ("--cross-repo-readiness", "cross_repo_readiness.json"),
+        ("--test-design", "test_design.json"),
     ]:
         artifact = out / artifact_name
         if artifact.exists():
@@ -1527,29 +1636,6 @@ def run(
         "design_review",
         design_review,
         design_review_command,
-        force,
-        generated,
-        skipped,
-        steps,
-    )
-
-    test_design = out / "test_design.json"
-    run_if_needed(
-        "test_design",
-        test_design,
-        [
-            "python3",
-            "skills/core/test-design-governor/scripts/test_design.py",
-            "render",
-            "--spec",
-            str(spec),
-            "--technical-design",
-            str(technical),
-            "--architecture-design",
-            str(architecture),
-            "--out",
-            str(test_design),
-        ],
         force,
         generated,
         skipped,
@@ -1633,6 +1719,22 @@ def run(
     )
     run_profile_artifact_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
+    harness_output = out / "harness_validation.json"
+    harness_result = run_command(
+        "harness_validation",
+        [
+            "python3",
+            "skills/core/auto-runner/scripts/harness_validation.py",
+            "--artifact-dir",
+            str(out),
+            "--out",
+            str(harness_output),
+        ],
+    )
+    steps.append(harness_result | {"output": str(harness_output)})
+    if harness_output.exists():
+        generated.append(harness_output.name)
+
     effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
     docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
     if docs_sync.get("decision") == "pass":
@@ -1685,9 +1787,14 @@ def run(
     blockers.extend(strictness_gaps)
     missing_profile = missing_profile_artifacts(effective_profile, out)
     gate_gaps = profile_gate_gaps(effective_profile, out)
+    blockers.extend(readiness_blockers)
+    blockers.extend({"source": "profile_artifact", "message": f"missing required artifact {name}"} for name in missing_profile)
+    blockers.extend({"source": "profile_gate", **item} for item in gate_gaps)
+    decision = "block" if blockers or not bool(inspect_status.get("can_implement")) else "pass"
     summary = {
         "schema": SCHEMA,
-        "decision": "block" if blockers else "pass",
+        "decision": decision,
+        "stage_result": {"decision": decision, "can_continue": decision == "pass", "exit_code": 0 if decision == "pass" else 2, "blockers": blockers},
         "doc_id": doc_id,
         "title": title,
         "input": str(input_path),
@@ -1752,7 +1859,9 @@ def main() -> int:
         doc_language=args.doc_language,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    if result.get("decision") == "pass":
+        return 0
+    return 3 if result.get("decision") == "error" else 2
 
 
 if __name__ == "__main__":

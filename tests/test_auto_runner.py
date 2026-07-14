@@ -15,6 +15,12 @@ auto_runner = importlib.util.module_from_spec(spec)
 assert spec.loader
 spec.loader.exec_module(auto_runner)
 
+HARNESS_SCRIPT = ROOT / "skills/core/auto-runner/scripts/harness_validation.py"
+harness_spec = importlib.util.spec_from_file_location("harness_validation", HARNESS_SCRIPT)
+harness_validation = importlib.util.module_from_spec(harness_spec)
+assert harness_spec.loader
+harness_spec.loader.exec_module(harness_validation)
+
 
 def write_workspace_docs_config(docs_root: Path) -> str | None:
     config_file = ROOT / ".codex-engineering-docs.json"
@@ -74,6 +80,33 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert result["docs_readiness"]["decision"] == "block"
         assert result["next_stage"]
         assert result["can_implement"] is False
+
+
+def test_harness_validation_blocks_reference_only_edit_target() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project = root / "project_understanding"
+        project.mkdir(parents=True)
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "schema": "codex-evidence-bundle-v1",
+            "anchors": [
+                {"path": "src/main.vue", "role": "confirmed_modify"},
+                {"path": "src/reference.vue", "role": "confirmed_reference"},
+            ],
+        }), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({"allowed_files": ["src/reference.vue"]}), encoding="utf-8")
+        result = harness_validation.validate(root)
+        assert result["decision"] == "block"
+        assert any(item["source"] == "evidence_consistency" for item in result["blockers"])
+
+
+def test_harness_validation_blocks_oversized_artifact() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "spec.json").write_text(json.dumps({"value": "x" * 500}), encoding="utf-8")
+        result = harness_validation.validate(root, {"spec.json": 100})
+        assert result["decision"] == "block"
+        assert result["artifact_sizes"][0]["within_budget"] is False
 
 
 def test_auto_runner_accepts_ready_docs_repo() -> None:
@@ -255,6 +288,23 @@ def test_auto_runner_auto_detects_chinese_doc_request() -> None:
         assert "## 四、需求澄清" in (docs_root / "human/specs/REQ-AUTO-ZH-HINT.md").read_text(encoding="utf-8")
 
 
+def test_auto_runner_blocked_spec_does_not_rewrite_design_doc() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text("优化播放体验。", encoding="utf-8")
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir()
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        docs_governor = auto_runner.load_docs_governor_module()
+        docs_governor.init(docs_root, "REQ-SPEC-ONLY", title="播放优化", doc_language="zh")
+        design_path = docs_root / "human/designs/REQ-SPEC-ONLY.md"
+        design_path.write_text("# existing design\n", encoding="utf-8")
+        result = auto_runner.run(req, doc_id="REQ-SPEC-ONLY", out=root / "artifacts", docs_root=docs_root, doc_language="zh")
+        assert result["decision"] == "block"
+        assert design_path.read_text(encoding="utf-8") == "# existing design\n"
+
+
 def test_auto_runner_defaults_to_auto_doc_language_detection() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -325,11 +375,12 @@ def test_auto_runner_regenerates_transitive_artifacts_when_requirement_changes()
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         requirement = root / "requirement.md"
-        requirement.write_text("Goal: show status. AC: status is visible.\n", encoding="utf-8")
+        original = (ROOT / "examples/synthetic-e2e-case/requirement.md").read_text(encoding="utf-8")
+        requirement.write_text(original, encoding="utf-8")
         out = root / "artifacts"
         auto_runner.run(requirement, doc_id="REQ-LINEAGE", out=out, profile="small_feature")
         before = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))["input_digests"]["spec.json"]
-        requirement.write_text("Goal: show status and owner. AC: status and owner are visible.\n", encoding="utf-8")
+        requirement.write_text(original.replace("order id and status", "order id, status, and owner"), encoding="utf-8")
         second = auto_runner.run(requirement, doc_id="REQ-LINEAGE", out=out, profile="small_feature")
         after = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))["input_digests"]["spec.json"]
         assert before != after
@@ -356,12 +407,9 @@ def test_auto_runner_project_understanding_optional() -> None:
             out=out,
         )
         assert (out / "project_understanding/baseline_quality.json").exists()
-        technical = (out / "technical_design.json").read_text(encoding="utf-8")
-        architecture = (out / "architecture_design.json").read_text(encoding="utf-8")
-        plan = (out / "delivery_plan.json").read_text(encoding="utf-8")
-        assert "basic-web-service" in technical
-        assert "basic-web-service" in architecture
-        assert "examples/synthetic-repos/basic-web-service" in plan
+        assert (out / "project_understanding/evidence_bundle.json").exists()
+        assert result["decision"] == "block"
+        assert not (out / "technical_design.json").exists()
         assert any(step["name"] == "project_understanding" for step in result["steps"])
 
 
@@ -477,6 +525,9 @@ def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
         req = root / "complex.md"
         req.write_text(
             """
+            Business purpose: reduce manual payment failure investigation time.
+            Flow: admin opens the payment failure page and clicks export; the system calls the payment failure API, reads migrated retry-count data, generates the file, and returns it for review.
+            Entry: payment failure admin page.
             Req: Add an API endpoint and admin page for payment export failures.
             Req: Add a database migration for retry count.
             Rule: only admin role can access payment failure data.
@@ -601,7 +652,7 @@ def test_cross_repo_readiness_is_aggregated_by_final_design_review() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         req = root / "api.md"
-        req.write_text("Req: Add API contract. AC: existing consumer remains compatible.", encoding="utf-8")
+        req.write_text("Business purpose: prevent consumer outages during contract evolution.\nFlow: consumer sends its existing request to the provider endpoint; the provider validates it, returns the compatible response, and the consumer completes its workflow unchanged.\nEntry: provider API endpoint.\nRepo: provider owns the endpoint.\nRepo: consumer uses the endpoint.\nDependency: consumer -> provider API.\nReq: Add API contract.\nAC: existing consumer remains compatible.", encoding="utf-8")
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-CROSS-REVIEW", out=out, profile="cross_repo_api")
         step_names = [item.get("name") for item in result["steps"]]
@@ -629,7 +680,7 @@ def test_auto_runner_generates_specialty_design_before_technical_design() -> Non
         step_names = [step.get("name") for step in result["steps"]]
         assert step_names.index("domain_model_design") < step_names.index("architecture_framing") < step_names.index("technical_design")
         assert step_names.index("ui_ue_design") < step_names.index("technical_design")
-        assert step_names.index("design_review") < step_names.index("test_design")
+        assert step_names.index("test_design") < step_names.index("design_review")
         assert step_names.index("delivery_plan") < step_names.index("initial_traceability") < step_names.index("delivery_plan_review")
         assert step_names.index("frontend_implementation_plan") > step_names.index("technical_design")
         assert result["steps"][step_names.index("initial_traceability")]["traceability_phase"] == "initial_design_plan"
@@ -708,7 +759,8 @@ def test_codex_eng_auto_cli_runs() -> None:
             text=True,
             capture_output=True,
         )
-        assert proc.returncode == 0
+        assert proc.returncode == 2
+        assert json.loads(proc.stdout)["decision"] == "block"
         assert (out / "auto_run_summary.json").exists()
 
 
@@ -733,8 +785,9 @@ def test_codex_eng_auto_human_output_runs() -> None:
             text=True,
             capture_output=True,
         )
-        assert proc.returncode == 0
+        assert proc.returncode == 2
         assert "Codex auto summary" in proc.stdout
+        assert "decision: block" in proc.stdout
         assert "next_command" in proc.stdout
         assert (out / "auto_run_summary.json").exists()
 

@@ -40,6 +40,42 @@ def test_requirement_ingestor_normalizes_markdown() -> None:
         assert (root / "artifacts/requirement.normalized.txt").exists()
 
 
+def test_requirement_ir_preserves_acceptance_hierarchy_and_excludes_correction() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text(
+            "# Playback\n\n## 纠偏说明\n\n- legacy/page.vue 不作为实现入口\n\n"
+            "## 本次目标\n\n- keep playback stable after seeking\n\n"
+            "## 验收标准\n\n1. Seek\n   - send one control request\n   - rebuild the player after success\n",
+            encoding="utf-8",
+        )
+        ingest_requirement.ingest(req, "REQ-IR", root / "artifacts")
+        ir = json.loads((root / "artifacts/requirement_ir.json").read_text(encoding="utf-8"))
+        acceptance = next(item for item in ir["sections"] if item["kind"] == "acceptance")
+        assert acceptance["items"][0]["text"] == "Seek"
+        assert [item["text"] for item in acceptance["items"][0]["children"]] == ["send one control request", "rebuild the player after success"]
+        assert "legacy/page.vue" not in ir["executable_text"]
+
+
+def test_spec_consumes_requirement_ir_without_heading_only_acceptance() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text(
+            "# Playback\n\n## 原始需求\n\nBusiness purpose: reduce playback interruptions.\n"
+            "Flow: operator opens playback, seeks, and resumes the stream.\nEntry: playback dialog.\n\n"
+            "## 本次目标\n\n- keep playback stable after seeking\n\n"
+            "## 验收标准\n\n1. Seek\n   - send one control request\n   - rebuild the player after success\n",
+            encoding="utf-8",
+        )
+        ingest_requirement.ingest(req, "REQ-IR-SPEC", root / "artifacts")
+        ir = json.loads((root / "artifacts/requirement_ir.json").read_text(encoding="utf-8"))
+        spec = spec_governor.normalize("REQ-IR-SPEC", "Playback", req.read_text(encoding="utf-8"), requirement_ir=ir)
+        assert len(spec["acceptance_criteria"]) == 1
+        assert spec["acceptance_criteria"][0]["criteria"] == "Seek；send one control request；rebuild the player after success"
+
+
 def test_requirement_ingestor_blocks_pdf_without_text() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -364,6 +400,30 @@ def test_real_project_replay_requires_privacy_review_and_ground_truth() -> None:
         assert {item["source"] for item in result["blockers"]} >= {"privacy_review", "ground_truth"}
 
 
+def test_real_project_replay_accepts_false_match_as_boolean_ground_truth() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "real-mismatch.replay.json"
+        write_json(path, {
+            "schema": "codex-delivery-replay-skeleton-v1",
+            "case_id": "REAL-MISMATCH",
+            "anonymized": True,
+            "source_type": "anonymized_real_project",
+            "scenario": "frontend_change",
+            "source": "artifact_summaries_only",
+            "artifacts": [
+                {"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+                {"artifact": "delivery_plan.json", "schema": "codex-delivery-plan-v1", "decision": "block", "blocker_count": 1, "warning_count": 0},
+            ],
+            "replay_steps": [{"step": "spec", "expected_artifact": "spec.json"}],
+            "privacy_review": {"decision": "approved", "reviewer": "reviewer", "reviewed_at": "2026-07-14"},
+            "ground_truth": {"expert_decision": "pass", "framework_decision": "block", "risk_level": "medium", "match": False},
+            "privacy_note": "Reviewed anonymized summaries only.",
+        })
+        result = capture_case.validate_replay_case(path)
+        assert result["valid"] is True
+        assert result["ground_truth_match"] is False
+
+
 def run_all() -> None:
     test_requirement_ingestor_normalizes_markdown()
     test_requirement_ingestor_blocks_pdf_without_text()
@@ -383,6 +443,7 @@ def run_all() -> None:
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
     test_real_project_replay_requires_privacy_review_and_ground_truth()
+    test_real_project_replay_accepts_false_match_as_boolean_ground_truth()
 
 
 if __name__ == "__main__":

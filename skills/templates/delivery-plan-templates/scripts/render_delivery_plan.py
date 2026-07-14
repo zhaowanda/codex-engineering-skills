@@ -70,6 +70,14 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
     if not base.exists():
         return {}
     result: dict[str, Any] = {}
+    bundle_file = base / "evidence_bundle.json"
+    if bundle_file.exists():
+        result["evidence_bundle"] = read_json(str(bundle_file))
+        for name in ["repository_analysis", "dependency_surface"]:
+            file = base / f"{name}.json"
+            if file.exists():
+                result[name] = read_json(str(file))
+        return result
     for name in ["repository_analysis", "dependency_surface", "code_index", "baseline"]:
         file = base / f"{name}.json"
         if file.exists():
@@ -78,14 +86,19 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
 
 
 def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
+    bundle = project_understanding.get("evidence_bundle", {})
     repo = project_understanding.get("repository_analysis", {})
     deps = project_understanding.get("dependency_surface", {})
     index = project_understanding.get("code_index", {})
     baseline = project_understanding.get("baseline", {})
-    project = str(repo.get("project") or baseline.get("project") or "target-repo")
-    repo_path = str(index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
+    project = str(bundle.get("project") or repo.get("project") or baseline.get("project") or "target-repo")
+    repo_path = str(bundle.get("repo_root") or index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
     files = [str(item.get("path")) for item in as_list(index.get("files")) if isinstance(item, dict) and item.get("path")]
     entrypoints = [str(item) for item in as_list(repo.get("entrypoint_hints"))]
+    if bundle:
+        anchors = [item for item in as_list(bundle.get("confirmed_anchors")) if isinstance(item, dict) and item.get("path")]
+        files = [str(item["path"]) for item in anchors]
+        entrypoints = [str(item["path"]) for item in anchors if item.get("role") != "reference_only"]
     tests = [str(item) for item in as_list(deps.get("test_command_hints"))] or [str(item) for item in as_list(repo.get("test_hints"))]
     return {"project": project, "repo_path": repo_path, "files": files, "entrypoints": entrypoints, "tests": tests}
 

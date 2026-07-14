@@ -326,6 +326,11 @@ def review(path: Path, strict: bool = False) -> dict:
             warnings.append({"source": area, "message": f"{area} release-readiness content not found"})
     if "diagram" in required_sources and "```mermaid" not in lower and not any(phrase in text for phrase in ["无法生成", "cannot be generated"]):
         warnings.append({"source": "diagram", "message": "diagram or explicit no-diagram explanation not found"})
+    if doc_type == "design":
+        if not re.search(r"```mermaid\s+flowchart\b", text, flags=re.I):
+            warnings.append({"source": "business_process_diagram", "message": "design document must include a Mermaid business process flowchart"})
+        if not re.search(r"```mermaid\s+sequenceDiagram\b", text, flags=re.I):
+            warnings.append({"source": "system_sequence_diagram", "message": "design document must include a Mermaid system sequence diagram"})
     if not re.search(r"`[^`]+\.json`", text):
         warnings.append({"source": "evidence_refs", "message": "machine artifact JSON evidence references not found"})
     if any(phrase in lower for phrase in GENERIC_PHRASES):
@@ -426,6 +431,8 @@ def review(path: Path, strict: bool = False) -> dict:
     strict_blockers = []
     if strict:
         strict_sources = required_sources | {"length", "evidence_refs", "placeholder_density", "bullet_depth", "zh_language_quality", "unresolved_without_context", "unresolved_density"}
+        if doc_type == "design":
+            strict_sources |= {"business_process_diagram", "system_sequence_diagram"}
         strict_blockers.extend(
             {"source": item.get("source", "warning"), "message": item.get("message", "strict warning promoted to blocker")}
             for item in warnings

@@ -132,6 +132,7 @@ def write_preimplementation_happy_evidence(out_dir: Path) -> None:
         "data_security_review.json",
         "performance_review.json",
         "cross_repo_readiness.json",
+        "test_design.json",
     ]:
         path = out_dir / artifact
         if path.exists():
@@ -285,10 +286,10 @@ def run(out_dir: Path) -> dict[str, Any]:
     happy_req.write_text(
         "Goal: reduce buyer support tickets caused by an unclear completed-order confirmation message by 20 percent.\n"
         "Metric: completed-order confirmation support tickets decrease by 20 percent.\n"
-        "Flow: buyer submits an order, the order completes, and the confirmation message is shown.\n"
-        "Route: /orders/complete.\n"
-        "Entrypoint: buyer submits the checkout form.\n"
-        "Requirement: replace the confirmation phrase with Order received.\n"
+        "Flow: buyer submits an order through the create_order API and receives the completed-order confirmation.\n"
+        "Route: POST /orders.\n"
+        "Entrypoint: buyer submits the checkout form through create_order.\n"
+        "Requirement: update create_order so a completed POST /orders response includes Order received.\n"
         "Rule: keep existing order processing unchanged.\n"
         "Acceptance: a completed order shows Order received.\n",
         encoding="utf-8",
@@ -330,6 +331,7 @@ def run(out_dir: Path) -> dict[str, Any]:
             "--docs-root",
             str(happy_docs),
         ],
+        allow_fail=True,
     )
     steps.append(happy_step)
     resolve_required_questions(happy_dir)
@@ -355,6 +357,7 @@ def run(out_dir: Path) -> dict[str, Any]:
             str(happy_docs),
             "--force",
         ],
+        allow_fail=True,
     )
     steps.append(happy_resolved_step)
     write_preimplementation_happy_evidence(happy_dir)
@@ -448,8 +451,10 @@ def run(out_dir: Path) -> dict[str, Any]:
     happy_case = {
         "case": "happy_path_case",
         "passed": (
-            happy_step.get("returncode") == 0
-            and happy_resolved_step.get("returncode") == 0
+            happy_step.get("returncode") == 2
+            and happy_step.get("decision") == "block"
+            and happy_resolved_step.get("returncode") == 2
+            and happy_resolved_step.get("decision") == "block"
             and happy_ready_step.get("returncode") == 0
             and (happy_dir / "open_questions.json").exists()
             and json.loads((happy_dir / "open_questions.json").read_text(encoding="utf-8")).get("decision") == "pass"

@@ -38,6 +38,26 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def test_spec_preserves_long_prefixed_field_values() -> None:
+    result = spec_governor.normalize(
+        "REQ-PREFIX",
+        "Order confirmation",
+        "\n".join([
+            "Goal: reduce buyer support tickets by 20 percent.",
+            "Metric: support tickets decrease by 20 percent.",
+            "Flow: buyer submits an order and receives a confirmation.",
+            "Entrypoint: buyer calls create_order through POST /orders.",
+            "Requirement: create_order returns Order received.",
+            "Acceptance: a completed order shows Order received.",
+        ]),
+    )
+
+    assert result["requirements"][0]["summary"] == "create_order returns Order received."
+    assert result["acceptance_criteria"][0]["criteria"] == "a completed order shows Order received."
+    explicit_entry = next(item for item in result["entrypoints"] if item["type"] == "explicit")
+    assert explicit_entry["trigger"] == "buyer calls create_order through POST /orders."
+
+
 def write_bound_questions(root: Path) -> None:
     spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
     write_json(root / "open_questions.json", {
@@ -385,6 +405,7 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
         ]},
         "source_location_evidence": {
             "decision": "pass",
+            "confirmed_contracts": ["/operate/api/dualCamera/playbackStreamControl"],
             "confirmed_anchors": [
                 {"path": "src/views/plugIn/accidentAnalysis.vue", "confidence": "high", "evidence_chain": [{"term": "playbackStreamControl"}]},
                 {"path": "src/components/DualCameraLivePlayer.vue", "confidence": "high", "evidence_chain": [{"term": "DualCameraLivePlayer"}]},
@@ -397,6 +418,9 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
     assert tech["code_entrypoint_confidence"]["level"] == "high"
     assert tech["source_location_evidence"]["decision"] == "pass"
     assert {item["module"] for item in tech["module_decomposition"]} == {"src/views/plugIn/accidentAnalysis.vue", "src/components/DualCameraLivePlayer.vue"}
+    assert tech["api_contracts"][0]["contract"] == "/operate/api/dualCamera/playbackStreamControl"
+    assert {item["to"] for item in tech["system_interaction_sequence"]["sequence"]} >= {"/operate/api/dualCamera/playbackStreamControl", "src/components/DualCameraLivePlayer.vue"}
+    assert len(tech["process_flow"][0]["steps"]) >= 2
 
 
 def test_design_options_are_generated_from_impact_surface() -> None:
@@ -837,6 +861,33 @@ def test_delivery_runner_propagates_spec_staleness() -> None:
         status = delivery_runner.inspect(root, profile_name="small_feature")
         assert status["can_implement"] is False
         assert any(item["source"] in {"domain_model_design", "technical_design"} and "stale" in item["message"] for item in status["blockers"])
+
+
+def test_requirement_questions_can_depend_on_blocked_spec_draft_without_unlocking_design() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        spec = json.loads((root / "spec.json").read_text(encoding="utf-8"))
+        spec["decision"] = "blocked"
+        write_json(root / "spec.json", spec)
+        questions = json.loads((root / "open_questions.json").read_text(encoding="utf-8"))
+        questions["spec_digest"] = delivery_runner.canonical_artifact_digest(spec)
+        delivery_runner.CONTRACT.bind_lineage(
+            root / "open_questions.json",
+            "test-fixture",
+            [root / "spec.json"],
+            command=["test-fixture", "open_questions"],
+        )
+
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+
+        assert status["can_implement"] is False
+        assert any(item["source"] == "spec" for item in status["blockers"])
+        assert not any(
+            item["source"] == "requirement_questions" and item.get("missing_dependencies") == ["spec"]
+            for item in status["blockers"]
+        )
 
 
 def test_delivery_runner_rejects_placeholder_release_chain() -> None:

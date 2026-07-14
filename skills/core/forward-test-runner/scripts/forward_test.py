@@ -2,14 +2,76 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import subprocess
 import tempfile
 from pathlib import Path
 
 
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def requirement_shape_results(root: Path) -> dict[str, object]:
+    governor = load_module("forward_spec_governor", root / "skills/core/spec-governor/scripts/spec_governor.py")
+    one_line = governor.normalize("REQ-FWD-ONE", "Order confirmation", "Optimize order confirmation.")
+    long_prd = governor.normalize(
+        "REQ-FWD-PRD",
+        "Order confirmation",
+        "\n".join([
+            "Goal: reduce buyer support tickets by 20 percent.",
+            "Metric: support tickets decrease by 20 percent.",
+            "Flow: buyer submits an order and receives a confirmation.",
+            "Entrypoint: buyer submits the checkout form.",
+            "Requirement: completed orders show Order received.",
+            "Acceptance: a completed order shows Order received.",
+        ]),
+    )
+    vague_bugfix = governor.normalize("REQ-FWD-BUG-BLOCK", "Order bug", "Fix the order confirmation bug.")
+    resolved_bugfix = governor.normalize(
+        "REQ-FWD-BUG-READY",
+        "Order bug correction",
+        "\n".join([
+            "Defect: completed orders show an empty confirmation message.",
+            "Goal: reduce buyer tickets caused by an empty order confirmation by 20 percent.",
+            "Metric: order-confirmation tickets decrease by 20 percent.",
+            "Current: completed orders show an empty confirmation message.",
+            "Flow: buyer submits an order and receives the completed-order confirmation.",
+            "Entrypoint: buyer submits the checkout form.",
+            "Observed: the confirmation message is empty.",
+            "Expected: the confirmation message shows Order received.",
+            "Reproduction: submit a valid order and wait for completion.",
+            "Requirement: completed orders show Order received.",
+            "Acceptance: after a valid order completes, the confirmation shows Order received.",
+        ]),
+    )
+    return {
+        "one_line_request": one_line.get("decision") == "blocked" and one_line.get("design_allowed") is False,
+        "long_prd": long_prd.get("decision") == "ready_for_design" and long_prd.get("design_allowed") is True,
+        "bugfix": (
+            vague_bugfix.get("decision") == "blocked"
+            and vague_bugfix.get("design_allowed") is False
+            and resolved_bugfix.get("decision") == "ready_for_design"
+            and resolved_bugfix.get("design_allowed") is True
+            and resolved_bugfix.get("lane") == "bugfix"
+        ),
+        "details": {
+            "one_line_decision": one_line.get("decision"),
+            "long_prd_decision": long_prd.get("decision"),
+            "vague_bugfix_decision": vague_bugfix.get("decision"),
+            "resolved_bugfix_decision": resolved_bugfix.get("decision"),
+        },
+    }
+
+
 def run(root: Path) -> dict:
     cases = []
+    requirement_shapes = requirement_shape_results(root)
     with tempfile.TemporaryDirectory() as tmp:
         proc = subprocess.run(
             ["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", tmp],
@@ -35,14 +97,14 @@ def run(root: Path) -> dict:
         ]
         case_results = {name: bool(case_map.get(name, {}).get("passed")) for name in required_cases}
         scenario_results = {
-            "one_line_request": proc.returncode == 0 and data.get("decision") == "pass",
-            "long_prd": proc.returncode == 0 and data.get("decision") == "pass",
-            "bugfix": proc.returncode == 0 and data.get("decision") == "pass",
+            "one_line_request": bool(requirement_shapes["one_line_request"]),
+            "long_prd": bool(requirement_shapes["long_prd"]),
+            "bugfix": bool(requirement_shapes["bugfix"]),
             "frontend_change": case_results["frontend_happy_path"],
             "cross_repo_api": case_results["happy_path_case"],
             "data_migration": case_results["data_migration_blocked_path"],
             "release_readiness": case_results["release_readiness_blocked_path"] and case_results["release_readiness_happy_path"] and case_results["release_followup_chain_path"],
-            "code_review": proc.returncode == 0 and data.get("decision") == "pass",
+            "code_review": case_results["release_followup_chain_path"],
         }
         cases.append({
             "case": "synthetic-e2e",
@@ -51,6 +113,7 @@ def run(root: Path) -> dict:
             "decision": data.get("decision"),
             "case_results": case_results,
             "scenario_results": scenario_results,
+            "requirement_shape_results": requirement_shapes,
             "blocked_case_passed": case_results["blocked_case"],
             "happy_path_case_passed": case_results["happy_path_case"],
             "frontend_happy_path_passed": case_results["frontend_happy_path"],

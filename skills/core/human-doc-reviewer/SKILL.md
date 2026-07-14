@@ -23,6 +23,7 @@ human-readable artifact draft
 
 - Check for clear scope, decisions, option comparison, risks, evidence references, rollback notes, and unresolved questions.
 - Check formal document substance: background, goals, clarification, decisions, acceptance, tests, diagrams or explicit diagram gaps, release/rollback readiness, and machine evidence references.
+- For design documents, check business process flowcharts and system sequence diagrams independently; strict review blocks when either Mermaid diagram type is missing.
 - For Chinese documents, warn when common English template headings remain.
 - Block local absolute paths, private markers, secrets, customer identifiers, or proprietary hostnames.
 - Warn on thin documents that are readable but lack enough decision context.

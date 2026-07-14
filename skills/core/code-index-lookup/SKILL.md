@@ -47,7 +47,8 @@ python3 scripts/source_location_evidence.py \
   --repo /path/to/repo \
   --index overlay/indexes/web-app.index.json \
   --requirement artifacts/requirement.normalized.txt \
-  --out artifacts/project_understanding/source_location_evidence.json
+  --out artifacts/project_understanding/source_location_evidence.json \
+  --bundle-out artifacts/project_understanding/evidence_bundle.json
 ```
 
 ## Output
@@ -60,4 +61,4 @@ Decision values:
 - `warn`: the index is valid but matches are weak or incomplete; continue with direct source inspection.
 - `block`: the index is missing, unreadable, stale, schema-mismatched, or from a different project.
 
-The artifact reports query text, ranked matches, match reasons, lookup limitations, warnings, blockers, and the final decision.
+`source_location_evidence.json` retains diagnostic detail. `evidence_bundle.json` (`codex-evidence-bundle-v1`) is the bounded downstream contract containing confirmed modify anchors, confirmed reference anchors, contracts, and a limited rejected set.

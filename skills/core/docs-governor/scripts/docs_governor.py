@@ -1813,7 +1813,16 @@ def render_system_sequence_mermaid(
     sequence = technical.get("system_interaction_sequence") if isinstance(technical.get("system_interaction_sequence"), dict) else {}
     if sequence.get("applicable") is not True:
         reason = text(sequence.get("not_applicable_reason") or sequence.get("reason"), "未涉及多系统交互" if language == "zh" else "no multi-system interaction")
-        return f"- {reason}"
+        owner = human_value((as_list(technical.get("module_decomposition")) or [{}])[0].get("module") if isinstance((as_list(technical.get("module_decomposition")) or [{}])[0], dict) else "", language, "责任模块" if language == "zh" else "Owner module")
+        return "\n".join([
+            f"- {reason}",
+            "",
+            "```mermaid",
+            "sequenceDiagram",
+            f"  participant M as {mermaid_flow_label(owner, language, 48)}",
+            f"  Note over M: {mermaid_flow_label(reason, language, 96)}",
+            "```",
+        ])
     participant_names = [human_value(item, language, "") for item in as_list(sequence.get("participants")) if human_value(item, language, "")]
     steps: list[dict[str, str]] = []
     for item in as_list(sequence.get("sequence")):
@@ -4021,6 +4030,39 @@ def render_runtime_process_flows(runtime_evidence: dict[str, Any], language: str
 
 def render_runtime_process_mermaid(runtime_evidence: dict[str, Any], language: str = "en") -> str:
     runtime_evidence = runtime_evidence if isinstance(runtime_evidence, dict) else {}
+    process_graph = runtime_evidence.get("process_graph") if isinstance(runtime_evidence.get("process_graph"), dict) else {}
+    graph_nodes = [item for item in as_list(process_graph.get("nodes")) if isinstance(item, dict) and item.get("id") and item.get("label")]
+    graph_edges = [item for item in as_list(process_graph.get("edges")) if isinstance(item, dict) and item.get("from") and item.get("to")]
+    if graph_nodes and graph_edges:
+        lines = [
+            "```mermaid",
+            "flowchart TD",
+            "  classDef actor fill:#eff6ff,stroke:#2563eb,color:#172554,stroke-width:1px;",
+            "  classDef api fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1px;",
+            "  classDef frontend fill:#ecfdf5,stroke:#16a34a,color:#14532d,stroke-width:1px;",
+            "  classDef decision fill:#fefce8,stroke:#ca8a04,color:#713f12,stroke-width:1px;",
+            "  classDef cleanup fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1px;",
+        ]
+        aliases: dict[str, str] = {}
+        for index, node in enumerate(graph_nodes, start=1):
+            raw_id = text(node.get("id"), f"N{index}")
+            alias = f"N{index}"
+            aliases[raw_id] = alias
+            label = mermaid_flow_label(human_value(node.get("label"), language, raw_id), language, 88)
+            kind = text(node.get("kind"), "frontend")
+            css_class = kind if kind in {"actor", "api", "frontend", "decision", "cleanup"} else "frontend"
+            shape = f'{{"{label}"}}' if kind == "decision" else f'["{label}"]'
+            lines.append(f"  {alias}{shape}:::{css_class}")
+        for edge in graph_edges:
+            source = aliases.get(text(edge.get("from"), ""))
+            target = aliases.get(text(edge.get("to"), ""))
+            if not source or not target:
+                continue
+            label = mermaid_flow_label(human_value(edge.get("label"), language, ""), language, 44)
+            connector = "-.->" if text(edge.get("style"), "") == "dashed" else "-->"
+            lines.append(f"  {source} {connector}{'|' + label + '|' if label else ''} {target}")
+        lines.append("```")
+        return "\n".join(lines)
     interactions = [item for item in as_list(runtime_evidence.get("interactions")) if isinstance(item, dict)]
     if not interactions:
         return ""
@@ -4589,6 +4631,8 @@ def inherit_expert_supplemental_artifacts(docs_root: Path, doc_id: str, artifact
             continue
         if filename == "runtime_sequence_evidence.json" and not as_list(payload.get("interactions")):
             continue
+        if filename == "runtime_sequence_evidence.json" and not runtime_evidence_matches_current_anchors(payload, artifact_dir):
+            continue
         shutil.copy2(source, target)
         inherited.append({
             "artifact": filename,
@@ -4597,6 +4641,47 @@ def inherit_expert_supplemental_artifacts(docs_root: Path, doc_id: str, artifact
             "reason": "preserve source-backed expert runtime evidence during artifact rerun",
         })
     return inherited
+
+
+def current_confirmed_modify_paths(artifact_dir: Path) -> set[str]:
+    candidates = [
+        read_json(project_understanding_path(artifact_dir, "evidence_bundle.json")),
+        read_json(project_understanding_path(artifact_dir, "source_location_evidence.json")),
+        read_json(artifact_dir / "evidence_bundle.json"),
+        read_json(artifact_dir / "source_location_evidence.json"),
+    ]
+    result: set[str] = set()
+    for payload in candidates:
+        for item in as_list(payload.get("anchors")) + as_list(payload.get("confirmed_anchors")):
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            role = text(item.get("role"), "")
+            if role in {"confirmed_modify", "modify_candidate", "modify"}:
+                result.add(text(item.get("path"), "").replace("\\", "/").lstrip("./"))
+    return result
+
+
+def runtime_evidence_source_paths(payload: dict[str, Any]) -> set[str]:
+    paths: set[str] = set()
+    candidates = [payload.get("entrypoint"), payload.get("frontend")]
+    candidates.extend(item.get("entrypoint") for item in as_list(payload.get("interactions")) if isinstance(item, dict))
+    candidates.extend(as_list(payload.get("entrypoints")))
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        for key in ["source_file", "file", "path"]:
+            value = text(item.get(key), "").replace("\\", "/").lstrip("./")
+            if value:
+                paths.add(value)
+    return paths
+
+
+def runtime_evidence_matches_current_anchors(payload: dict[str, Any], artifact_dir: Path) -> bool:
+    confirmed = current_confirmed_modify_paths(artifact_dir)
+    if not confirmed:
+        return True
+    evidence_paths = runtime_evidence_source_paths(payload)
+    return bool(evidence_paths & confirmed)
 
 
 def first_text(*values: Any) -> str:
@@ -5028,7 +5113,10 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
 def ensure_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -> dict[str, Any]:
     target = artifact_dir / "runtime_sequence_evidence.json"
     if target.exists():
-        return {"generated": False, "path": str(target), "reason": "already exists"}
+        payload = read_json(target)
+        if runtime_evidence_matches_current_anchors(payload, artifact_dir):
+            return {"generated": False, "path": str(target), "reason": "already exists and matches current confirmed anchors"}
+        target.unlink()
     evidence, warnings = synthesize_runtime_sequence_evidence(artifact_dir, doc_id)
     if evidence.get("interactions"):
         write_json(target, evidence)
@@ -5037,19 +5125,12 @@ def ensure_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -> di
 
 
 def extract_manual_preface_sections(markdown: str) -> str:
-    lines = markdown.splitlines()
-    if not lines or not lines[0].startswith("# "):
-        return ""
-    start = 1
-    end = len(lines)
-    for index, line in enumerate(lines[1:], start=1):
-        if re.match(r"^##\s+(一、摘要|摘要|Executive Summary)\b", line):
-            end = index
-            break
-    segment = "\n".join(lines[start:end]).strip()
-    if not segment or not re.search(r"(?m)^##\s+", segment):
-        return ""
-    return segment
+    match = re.search(
+        r"<!--\s*codex:manual-preface:start\s*-->(.*?)<!--\s*codex:manual-preface:end\s*-->",
+        markdown,
+        flags=re.S | re.I,
+    )
+    return match.group(1).strip() if match else ""
 
 
 def merge_manual_preface_sections(existing_markdown: str, generated_markdown: str) -> str:
@@ -5498,8 +5579,9 @@ def sync(
     language = normalize_doc_language(doc_language)
     human_section = human_section if human_section in {"all", "spec", "design", "test", "release"} else "all"
     manifest = init(docs_root, doc_id, git_url=git_url, title=title, doc_language=language) if human_section == "all" else sync_manifest_without_rewrite(docs_root, doc_id, title, language)
-    inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir)
-    generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id)
+    design_sync = human_section in {"all", "design"}
+    inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir) if design_sync else []
+    generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id) if design_sync else {"generated": False, "reason": "runtime evidence is not needed for this human section"}
     sanitized_artifacts = [] if human_section != "all" else sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
     human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
     human_targets = {

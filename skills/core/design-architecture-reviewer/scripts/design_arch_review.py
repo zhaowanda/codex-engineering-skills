@@ -181,6 +181,7 @@ def review_specialty_artifacts(specialty_artifacts: dict[str, dict[str, Any]], f
         "data_security_review.json": "security_review",
         "performance_review.json": "performance_review",
         "cross_repo_readiness.json": "cross_repo_contract_review",
+        "test_design.json": "testability_review",
     }
     summary: list[dict[str, Any]] = []
     blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "needs_review", "needs_evidence", "no_go"}
@@ -657,7 +658,12 @@ def review(
             findings.append(finding("technical_design_quality", "high", "requirement-specific source location evidence did not pass", source_locations, "Inspect source and confirm at least one requirement-specific entrypoint before design."))
         if selected_entrypoint and selected_entrypoint not in confirmed_paths:
             findings.append(finding("technical_design_quality", "high", "selected entrypoint is not a confirmed source anchor", selected_entrypoint, "Select an entrypoint from source_location_evidence.confirmed_anchors."))
-        design_text = text_of([technical.get("module_decomposition"), architecture.get("module_topology"), technical.get("selected_solution"), architecture.get("selected_architecture")])
+        design_text = text_of([
+            technical.get("problem_analysis"), technical.get("current_state_analysis"), technical.get("process_flow"),
+            technical.get("module_decomposition"), technical.get("logical_data_flow"), technical.get("api_contracts"),
+            technical.get("system_interaction_sequence"), architecture.get("current_architecture"), architecture.get("module_topology"),
+            architecture.get("integration_sequence"), technical.get("selected_solution"), architecture.get("selected_architecture"),
+        ])
         leaked_rejected = sorted(path for path in rejected_paths if path and path.lower() in design_text)
         if leaked_rejected:
             findings.append(finding("technical_design_quality", "high", "rejected source candidates leaked into implementation-facing design", leaked_rejected, "Remove rejected paths from modules, selected options, rollback, and delivery scope."))
@@ -686,6 +692,9 @@ def review(
         findings.append(finding("technical_design_quality", "high", "business rule mapping lacks enforcement or source of truth", business_rules, "Each rule needs technical_enforcement and source_of_truth."))
 
     review_process_flow(process_flow, findings)
+    process_step_count = sum(len(as_list(item.get("steps"))) for item in process_flow if isinstance(item, dict))
+    if len(as_list(technical.get("acceptance_mapping"))) >= 2 and process_step_count < 2:
+        findings.append(finding("technical_design_quality", "high", "business process flow is too shallow for the mapped acceptance scope", {"process_steps": process_step_count, "acceptance_mappings": len(as_list(technical.get("acceptance_mapping")))}, "Model the ordered trigger, business actions, downstream effects, success state, and failure branches before implementation."))
     review_module_decomposition(modules, findings)
     for idx, item in enumerate(modules):
         if isinstance(item, dict) and item.get("module") and not looks_like_path(str(item.get("module"))):
@@ -1001,6 +1010,7 @@ def main() -> int:
     p_review.add_argument("--data-security-review")
     p_review.add_argument("--performance-review")
     p_review.add_argument("--cross-repo-readiness")
+    p_review.add_argument("--test-design")
     p_review.add_argument("--out")
     p_validate = sub.add_parser("validate")
     p_validate.add_argument("--file", required=True)
@@ -1016,6 +1026,7 @@ def main() -> int:
             "data_security_review.json": args.data_security_review,
             "performance_review.json": args.performance_review,
             "cross_repo_readiness.json": args.cross_repo_readiness,
+            "test_design.json": args.test_design,
         }
         result = review(
             read_json(args.technical_design),

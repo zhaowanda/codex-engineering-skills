@@ -60,6 +60,8 @@ stages:
         type: array
     phase: requirement
     depends_on: [spec]
+    dependency_decisions:
+      spec: [blocked, ready_for_design, pass]
     input_artifacts: [spec.json]
     conditional_skill: requirement-question-governor
     implementation_required: true
@@ -236,6 +238,21 @@ stages:
     conditional_skill: cross-repo-planner
     implementation_required: true
     accepted_decisions: [pass, ready]
+  - name: test_design
+    artifact: test_design.json
+    expected_schema: codex-test-design-v1
+    required_fields: [decision, test_cases, evidence_required]
+    evidence_fields: [test_cases]
+    field_constraints:
+      test_cases:
+        type: array
+        min_items: 1
+    phase: pre_implementation_design
+    depends_on: [architecture_design, frontend_implementation_plan, configuration_design_review, data_security_design_review, performance_design_review, cross_repo_plan]
+    input_artifacts: [spec.json, technical_design.json, architecture_design.json, ui_ue_review.json, api_contract_design.json, data_model_design.json, observability_design.json, configuration_readiness.json, data_security_review.json, performance_review.json, cross_repo_readiness.json]
+    implementation_required: true
+    accepted_decisions: [pass]
+    next_command: python3 skills/core/test-design-governor/scripts/test_design.py render --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/test_design.json
   - name: design_review
     artifact: design_architecture_review.json
     expected_schema: codex-design-architecture-review-v1
@@ -249,25 +266,10 @@ stages:
         type: boolean
         const: true
     phase: pre_implementation_design
-    depends_on: [architecture_design, frontend_implementation_plan, configuration_design_review, data_security_design_review, performance_design_review, cross_repo_plan]
-    input_artifacts: [technical_design.json, architecture_design.json, ui_ue_review.json, api_contract_design.json, data_model_design.json, observability_design.json, configuration_readiness.json, data_security_review.json, performance_review.json, cross_repo_readiness.json]
+    depends_on: [test_design]
+    input_artifacts: [technical_design.json, architecture_design.json, test_design.json, ui_ue_review.json, api_contract_design.json, data_model_design.json, observability_design.json, configuration_readiness.json, data_security_review.json, performance_review.json, cross_repo_readiness.json]
     implementation_required: true
     accepted_decisions: [pass, approved]
-  - name: test_design
-    artifact: test_design.json
-    expected_schema: codex-test-design-v1
-    required_fields: [decision, test_cases, evidence_required]
-    evidence_fields: [test_cases]
-    field_constraints:
-      test_cases:
-        type: array
-        min_items: 1
-    phase: pre_implementation_design
-    depends_on: [design_review]
-    input_artifacts: [spec.json, technical_design.json, architecture_design.json, design_architecture_review.json]
-    implementation_required: true
-    accepted_decisions: [pass]
-    next_command: python3 skills/core/test-design-governor/scripts/test_design.py render --spec artifacts/REQ-001/spec.json --technical-design artifacts/REQ-001/technical_design.json --architecture-design artifacts/REQ-001/architecture_design.json --out artifacts/REQ-001/test_design.json
   - name: test_data_plan
     artifact: test_data_plan.json
     expected_schema: codex-test-data-plan-v1
@@ -281,8 +283,8 @@ stages:
         type: array
         min_items: 1
     phase: pre_implementation_design
-    depends_on: [test_design]
-    input_artifacts: [test_design.json]
+    depends_on: [test_design, design_review]
+    input_artifacts: [test_design.json, design_architecture_review.json]
     implementation_required: true
     accepted_decisions: [pass]
   - name: delivery_plan

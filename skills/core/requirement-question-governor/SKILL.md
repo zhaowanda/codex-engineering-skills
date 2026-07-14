@@ -9,6 +9,8 @@ gate: true
 
 # Requirement Question Governor
 
+`open_questions.json` may be generated from a blocked `spec.json` draft so the workflow can explain and resolve requirement gaps. This dependency exception permits question generation only: downstream design remains blocked until the requirement source or project evidence is updated and `spec.json` is regenerated with an accepted decision. Closing a question must never override source-location, schema, permission, security, or other evidence gates by itself.
+
 Use this skill after ingestion/spec normalization and before design.
 
 ## Command

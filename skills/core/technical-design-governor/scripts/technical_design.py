@@ -754,6 +754,14 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
     if not base.exists():
         return {}
     result: dict[str, Any] = {}
+    bundle_file = base / "evidence_bundle.json"
+    if bundle_file.exists():
+        result["evidence_bundle"] = load_json(bundle_file)
+        for name in ["repository_analysis", "dependency_surface"]:
+            file = base / f"{name}.json"
+            if file.exists():
+                result[name] = load_json(file)
+        return result
     for name in ["repository_analysis", "api_surface", "config_surface", "dependency_surface", "code_index", "source_location_evidence", "baseline", "baseline_quality"]:
         file = base / f"{name}.json"
         if file.exists():
@@ -762,15 +770,16 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
 
 
 def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
+    bundle = project_understanding.get("evidence_bundle", {})
     repo = project_understanding.get("repository_analysis", {})
     api = project_understanding.get("api_surface", {})
     config = project_understanding.get("config_surface", {})
     deps = project_understanding.get("dependency_surface", {})
     index = project_understanding.get("code_index", {})
     baseline = project_understanding.get("baseline", {})
-    source_locations = project_understanding.get("source_location_evidence", {})
-    project = str(repo.get("project") or api.get("project") or baseline.get("project") or "target-repo")
-    repo_root = str(index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
+    source_locations = bundle or project_understanding.get("source_location_evidence", {})
+    project = str(bundle.get("project") or repo.get("project") or api.get("project") or baseline.get("project") or "target-repo")
+    repo_root = str(bundle.get("repo_root") or index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
     entrypoints = [str(item) for item in as_list(repo.get("entrypoint_hints"))]
     modules = [str(item.get("module")) for item in as_list(baseline.get("module_hints")) if isinstance(item, dict) and item.get("module")]
     if not modules:
@@ -779,6 +788,13 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
     file_items = [item for item in as_list(index.get("files")) if isinstance(item, dict) and item.get("path")]
     files = [str(item.get("path")) for item in file_items]
     routes = [item for item in as_list(api.get("routes")) if isinstance(item, dict)]
+    if bundle:
+        anchors = [item for item in as_list(bundle.get("confirmed_anchors")) if isinstance(item, dict) and item.get("path")]
+        file_items = [{"path": item["path"]} for item in anchors]
+        files = [str(item["path"]) for item in anchors]
+        entrypoints = [str(item["path"]) for item in anchors if item.get("role") != "reference_only"]
+        modules = sorted({str(Path(item).parent) for item in files})
+        routes = [{"method": "", "route": str(contract), "file": "evidence_bundle.json"} for contract in as_list(bundle.get("contracts"))]
     config_items = [item for item in as_list(config.get("config_items")) if isinstance(item, dict)]
     raw_test_hints = [str(item) for item in as_list(deps.get("test_command_hints"))] or [str(item) for item in as_list(repo.get("test_hints"))]
     test_hints = [item for item in raw_test_hints if is_executable_test_hint(item)]
@@ -863,19 +879,22 @@ def render_table_schema_changes(data_model: dict[str, Any]) -> list[dict[str, An
     return rows
 
 
-def render_system_interaction_sequence(signals: dict[str, bool], route_refs: list[str], owner_file: str, summary: str) -> dict[str, Any]:
+def render_system_interaction_sequence(signals: dict[str, bool], route_refs: list[str], owner_file: str, summary: str, confirmed_modules: list[str] | None = None) -> dict[str, Any]:
     applicable = bool(signals.get("system"))
-    participants = ["User/Client", owner_file]
-    if route_refs:
-        participants.append(route_refs[0])
+    confirmed_modules = confirmed_modules or []
+    participants = ["User/Client", owner_file, *[item for item in confirmed_modules if item != owner_file]]
+    participants.extend(item for item in route_refs if item not in participants)
+    sequence = [{"step": 1, "from": "User/Client", "to": owner_file, "mode": "sync", "action": summary, "success": "页面接受操作", "failure": "保留输入并展示错误"}]
+    for contract in route_refs:
+        sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": contract, "mode": "sync", "action": f"调用或复用已确认契约 {contract}", "success": "契约返回兼容结果", "failure": "超时/错误时保持可观测并返回错误"})
+    for module in confirmed_modules:
+        if module != owner_file:
+            sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": module, "mode": "sync", "action": "更新直接参与需求的共享模块", "success": "共享模块完成状态或行为更新", "failure": "清理局部状态并保留可恢复路径"})
     return {
         "applicable": applicable,
         "reason": "需求涉及接口/跨模块调用或已识别业务路由。" if applicable else "未识别到跨系统或接口调用影响。",
         "participants": participants if applicable else [],
-        "sequence": [
-            {"step": 1, "from": "User/Client", "to": owner_file, "mode": "sync", "action": summary, "success": "返回新业务结果", "failure": "保留既有错误处理"},
-            {"step": 2, "from": owner_file, "to": route_refs[0] if route_refs else "existing contract", "mode": "sync", "action": "调用或复用既有契约", "success": "契约兼容", "failure": "超时/错误时保持可观测并降级或返回错误"},
-        ] if applicable else [],
+        "sequence": sequence if applicable else [],
         "timeout_retry": "同步调用需确认超时、重试次数和用户可见错误；异步调用需确认补偿任务。",
         "idempotency": "写操作、多系统调用或重试路径必须绑定业务幂等键。",
         "consistency": "默认避免分布式事务；跨系统写入使用最终一致性、补偿或对账。",
@@ -883,6 +902,49 @@ def render_system_interaction_sequence(signals: dict[str, bool], route_refs: lis
         "evidence_required": ["integration evidence", "timeout/retry evidence"] if applicable else [],
         "open_questions": ["确认真实上下游系统、调用方向和超时策略。"] if applicable else [],
     }
+
+
+def render_process_flow(spec: dict[str, Any], breakdown: list[dict[str, Any]], actors: list[str], summary: str) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def append(actor: str, action: str, input_value: str, output: str, exception: str) -> None:
+        clean = action.strip()
+        if not clean or clean.lower() in seen:
+            return
+        seen.add(clean.lower())
+        steps.append({"step": len(steps) + 1, "actor": actor, "action": clean, "input": input_value, "output": output, "exception": exception})
+
+    for item in as_list(spec.get("business_flow")):
+        if not isinstance(item, dict):
+            continue
+        structured = item.get("structured_step") if isinstance(item.get("structured_step"), dict) else {}
+        append(
+            str(item.get("actor") or structured.get("actor") or actors[0]),
+            str(item.get("system_behavior") or (as_list(structured.get("system_actions")) or [""])[0]),
+            str(item.get("trigger") or structured.get("entrypoint") or "business trigger"),
+            str(item.get("expected_outcome") or structured.get("result") or "observable result"),
+            "validation, permission, or dependency failure follows the documented exception path",
+        )
+    for item in as_list(spec.get("acceptance_criteria")):
+        if not isinstance(item, dict):
+            continue
+        criterion = str(item.get("criteria") or item.get("summary") or "").strip()
+        if criterion and criterion != summary:
+            append("System", criterion, "previous flow state", criterion, "failed assertion keeps the flow incomplete")
+        if len(steps) >= 10:
+            break
+    if not steps:
+        for item in breakdown[:8]:
+            append(actors[0], str(item.get("behavior_change") or item.get("summary") or summary), "user request/context", "observable business result", "existing validation or dependency failure")
+    return [{
+        "flow_name": summary,
+        "actors": actors,
+        "steps": steps,
+        "success_end_state": "All mapped acceptance criteria pass.",
+        "failure_end_states": ["Validation or permission failure", "Dependency unavailable", "Acceptance evidence missing"],
+        "requirement_breakdown_ids": [str(item.get("id")) for item in breakdown if item.get("id")],
+    }]
 
 
 def render_mq_interactions(signals: dict[str, bool], owner_file: str, summary: str) -> list[dict[str, Any]]:
@@ -989,7 +1051,9 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         key=lambda item: route_relevance_score(item, route_subject),
         reverse=True,
     )
-    route_refs = [route_ref(item) for item in business_routes[:5]]
+    location_evidence = ctx.get("source_location_evidence") if isinstance(ctx.get("source_location_evidence"), dict) else {}
+    confirmed_contracts = [str(item) for item in as_list(location_evidence.get("confirmed_contracts")) if item]
+    route_refs = confirmed_contracts or [route_ref(item) for item in business_routes[:5]]
     config_refs = [str(item.get("path")) for item in ctx["config_items"][:5]]
     test_evidence = [f"{cmd} evidence" for cmd in ctx["test_hints"][:3]] or ["test evidence"]
     impact_areas = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
@@ -1041,6 +1105,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     technical_options, comparison_matrix, score_summary, selected_solution = build_technical_options(spec, summary, owner_file, breakdown, route_refs, test_evidence, problem)
     signals = impact_signals(spec, breakdown, route_refs)
     data_model_design = render_data_model_design(signals, spec, breakdown, owner_file)
+    process_flow = render_process_flow(spec, breakdown, actors, summary)
     module_decomposition = [{
         "module": owner_file,
         "responsibility": str(item.get("summary") or summary),
@@ -1101,14 +1166,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             {"requirement_id": req_id, "technical_enforcement": str(rule.get("rule")), "source_of_truth": "spec.business_rules"}
             for rule in as_list(spec.get("business_rules")) if isinstance(rule, dict)
         ] or [{"requirement_id": req_id, "technical_enforcement": "Implement behavior described by normalized spec.", "source_of_truth": "spec.requirements"}],
-        "process_flow": [{
-            "flow_name": str(item.get("summary") or title or summary),
-            "actors": actors,
-            "steps": [{"step": 1, "actor": actors[0], "action": str(item.get("behavior_change") or item.get("summary")), "input": "user request/context", "output": "达到该子需求的预期业务结果", "exception": "show existing error handling or validation failure"}],
-            "success_end_state": "Acceptance criteria pass.",
-            "failure_end_states": ["Validation failure", "Dependency unavailable"],
-            "requirement_breakdown_id": item.get("id"),
-        } for item in breakdown],
+        "process_flow": process_flow,
         "module_decomposition": module_decomposition,
         "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": str(item.get("summary") or summary), "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
@@ -1119,7 +1177,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "data_design": [{"read_rule": f"{item.get('id')}: read through {owner_file}", "write_rule": f"{item.get('id')}: write through {owner_file} only if this slice changes state", "migration": "none unless this slice changes schema/data backfill", "field_impact": item.get("field_impact"), "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "data_model_design": data_model_design,
         "table_schema_changes": render_table_schema_changes(data_model_design),
-        "system_interaction_sequence": render_system_interaction_sequence(signals, route_refs, owner_file, summary),
+        "system_interaction_sequence": render_system_interaction_sequence(signals, route_refs, owner_file, summary, [str(item) for item in as_list(entrypoint_confidence.get("confirmed_anchors"))]),
         "mq_interactions": render_mq_interactions(signals, owner_file, summary),
         "cache_strategy": render_cache_strategy(signals, spec),
         "transaction_consistency": render_transaction_consistency(signals, summary),

@@ -10,12 +10,15 @@ from typing import Any
 
 
 SCHEMA = "codex-source-location-evidence-v1"
+BUNDLE_SCHEMA = "codex-evidence-bundle-v1"
 GENERIC_TERMS = {
     "add", "change", "device", "feature", "fix", "page", "service", "update",
     "修改", "功能", "优化", "页面", "设备", "需求", "用户",
 }
 WEAK_EQUIVALENTS = {"设备": "device", "页面": "page", "服务": "service", "功能": "feature"}
 SOURCE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".vue", ".java", ".kt", ".go", ".rs", ".php", ".rb", ".cs"}
+HTTP_METHOD_ROUTE = re.compile(r"\b(?:GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+((?:/[A-Za-z0-9_{}.*-]+)+)", re.I)
+BACKTICK_ROUTE = re.compile(r"`((?:/[A-Za-z0-9_{}.*-]+)+)`")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -33,12 +36,21 @@ def requirement_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
+def requirement_contracts(text: str) -> list[str]:
+    contracts: list[str] = []
+    for contract in [*HTTP_METHOD_ROUTE.findall(text), *BACKTICK_ROUTE.findall(text)]:
+        if contract.lower().endswith(tuple(SOURCE_SUFFIXES)) or contract in contracts:
+            continue
+        contracts.append(contract)
+    return contracts
+
+
 def query_terms(text: str) -> list[str]:
     quoted = re.findall(r"[`'\"]([^`'\"]{3,120})[`'\"]", text)
     identifiers = re.findall(r"(?:/[A-Za-z0-9_{}.-]+){2,}|[A-Za-z_][A-Za-z0-9_]{3,}", text)
     chinese = re.findall(r"[\u4e00-\u9fff]{3,12}", text)
     terms: list[str] = []
-    for term in [*quoted, *identifiers, *chinese]:
+    for term in [*requirement_contracts(text), *quoted, *identifiers, *chinese]:
         clean = term.strip().lower()
         if clean.startswith("<") or clean in {"/>", ">"} or "=" in clean or not re.search(r"[a-z0-9\u4e00-\u9fff]", clean):
             continue
@@ -120,11 +132,15 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
         text = raw.decode("utf-8", errors="ignore")
         matched, evidence = source_matches(text, terms)
         strong = [term for term in matched if is_strong(term)]
+        matched_symbols = [term for term in strong if not term.startswith("/")]
         source_digests[relative] = digest_bytes(raw)
         if len(strong) >= 2 and len(matched) >= 2:
             confirmed.append({
                 **candidate,
                 "matched_requirement_terms": matched[:20],
+                "matched_contract_terms": [term for term in matched if term.startswith("/")],
+                "matched_symbols": matched_symbols[:12],
+                "symbol": matched_symbols[0] if matched_symbols else "",
                 "strong_terms": strong[:12],
                 "evidence_chain": evidence,
                 "source_digest": source_digests[relative],
@@ -139,6 +155,19 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
             })
     confirmed.sort(key=lambda item: (item["confidence"] == "high", len(item["matched_requirement_terms"]), item["index_score"]), reverse=True)
     modify_candidates = [item for item in confirmed if item.get("role") == "modify_candidate"]
+    matched_contract_terms = {
+        term.lower()
+        for item in confirmed
+        if item.get("role") == "modify_candidate"
+        for term in item.get("matched_contract_terms", [])
+        if term.startswith("/")
+    }
+    confirmed_contracts: list[str] = []
+    for contract in requirement_contracts(requirement):
+        if contract.lower() not in matched_contract_terms:
+            continue
+        if contract not in confirmed_contracts:
+            confirmed_contracts.append(contract)
     decision = "pass" if modify_candidates else "block"
     return {
         "schema": SCHEMA,
@@ -147,6 +176,7 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
         "query_terms": terms,
         "candidates": candidates,
         "confirmed_anchors": confirmed,
+        "confirmed_contracts": confirmed_contracts,
         "rejected_candidates": rejected,
         "decision": decision,
         "blockers": [] if modify_candidates else [{"source": "source_location_evidence", "message": "no requirement-specific modify candidate was confirmed"}],
@@ -159,18 +189,62 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
     }
 
 
+def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12, max_rejected: int = 12) -> dict[str, Any]:
+    anchors = [item for item in source_location.get("confirmed_anchors", []) if isinstance(item, dict)][:max_anchors]
+    normalized: list[dict[str, Any]] = []
+    for item in anchors:
+        role = "confirmed_reference" if item.get("role") == "reference_only" else "confirmed_modify"
+        normalized.append({
+            "path": item.get("path", ""),
+            "role": role,
+            "confidence": item.get("confidence", ""),
+            "symbol": item.get("symbol", ""),
+            "matched_contract_terms": item.get("matched_contract_terms", [])[:8],
+            "matched_symbols": item.get("matched_symbols", [])[:8],
+            "evidence_chain": item.get("evidence_chain", [])[:8],
+            "source_digest": item.get("source_digest", ""),
+            "index_score": item.get("index_score", 0),
+        })
+    rejected = [
+        {"path": item.get("path", ""), "reason": item.get("reason", "")}
+        for item in source_location.get("rejected_candidates", [])
+        if isinstance(item, dict) and item.get("path")
+    ][:max_rejected]
+    modify = [item for item in normalized if item["role"] == "confirmed_modify"]
+    return {
+        "schema": BUNDLE_SCHEMA,
+        "project": source_location.get("project", ""),
+        "repo_root": source_location.get("repo_root", ""),
+        "decision": "pass" if modify else "block",
+        "confirmed_anchors": [
+            {**item, "role": "reference_only" if item["role"] == "confirmed_reference" else "modify_candidate"}
+            for item in normalized
+        ],
+        "anchors": normalized,
+        "contracts": source_location.get("confirmed_contracts", [])[:12],
+        "rejected_candidates": rejected,
+        "budgets": {"max_anchors": max_anchors, "max_rejected": max_rejected},
+        "blockers": [] if modify else [{"source": "evidence_bundle", "message": "no confirmed modify anchor"}],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Confirm requirement-specific code locations against source")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--index", required=True)
     parser.add_argument("--requirement", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--bundle-out")
     parser.add_argument("--limit", type=int, default=30)
     args = parser.parse_args()
     result = build(Path(args.repo), Path(args.index), Path(args.requirement), args.limit)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.bundle_out:
+        bundle_out = Path(args.bundle_out)
+        bundle_out.parent.mkdir(parents=True, exist_ok=True)
+        bundle_out.write_text(json.dumps(build_evidence_bundle(result), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["decision"] == "pass" else 1
 

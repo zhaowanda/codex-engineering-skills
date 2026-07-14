@@ -23,6 +23,7 @@ release evidence preparation
 ## Rules
 
 - Require release window, approvers, release order, rollback owner, change ticket, risk level, and communication plan.
+- Under a regulated release policy, require structured approver identity, approval timestamp/evidence, distinct approver count, implementer/approver separation of duties, immutable audit retention, and CI/change/deployment/observability integration evidence.
 - Block release evidence when rollback owner or rollback plan is missing.
 - Treat high-risk changes as requiring explicit approver and post-release check ownership.
 - Keep release change evidence generic; do not include private credentials or customer data.

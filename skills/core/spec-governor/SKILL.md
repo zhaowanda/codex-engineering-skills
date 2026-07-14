@@ -19,6 +19,7 @@ python3 scripts/spec_governor.py \
   --doc-id REQ-001 \
   --title "Checkout discount display" \
   --input requirement.txt \
+  --requirement-ir artifacts/REQ-001/requirement_ir.json \
   --project-understanding artifacts/project-understanding \
   --out artifacts/REQ-001/spec.json
 ```
@@ -47,7 +48,9 @@ python3 scripts/spec_governor.py \
 - Extract business intent, current business problem, expected business outcome, business flow, entrypoints, trigger conditions, preconditions, postconditions, and ambiguity records.
 - Model business flow as structured steps with actor, entrypoint, trigger, system actions, downstream effects, result, and branch signals.
 - Capture current business state evidence when available: existing UI/API/task/MQ/manual entrypoints, existing data ownership, downstream dependencies, and whether the change reuses, modifies, or adds capability.
-- When `--project-understanding` is provided, read `baseline.json`, `api_surface.json`, `code_index.json`, `config_surface.json`, `dependency_surface.json`, and `repository_analysis.json` to bind current-state facts to real artifact sources.
+- Prefer `requirement_ir.json` hierarchy over flat line parsing so correction headings and acceptance subheadings cannot become executable requirements by accident.
+- When `--project-understanding` contains `evidence_bundle.json`, consume only its confirmed modify/reference anchors and contracts; use legacy broad artifacts only as a compatibility fallback.
+- Distinguish required, conditional, and excluded impacts. Runtime data is not database migration evidence, and an explicitly preserved API/field contract is not a change trigger.
 - Treat broad code-index matches as candidates, not confirmed current-state facts.
 - Use only `source_location_evidence.confirmed_anchors` as confirmed code entrypoints; block design when supplied source-location evidence has no confirmed anchor.
 - Produce `evidence_match_table` with `evidence_match_score` and `match_reason` for project evidence used by current-state and dependency reasoning.
@@ -95,3 +98,5 @@ Key fields:
 - `understanding_confidence`
 - `design_allowed`
 - `implementation_allowed`
+- `impact_applicability`
+- `requirement_ir`

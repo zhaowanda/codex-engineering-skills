@@ -58,6 +58,14 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
     if not base.exists():
         return {}
     result: dict[str, Any] = {}
+    bundle_file = base / "evidence_bundle.json"
+    if bundle_file.exists():
+        result["evidence_bundle"] = load_json(bundle_file)
+        for name in ["repository_analysis", "dependency_surface"]:
+            file = base / f"{name}.json"
+            if file.exists():
+                result[name] = load_json(file)
+        return result
     for name in ["repository_analysis", "api_surface", "config_surface", "dependency_surface", "code_index", "baseline", "baseline_quality"]:
         file = base / f"{name}.json"
         if file.exists():
@@ -66,18 +74,23 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
 
 
 def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
+    bundle = project_understanding.get("evidence_bundle", {})
     repo = project_understanding.get("repository_analysis", {})
     index = project_understanding.get("code_index", {})
     baseline = project_understanding.get("baseline", {})
     api = project_understanding.get("api_surface", {})
     deps = project_understanding.get("dependency_surface", {})
-    project = str(repo.get("project") or baseline.get("project") or api.get("project") or "target-repo")
-    repo_path = str(index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
+    project = str(bundle.get("project") or repo.get("project") or baseline.get("project") or api.get("project") or "target-repo")
+    repo_path = str(bundle.get("repo_root") or index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
     modules = [str(item.get("module")) for item in as_list(baseline.get("module_hints")) if isinstance(item, dict) and item.get("module")]
     if not modules:
         modules = [str(item) for item in as_list(repo.get("top_level_directories"))]
     modules = [item for item in modules if item not in {".github", ".git", "tests", "__pycache__"}] or modules
     routes = [item for item in as_list(api.get("routes")) if isinstance(item, dict) and is_business_route(item)]
+    if bundle:
+        anchors = [item for item in as_list(bundle.get("confirmed_anchors")) if isinstance(item, dict) and item.get("path")]
+        modules = sorted({str(Path(str(item["path"])).parent) for item in anchors})
+        routes = [{"method": "", "route": str(contract), "file": "evidence_bundle.json"} for contract in as_list(bundle.get("contracts"))]
     tests = [str(item) for item in as_list(deps.get("test_command_hints"))] or [str(item) for item in as_list(repo.get("test_hints"))]
     return {"project": project, "repo_path": repo_path, "modules": modules, "routes": routes, "tests": tests}
 
