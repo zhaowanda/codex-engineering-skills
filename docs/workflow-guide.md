@@ -118,6 +118,7 @@ Traceability is intentionally two-pass. The initial pass (`traceability_matrix.j
 ## Release Is Allowed Only When
 
 - Implementation completion evidence exists.
+- Post-change evidence passes; when project skill sync candidates exist, `project_skill_index_sync.json` must prove the project-level skill index was updated or carry an explicit owner-reviewed waiver.
 - Write guard audit is clean.
 - Code review gate approves or has accepted residual risks.
 - Test evidence gate passes.

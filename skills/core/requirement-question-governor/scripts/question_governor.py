@@ -20,6 +20,10 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def load_json(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     return data if isinstance(data, dict) else {}
@@ -114,9 +118,74 @@ def impact_areas(spec: dict[str, Any]) -> set[str]:
     return {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
 
 
+def applicability_statuses(spec: dict[str, Any]) -> dict[str, str]:
+    statuses: dict[str, str] = {}
+    for item in as_list(spec.get("impact_applicability")):
+        if not isinstance(item, dict):
+            continue
+        area = str(item.get("area") or "").strip()
+        status = str(item.get("status") or "").strip()
+        if area and status:
+            statuses[area] = status
+    return statuses
+
+
+def applicable_impact_areas(spec: dict[str, Any]) -> set[str]:
+    statuses = applicability_statuses(spec)
+    areas = impact_areas(spec)
+    if not statuses:
+        return areas
+    return {area for area in areas if statuses.get(area, "required") != "excluded"}
+
+
+def is_area_applicable(spec: dict[str, Any], area: str) -> bool:
+    return applicability_statuses(spec).get(area, "required") != "excluded"
+
+
+def entrypoint_question(spec: dict[str, Any]) -> str:
+    options = ["frontend actions"]
+    if is_area_applicable(spec, "api"):
+        options.append("backend APIs")
+    options.extend(["scheduled jobs", "MQ consumers", "manual tasks", "external callbacks"])
+    return f"Which exact entrypoints trigger the change, including {', '.join(options[:-1])}, or {options[-1]}?"
+
+
+def current_state_evidence_question(spec: dict[str, Any]) -> str:
+    evidence = ["existing frontend routes/actions/components", "source anchors"]
+    if is_area_applicable(spec, "api"):
+        evidence.append("API contracts")
+    if is_area_applicable(spec, "data"):
+        evidence.append("persistence/data ownership")
+    evidence.extend(["runtime tasks or consumers only when in scope", "downstream dependencies only when in scope"])
+    return f"Which current-state evidence proves the {', '.join(evidence[:-1])}, and {evidence[-1]}?"
+
+
+def business_closure_question(spec: dict[str, Any]) -> str:
+    nodes = ["actor/external trigger", "frontend UI/component"]
+    if is_area_applicable(spec, "api"):
+        nodes.append("API")
+    nodes.extend(["task/consumer only when in scope", "domain behavior", "visible result"])
+    if is_area_applicable(spec, "data"):
+        nodes.insert(-1, "persistence/cache")
+    return f"What is the full business closure chain from {' through '.join(nodes)}?"
+
+
+def mentions_excluded_applicability(spec: dict[str, Any], question: dict[str, Any]) -> bool:
+    text = f"{question.get('question', '')} {question.get('category', '')} {question.get('source', '')}".lower()
+    terms = {
+        "api": ("api", "endpoint", "contract", "接口", "端点", "合约"),
+        "data": ("data ownership", "data fields", "database", "db", "migration", "persistence", "字段", "数据库", "迁移", "持久化"),
+    }
+    for area, markers in terms.items():
+        if not is_area_applicable(spec, area) and any(marker in text for marker in markers):
+            return True
+    return False
+
+
 def merge_existing_answers(
     questions: list[dict[str, Any]],
     existing: dict[str, Any] | None,
+    spec: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if not existing:
         return questions
@@ -141,6 +210,8 @@ def merge_existing_answers(
     for previous in existing_questions:
         previous_id = str(previous.get("id") or stable_question_id(previous))
         if previous_id in current_ids or question_key(previous) in {question_key(item) for item in questions}:
+            continue
+        if spec is not None and mentions_excluded_applicability(spec, previous):
             continue
         obsolete = dict(previous)
         obsolete["id"] = previous_id
@@ -170,7 +241,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
     for conflict in as_list(spec.get("rule_conflicts")):
         if isinstance(conflict, dict):
             add_question(questions, f"Resolve rule conflict: {conflict.get('message')}", "product/engineering", True, "spec.rule_conflicts", "business_rule")
-    understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
+    understanding = as_dict(spec.get("requirements_understanding"))
     for ambiguity in as_list(spec.get("ambiguities")) + as_list(understanding.get("blockers")):
         if not isinstance(ambiguity, dict):
             continue
@@ -181,7 +252,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
         question_text = {
             "business_goal": "What is the real business purpose, current pain point, affected users, and expected measurable outcome for this requirement?",
             "business_flow": "What is the complete business flow: actor, precondition, entry point, trigger, system behavior, success result, and failure handling?",
-            "actor_entrypoint": "Which concrete entry point triggers this requirement: frontend operation, backend API, MQ consumer, scheduled job, manual task, batch script, or external callback?",
+            "actor_entrypoint": entrypoint_question(spec),
             "acceptance": "What concrete, executable acceptance criteria prove this requirement is satisfied, including evidence to collect?",
             "state_transition": "What are the exact from/to states, trigger timing, and invalid state transitions?",
             "ambiguous_action": "What concrete behavior change is required, and what existing behavior must remain unchanged?",
@@ -191,41 +262,41 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             "ambiguous_rule": "What exact rule, default value, priority, exception, and rollback behavior should apply?",
             "ambiguous_exception": "Which exception cases must be handled, ignored, retried, or surfaced to users/operators?",
             "ambiguous_state": "Which state should be updated, when, by whom, and what downstream effects are expected?",
-            "business_closure": "What is the full business closure chain from actor/external trigger through UI/API/task/consumer, domain service, DB/MQ/cache, downstream systems, and user-visible result?",
+            "business_closure": business_closure_question(spec),
             "state_machine": "What are the exact state transitions, triggers, retry policy, idempotency key, timeout rule, compensation rule, and invalid transitions?",
             "dependency_chain": "What are the ordered upstream and downstream systems, message topics, API contracts, consumers, and integration evidence required?",
             "repo_impact": "Which repositories/services own each part of this requirement, and which are one-degree or multi-degree dependencies?",
         }.get(category, f"Clarify requirement ambiguity: {message}")
         add_question(questions, question_text, "product/engineering", True, f"ambiguity.{ambiguity.get('source', category)}", category, risk_for_category(category))
-    scorecard = understanding.get("scorecard") if isinstance(understanding.get("scorecard"), dict) else {}
+    scorecard = as_dict(understanding.get("scorecard"))
     weak_dimensions = as_list(scorecard.get("weak_dimensions")) + as_list(understanding.get("weak_dimensions"))
     score_questions = {
         "intent_score": "What real business purpose, current pain point, target users, and measurable success signal should this requirement satisfy?",
         "flow_score": "What are the complete success, failure, permission, retry, timeout, idempotency, and compensation branches in the business flow?",
-        "entrypoint_score": "Which exact entrypoints trigger the change, including frontend actions, backend APIs, scheduled jobs, MQ consumers, manual tasks, or external callbacks?",
+        "entrypoint_score": entrypoint_question(spec),
         "acceptance_score": "Which executable positive and negative acceptance cases prove every business branch is satisfied?",
-        "evidence_score": "Which current-state evidence proves the existing entrypoints, APIs, tasks, consumers, data ownership, and downstream dependencies?",
-        "closure_score": "What concrete business closure evidence connects the trigger to backend behavior, persistence or messages, downstream effects, and visible result?",
+        "evidence_score": current_state_evidence_question(spec),
+        "closure_score": business_closure_question(spec),
         "state_score": "What state machine, retry, idempotency, timeout, and compensation rules govern this requirement?",
         "dependency_score": "What ordered dependency chain and repository/service ownership prove the multi-system plan?",
         "runtime_dependency_score": "What runtime dependency graph proves API-to-service, service-to-DB, producer-to-topic, topic-to-consumer, and downstream interactions with source evidence?",
     }
     for dimension in sorted({str(item) for item in weak_dimensions if item}):
-        question_text = score_questions.get(dimension)
+        question_text = score_questions.get(dimension, "")
         if question_text:
             add_question(questions, question_text, "product/engineering", True, f"requirements_understanding.{dimension}", "understanding_score")
-    current_state = spec.get("current_business_state") if isinstance(spec.get("current_business_state"), dict) else {}
+    current_state = as_dict(spec.get("current_business_state"))
     for gap in as_list(current_state.get("evidence_gaps")):
         if isinstance(gap, dict) and gap.get("message"):
             add_question(
                 questions,
-                "What current implementation evidence describes the existing entrypoints, APIs, jobs, consumers, data ownership, and downstream dependencies?",
+                current_state_evidence_question(spec),
                 "engineering",
                 False,
                 "current_business_state.evidence_gaps",
                 "current_business_state",
             )
-    state_machine = spec.get("state_machine") if isinstance(spec.get("state_machine"), dict) else {}
+    state_machine = as_dict(spec.get("state_machine"))
     if state_machine.get("missing"):
         add_question(
             questions,
@@ -235,17 +306,17 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             "state_machine.missing",
             "state_machine",
         )
-    closure = spec.get("business_closure_model") if isinstance(spec.get("business_closure_model"), dict) else {}
+    closure = as_dict(spec.get("business_closure_model"))
     if closure.get("missing_nodes"):
-        add_question(
-            questions,
-            "What complete actor-to-result business closure chain should the design use, including UI/API/task/consumer, service, DB/MQ/cache, downstream systems, and visible outcome?",
+            add_question(
+                questions,
+                business_closure_question(spec),
             "engineering/product",
             True,
             "business_closure_model.missing_nodes",
             "business_closure",
         )
-    dependency_chain = spec.get("dependency_chain") if isinstance(spec.get("dependency_chain"), dict) else {}
+    dependency_chain = as_dict(spec.get("dependency_chain"))
     if dependency_chain.get("missing"):
         add_question(
             questions,
@@ -255,7 +326,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             "dependency_chain.missing",
             "dependency_chain",
         )
-    repo_impact = spec.get("repo_impact_map") if isinstance(spec.get("repo_impact_map"), dict) else {}
+    repo_impact = as_dict(spec.get("repo_impact_map"))
     if repo_impact.get("missing_repo_evidence"):
         add_question(
             questions,
@@ -269,13 +340,16 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
         add_question(questions, "What are the acceptance criteria and evidence required?", "product", True, "missing.acceptance_criteria", "acceptance")
     if as_list(spec.get("acceptance_criteria")) and all(str(item.get("source_evidence")) != "input" for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)):
         add_question(questions, "Confirm concrete, testable acceptance criteria; current acceptance was inferred from the request.", "product", True, "quality.inferred_acceptance", "acceptance")
-    scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
+    scope = as_dict(spec.get("scope"))
     if not as_list(scope.get("out_of_scope")):
         add_question(questions, "What is explicitly out of scope for this change?", "product/engineering", False, "missing.out_of_scope", "scope_boundary")
     for constraint in as_list(spec.get("implicit_constraints")):
         if isinstance(constraint, dict) and constraint.get("status") == "requires_confirmation" and constraint.get("question"):
+            area = str(constraint.get("area") or "")
+            if area and not is_area_applicable(spec, area):
+                continue
             add_question(questions, str(constraint["question"]), "product/engineering", True, f"implicit.{constraint.get('area', 'constraint')}", str(constraint.get("area") or "implicit_constraint"))
-    areas = impact_areas(spec)
+    areas = applicable_impact_areas(spec)
     if "permission" in areas and not as_list(spec.get("negative_acceptance_criteria")):
         add_question(questions, "Which unauthorized roles, tenant/data-scope cases, and negative permission tests must fail?", "product/security", True, "impact.permission", "permission")
     if "data" in areas and not as_list(spec.get("data_fields")):
@@ -289,7 +363,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
     if "config" in areas:
         add_question(questions, "What are the configuration defaults, environment overrides, rollout scope, and rollback behavior?", "engineering/release", True, "impact.config", "configuration")
     finalize_question_ids(questions)
-    questions = merge_existing_answers(questions, existing)
+    questions = merge_existing_answers(questions, existing, spec)
     decision = "block" if any(q["required"] and q["status"] != "closed" for q in questions) else "pass"
     return {
         "schema": SCHEMA,

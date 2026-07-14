@@ -209,7 +209,21 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "delivery_plan.json", {"decision": "pass", "rollback_order": ["rollback synthetic"], "post_release_checks": ["check synthetic metric"]})
     write_json(out_dir / "design_architecture_review.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(out_dir / "implementation_completion_gate.json", {"schema": "codex-implementation-completion-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"], "evidence_followups": []})
-    write_json(out_dir / "post_change_implementation_report.json", {"schema": "codex-post-change-implementation-report-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"]})
+    write_json(
+        out_dir / "post_change_implementation_report.json",
+        {
+            "schema": "codex-post-change-implementation-report-v1",
+            "decision": "pass",
+            "blockers": [],
+            "changed_files": ["synthetic.py"],
+            "project_skill_index_requirements": {
+                "required": False,
+                "status": "not_required",
+                "candidate_count": 0,
+                "updated_index_paths": [],
+            },
+        },
+    )
     write_json(out_dir / "write_guard_audit.json", {"schema": "codex-write-guard-audit-v1", "decision": "ready", "blockers": [], "changed_files": ["synthetic.py"], "snapshot": {"artifact": "write_guard_snapshot.json", "verified": True}})
     write_json(out_dir / "diff_impact.json", {"schema": "codex-diff-impact-v1", "decision": "pass", "impact_areas": ["code"], "changed_files": ["synthetic.py"], "blockers": []})
     write_json(out_dir / "post_implementation_traceability_matrix.json", {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": [], "coverage": {"acceptance_covered": True}, "acceptance_trace": [{"acceptance": "synthetic behavior", "status": "covered"}], "task_trace": [{"task": "synthetic.py", "status": "implemented"}]})

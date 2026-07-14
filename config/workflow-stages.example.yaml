@@ -404,8 +404,8 @@ stages:
   - name: post_change
     artifact: post_change_implementation_report.json
     expected_schema: codex-post-change-implementation-report-v1
-    required_fields: [decision, blockers, changed_files]
-    evidence_fields: [changed_files]
+    required_fields: [decision, blockers, changed_files, project_skill_index_requirements]
+    evidence_fields: [changed_files, project_skill_index_requirements]
     field_constraints:
       changed_files:
         type: array

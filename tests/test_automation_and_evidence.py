@@ -176,11 +176,52 @@ def test_post_change_sync_generates_report_from_git_changes() -> None:
         artifact_dir = root / "artifacts"
         result = post_change_sync.generate(repo, artifact_dir, doc_id="REQ-1")
         assert result["schema"] == "codex-post-change-implementation-report-v1"
-        assert result["decision"] in {"pass", "warn"}
+        assert result["decision"] == "block"
         assert "src/api/orders.py" in result["changed_files"]
         assert result["baseline_update_candidates"]
         assert result["project_skill_sync_candidates"]
+        assert result["project_skill_index_requirements"]["status"] == "missing_evidence"
         assert (artifact_dir / "post_change_implementation_report.json").exists()
+        assert post_change_sync.validate(result)["decision"] == "block"
+        write_json(
+            artifact_dir / "project_skill_index_sync.json",
+            {
+                "schema": "codex-project-skill-index-sync-v1",
+                "decision": "pass",
+                "updated_index_paths": ["company/demo/references/code-index.md"],
+            },
+        )
+        satisfied = post_change_sync.generate(repo, artifact_dir, doc_id="REQ-1")
+        assert satisfied["decision"] in {"pass", "warn"}
+        assert satisfied["project_skill_index_requirements"]["status"] == "satisfied"
+        assert post_change_sync.validate(satisfied)["decision"] == "pass"
+
+
+def test_post_change_sync_allows_explicit_project_skill_index_waiver() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess = __import__("subprocess")
+        subprocess.run(["git", "init"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, text=True, capture_output=True, check=True)
+        (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, text=True, capture_output=True, check=True)
+        (repo / "src").mkdir()
+        (repo / "src/service.py").write_text("def run():\n    return True\n", encoding="utf-8")
+        artifact_dir = root / "artifacts"
+        write_json(
+            artifact_dir / "project_skill_index_sync.json",
+            {
+                "schema": "codex-project-skill-index-sync-v1",
+                "decision": "waived",
+                "waiver_reason": "touches experimental code that is not promoted to the project skill index",
+            },
+        )
+        result = post_change_sync.generate(repo, artifact_dir, doc_id="REQ-1")
+        assert result["project_skill_index_requirements"]["status"] == "waived"
         assert post_change_sync.validate(result)["decision"] == "pass"
 
 
@@ -226,6 +267,7 @@ def run_all() -> None:
     test_evidence_collector_maps_implementation_followups_to_required_artifacts()
     test_evidence_collector_passes_when_followup_artifacts_exist()
     test_post_change_sync_generates_report_from_git_changes()
+    test_post_change_sync_allows_explicit_project_skill_index_waiver()
     test_post_change_sync_blocks_required_docs_when_unbound()
     test_synthetic_e2e_runner_completes_core_flow()
 
