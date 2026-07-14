@@ -400,6 +400,30 @@ def test_real_project_replay_requires_privacy_review_and_ground_truth() -> None:
         assert {item["source"] for item in result["blockers"]} >= {"privacy_review", "ground_truth"}
 
 
+def test_real_project_replay_accepts_false_match_as_boolean_ground_truth() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "real-mismatch.replay.json"
+        write_json(path, {
+            "schema": "codex-delivery-replay-skeleton-v1",
+            "case_id": "REAL-MISMATCH",
+            "anonymized": True,
+            "source_type": "anonymized_real_project",
+            "scenario": "frontend_change",
+            "source": "artifact_summaries_only",
+            "artifacts": [
+                {"artifact": "spec.json", "schema": "codex-spec-v1", "decision": "pass", "blocker_count": 0, "warning_count": 0},
+                {"artifact": "delivery_plan.json", "schema": "codex-delivery-plan-v1", "decision": "block", "blocker_count": 1, "warning_count": 0},
+            ],
+            "replay_steps": [{"step": "spec", "expected_artifact": "spec.json"}],
+            "privacy_review": {"decision": "approved", "reviewer": "reviewer", "reviewed_at": "2026-07-14"},
+            "ground_truth": {"expert_decision": "pass", "framework_decision": "block", "risk_level": "medium", "match": False},
+            "privacy_note": "Reviewed anonymized summaries only.",
+        })
+        result = capture_case.validate_replay_case(path)
+        assert result["valid"] is True
+        assert result["ground_truth_match"] is False
+
+
 def run_all() -> None:
     test_requirement_ingestor_normalizes_markdown()
     test_requirement_ingestor_blocks_pdf_without_text()
@@ -419,6 +443,7 @@ def run_all() -> None:
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
     test_real_project_replay_requires_privacy_review_and_ground_truth()
+    test_real_project_replay_accepts_false_match_as_boolean_ground_truth()
 
 
 if __name__ == "__main__":

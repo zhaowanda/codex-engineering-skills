@@ -120,14 +120,16 @@ def validate_replay_case(path: Path) -> dict[str, Any]:
     if source_type not in {"synthetic", "anonymized_real_project"}:
         blockers.append({"source": "source_type", "message": "source_type must be synthetic or anonymized_real_project"})
     if source_type == "anonymized_real_project":
-        privacy_review = data.get("privacy_review") if isinstance(data.get("privacy_review"), dict) else {}
-        ground_truth = data.get("ground_truth") if isinstance(data.get("ground_truth"), dict) else {}
+        privacy_review_value = data.get("privacy_review")
+        ground_truth_value = data.get("ground_truth")
+        privacy_review: dict[str, Any] = privacy_review_value if isinstance(privacy_review_value, dict) else {}
+        ground_truth: dict[str, Any] = ground_truth_value if isinstance(ground_truth_value, dict) else {}
         if privacy_review.get("decision") != "approved" or not privacy_review.get("reviewer") or not privacy_review.get("reviewed_at"):
             blockers.append({"source": "privacy_review", "message": "real-project replay requires approved privacy review with reviewer and reviewed_at"})
         for field in ["expert_decision", "framework_decision", "risk_level"]:
             if not ground_truth.get(field):
                 blockers.append({"source": "ground_truth", "message": f"real-project replay requires {field}"})
-        if ground_truth.get("match") is not isinstance(ground_truth.get("match"), bool):
+        if not isinstance(ground_truth.get("match"), bool):
             blockers.append({"source": "ground_truth", "message": "real-project replay requires boolean match"})
     if LOCAL_PATH_RE.search(raw):
         blockers.append({"source": "privacy", "message": "local absolute path detected"})
