@@ -960,7 +960,7 @@ def test_codex_eng_next_human_cli_runs() -> None:
             text=True,
             capture_output=True,
         )
-        assert proc.returncode == 0
+        assert proc.returncode == 2
         assert "Codex delivery status" in proc.stdout
         assert "next_stage" in proc.stdout
 
@@ -1183,7 +1183,7 @@ def test_codex_eng_implement_dry_run_cli_runs() -> None:
             text=True,
             capture_output=True,
         )
-        assert proc.returncode == 0
+        assert proc.returncode == 2
         assert "Codex implement dry-run" in proc.stdout
         assert "missing_gates" in proc.stdout
 

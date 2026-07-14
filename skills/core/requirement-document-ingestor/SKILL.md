@@ -34,6 +34,10 @@ python3 scripts/ingest_requirement.py \
 - Preserve source references and detected tables/images/process hints.
 - Do not claim OCR/PDF extraction succeeded unless text is actually available.
 - Write normalized text for `spec-governor`.
+- Parse Markdown heading and list hierarchy into `requirement_ir.json` with source lines and heading paths.
+- Classify context, correction, executable requirements, acceptance, constraints, references, and out-of-scope sections.
+- Keep correction and reference-only sections out of executable requirement text.
+- Preserve numbered acceptance scenarios with their indented evidence bullets instead of emitting heading-only acceptance criteria.
 - Keep original requirement facts separate from inferred summaries.
 - Flag unsupported file types or empty inputs as warnings or blockers.
 
@@ -41,4 +45,4 @@ python3 scripts/ingest_requirement.py \
 
 The output uses schema `codex-requirement-ingestion-v1`.
 
-The artifact reports normalized requirement text, source manifest, detected structures, unsupported inputs, blockers, warnings, and next command hints.
+The ingestion artifact reports normalized text and points to `requirement_ir.json` (`codex-requirement-ir-v1`) for structured downstream consumption.

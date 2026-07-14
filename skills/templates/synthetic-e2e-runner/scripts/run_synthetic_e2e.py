@@ -331,6 +331,7 @@ def run(out_dir: Path) -> dict[str, Any]:
             "--docs-root",
             str(happy_docs),
         ],
+        allow_fail=True,
     )
     steps.append(happy_step)
     resolve_required_questions(happy_dir)
@@ -356,6 +357,7 @@ def run(out_dir: Path) -> dict[str, Any]:
             str(happy_docs),
             "--force",
         ],
+        allow_fail=True,
     )
     steps.append(happy_resolved_step)
     write_preimplementation_happy_evidence(happy_dir)
@@ -449,8 +451,10 @@ def run(out_dir: Path) -> dict[str, Any]:
     happy_case = {
         "case": "happy_path_case",
         "passed": (
-            happy_step.get("returncode") == 0
-            and happy_resolved_step.get("returncode") == 0
+            happy_step.get("returncode") == 2
+            and happy_step.get("decision") == "block"
+            and happy_resolved_step.get("returncode") == 2
+            and happy_resolved_step.get("decision") == "block"
             and happy_ready_step.get("returncode") == 0
             and (happy_dir / "open_questions.json").exists()
             and json.loads((happy_dir / "open_questions.json").read_text(encoding="utf-8")).get("decision") == "pass"

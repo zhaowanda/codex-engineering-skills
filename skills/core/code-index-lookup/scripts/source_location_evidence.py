@@ -10,6 +10,7 @@ from typing import Any
 
 
 SCHEMA = "codex-source-location-evidence-v1"
+BUNDLE_SCHEMA = "codex-evidence-bundle-v1"
 GENERIC_TERMS = {
     "add", "change", "device", "feature", "fix", "page", "service", "update",
     "修改", "功能", "优化", "页面", "设备", "需求", "用户",
@@ -188,18 +189,62 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
     }
 
 
+def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12, max_rejected: int = 12) -> dict[str, Any]:
+    anchors = [item for item in source_location.get("confirmed_anchors", []) if isinstance(item, dict)][:max_anchors]
+    normalized: list[dict[str, Any]] = []
+    for item in anchors:
+        role = "confirmed_reference" if item.get("role") == "reference_only" else "confirmed_modify"
+        normalized.append({
+            "path": item.get("path", ""),
+            "role": role,
+            "confidence": item.get("confidence", ""),
+            "symbol": item.get("symbol", ""),
+            "matched_contract_terms": item.get("matched_contract_terms", [])[:8],
+            "matched_symbols": item.get("matched_symbols", [])[:8],
+            "evidence_chain": item.get("evidence_chain", [])[:8],
+            "source_digest": item.get("source_digest", ""),
+            "index_score": item.get("index_score", 0),
+        })
+    rejected = [
+        {"path": item.get("path", ""), "reason": item.get("reason", "")}
+        for item in source_location.get("rejected_candidates", [])
+        if isinstance(item, dict) and item.get("path")
+    ][:max_rejected]
+    modify = [item for item in normalized if item["role"] == "confirmed_modify"]
+    return {
+        "schema": BUNDLE_SCHEMA,
+        "project": source_location.get("project", ""),
+        "repo_root": source_location.get("repo_root", ""),
+        "decision": "pass" if modify else "block",
+        "confirmed_anchors": [
+            {**item, "role": "reference_only" if item["role"] == "confirmed_reference" else "modify_candidate"}
+            for item in normalized
+        ],
+        "anchors": normalized,
+        "contracts": source_location.get("confirmed_contracts", [])[:12],
+        "rejected_candidates": rejected,
+        "budgets": {"max_anchors": max_anchors, "max_rejected": max_rejected},
+        "blockers": [] if modify else [{"source": "evidence_bundle", "message": "no confirmed modify anchor"}],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Confirm requirement-specific code locations against source")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--index", required=True)
     parser.add_argument("--requirement", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--bundle-out")
     parser.add_argument("--limit", type=int, default=30)
     args = parser.parse_args()
     result = build(Path(args.repo), Path(args.index), Path(args.requirement), args.limit)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.bundle_out:
+        bundle_out = Path(args.bundle_out)
+        bundle_out.parent.mkdir(parents=True, exist_ok=True)
+        bundle_out.write_text(json.dumps(build_evidence_bundle(result), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["decision"] == "pass" else 1
 

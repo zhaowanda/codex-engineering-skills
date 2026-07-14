@@ -374,7 +374,9 @@ def main() -> int:
         else:
             print(stdout, end="")
             print(stderr, end="", file=sys.stderr)
-        return 0 if result else code
+        if not result:
+            return code
+        return 0 if result.get("decision") == "pass" else 2
     if args.cmd == "docs":
         command = COMMANDS["docs-governor"] + [args.mode, "--docs-root", args.docs_root]
         if args.mode in {"init", "validate"}:
@@ -403,7 +405,9 @@ def main() -> int:
         else:
             print(stdout, end="")
             print(stderr, end="", file=sys.stderr)
-        return 0 if result else code
+        if not result:
+            return code
+        return 0 if result.get("decision") == "pass" else 2
     if args.cmd == "synthetic-e2e":
         return run_command(["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", args.out_dir])
     if args.cmd == "scenarios":

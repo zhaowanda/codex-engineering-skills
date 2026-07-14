@@ -588,8 +588,10 @@ def test_sync_preserves_manual_design_preface_sections() -> None:
         design_path = docs_root / "human/designs" / f"{doc_id}.md"
         design_path.write_text(
             "# 人工补充保留 技术设计\n\n"
+            "<!-- codex:manual-preface:start -->\n"
             "## 补充设计决策：显式保留人工判断\n\n"
             "- 决策：这个段落来自专家复核，sync 不能覆盖。\n\n"
+            "<!-- codex:manual-preface:end -->\n\n"
             "## 一、摘要\n\n"
             "- old generated content\n",
             encoding="utf-8",
@@ -614,6 +616,44 @@ def test_sync_preserves_manual_design_preface_sections() -> None:
         assert "## 补充设计决策：显式保留人工判断" in design_doc
         assert "sync 不能覆盖" in design_doc
         assert "## 一、摘要" in design_doc
+
+
+def test_sync_rejects_inherited_runtime_evidence_that_conflicts_with_confirmed_anchor() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-STALE-RUNTIME"
+        write_json(docs_root / "machine/raw" / doc_id / "runtime_sequence_evidence.json", {
+            "interactions": [{"entrypoint": {"source_file": "src/views/wrong.vue"}, "trigger": "wrong"}],
+        })
+        write_json(artifact_dir / "project_understanding/evidence_bundle.json", {
+            "anchors": [{"path": "src/views/correct.vue", "role": "confirmed_modify"}],
+        })
+        inherited = docs_governor.inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir)
+        assert inherited == []
+        assert not (artifact_dir / "runtime_sequence_evidence.json").exists()
+
+
+def test_runtime_process_graph_renders_control_branches() -> None:
+    rendered = docs_governor.render_runtime_process_mermaid({
+        "process_graph": {
+            "nodes": [
+                {"id": "control", "label": "控制类型", "kind": "decision"},
+                {"id": "forward", "label": "快进仅设置本地倍速", "kind": "frontend"},
+                {"id": "seek", "label": "快退或拖拽重建 FLV", "kind": "frontend"},
+            ],
+            "edges": [
+                {"from": "control", "to": "forward", "label": "mode=3"},
+                {"from": "control", "to": "seek", "label": "mode=4/5"},
+            ],
+        },
+        "interactions": [{"trigger": "fallback"}],
+    }, "zh")
+    assert "mode=3" in rendered
+    assert "mode=4/5" in rendered
+    assert "快进仅设置本地倍速" in rendered
+    assert "fallback" not in rendered
 
 
 def test_sync_design_only_does_not_rewrite_specs_machine_or_manifest() -> None:

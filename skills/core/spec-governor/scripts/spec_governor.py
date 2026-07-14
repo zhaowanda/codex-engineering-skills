@@ -175,7 +175,30 @@ def classify_lane(text: str) -> str:
     return "standard_requirement"
 
 
-def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, Any]]:
+def ir_sections(requirement_ir: dict[str, Any] | None, kind: str) -> list[dict[str, Any]]:
+    if not isinstance(requirement_ir, dict):
+        return []
+    return [item for item in as_list(requirement_ir.get("sections")) if isinstance(item, dict) and item.get("kind") == kind]
+
+
+def ir_acceptance_items(requirement_ir: dict[str, Any] | None) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    for section in ir_sections(requirement_ir, "acceptance"):
+        for item in as_list(section.get("items")):
+            if not isinstance(item, dict):
+                continue
+            children = [str(child.get("text") or "").strip() for child in as_list(item.get("children")) if isinstance(child, dict) and child.get("text")]
+            text = str(item.get("text") or "").strip()
+            criteria = "；".join([text, *children]) if children else text
+            if criteria:
+                result.append((criteria, f"input lines {item.get('line', '')}"))
+        for paragraph in as_list(section.get("paragraphs")):
+            if isinstance(paragraph, dict) and paragraph.get("text"):
+                result.append((str(paragraph["text"]), f"input line {paragraph.get('line', '')}"))
+    return result
+
+
+def extract_acceptance(lines: list[str], raw_text: str = "", requirement_ir: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     ac_pattern = re.compile(r"^(acceptance criteria|acceptance|验收标准|标准|验收|ac)(?:[:：\s-]+)(.+)$", re.I)
     for line in lines:
@@ -192,7 +215,10 @@ def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, A
                 "evidence_required": evidence_for_text(criteria),
                 "source_evidence": "input",
             })
-    for criteria in collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance")):
+    structured = ir_acceptance_items(requirement_ir)
+    section_items = [item[0] for item in structured] if structured else collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance"))
+    evidence_by_criteria = {item[0]: item[1] for item in structured}
+    for criteria in section_items:
         if criteria and criteria not in {str(item.get("criteria")) for item in result}:
             criteria = normalize_requirement_text(criteria)
             result.append({
@@ -200,14 +226,14 @@ def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, A
                 "criteria": criteria,
                 "type": "negative" if is_negative(criteria) else "positive",
                 "evidence_required": evidence_for_text(criteria),
-                "source_evidence": "input section: acceptance",
+                "source_evidence": evidence_by_criteria.get(criteria, "input section: acceptance"),
             })
     if not result and lines:
         result.append({"id": "AC-1", "criteria": normalize_requirement_text(lines[0]), "type": "positive", "evidence_required": ["test evidence"], "source_evidence": "inferred from first line"})
     return result
 
 
-def extract_requirements(lines: list[str], raw_text: str = "") -> list[dict[str, str]]:
+def extract_requirements(lines: list[str], raw_text: str = "", requirement_ir: dict[str, Any] | None = None) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     req_pattern = re.compile(r"^(requirement|需求|功能|req)(?:[:：\s-]+)(.+)$", re.I)
     skip_pattern = re.compile(r"^(acceptance criteria|acceptance|验收标准|标准|验收|ac|rule|规则|out of scope|非目标|assumption|假设|risk|风险)(?:[:：\s-]+)", re.I)
@@ -215,9 +241,19 @@ def extract_requirements(lines: list[str], raw_text: str = "") -> list[dict[str,
         match = req_pattern.match(line)
         if match:
             result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(match.group(2)), "source_evidence": f"input line {idx}"})
-    for summary in collect_section_items(raw_text, ("可执行需求", "需求列表", "requirements", "requirement")):
+    structured_requirements: list[tuple[str, str]] = []
+    for section in ir_sections(requirement_ir, "requirements"):
+        for paragraph in as_list(section.get("paragraphs")):
+            if isinstance(paragraph, dict) and paragraph.get("text"):
+                structured_requirements.append((str(paragraph["text"]), f"input line {paragraph.get('line', '')}"))
+        for item in as_list(section.get("items")):
+            if isinstance(item, dict) and item.get("text"):
+                structured_requirements.append((str(item["text"]), f"input line {item.get('line', '')}"))
+    section_requirements = [item[0] for item in structured_requirements] if structured_requirements else collect_section_items(raw_text, ("可执行需求", "需求列表", "requirements", "requirement"))
+    evidence_by_summary = {item[0]: item[1] for item in structured_requirements}
+    for summary in section_requirements:
         if summary and summary not in {str(item.get("summary")) for item in result}:
-            result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(summary), "source_evidence": "input section: requirements"})
+            result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(summary), "source_evidence": evidence_by_summary.get(summary, "input section: requirements")})
     if not result:
         for idx, line in enumerate(lines, start=1):
             if skip_pattern.match(line) or "?" in line or "？" in line:
@@ -441,6 +477,29 @@ def detect_impact_surface(text: str) -> list[dict[str, Any]]:
         if matched:
             result.append({"area": area, "signals": sorted(set(matched)), "status": "detected"})
     return result
+
+
+def classify_impact_applicability(text: str, impacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lower = text.lower()
+    decisions: list[dict[str, Any]] = []
+    for item in impacts:
+        area = str(item.get("area") or "")
+        status = "required"
+        reason = "executable requirement contains direct impact signals"
+        if area == "data":
+            data_change = re.search(r"database|\bdb\b|\bsql\b|migration|数据库|数据表|表结构|字段|迁移", lower)
+            preserves_data_shape = re.search(r"(?:不改变|无需修改|保持现有|without changing|no change to).{0,40}(?:字段|表结构|数据库|schema|migration)", lower, re.I)
+            if not data_change or preserves_data_shape:
+                status = "excluded"
+                reason = "runtime data wording or an explicitly preserved field shape is not database migration evidence"
+        elif area == "api" and re.search(r"(?:不改变|无需修改|保持现有|without changing|no change to).{0,30}(?:api|接口|endpoint|contract|合约)", lower, re.I):
+            status = "excluded"
+            reason = "requirement explicitly preserves the existing API contract"
+        elif area == "security" and re.search(r"(?:不复制|不得包含|禁止记录|do not copy|must not include).{0,30}(?:token|secret|客户数据|production data)", lower, re.I):
+            status = "excluded"
+            reason = "security term appears only in a non-change handling constraint"
+        decisions.append({"area": area, "status": status, "reason": reason, "signals": item.get("signals", [])})
+    return decisions
 
 
 def extract_personas(actors: list[str]) -> list[dict[str, str]]:
@@ -709,7 +768,7 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
         add("frontend_operation", "user triggers UI operation", "inferred from UI terms")
     if any(term in lower or term in text for term in ["api", "接口", "endpoint", "route"]):
         add("backend_api", "caller invokes API endpoint", "inferred from API terms")
-    if any(term in lower or term in text for term in ["mq", "consumer", "topic", "queue", "消息", "消费", "订阅"]):
+    if any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "订阅消息", "message consumer"]):
         add("mq_consumer", "consumer receives message", "inferred from MQ terms")
     if any(term in lower or term in text for term in ["定时", "cron", "scheduled", "scheduler", "job"]):
         add("scheduled_job", "scheduled task fires", "inferred from schedule terms")
@@ -901,15 +960,15 @@ def business_closure_model(
 
 def state_machine_model(lines: list[str], text: str, transitions: list[dict[str, str]], project_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     lower = text.lower()
-    requires_state_model = any(term in lower or term in text for term in [
-        "状态流转", "状态从", "状态变更", "状态更新", "同步", "异步", "mq", "consumer",
-        "重试", "幂等", "补偿", "超时", "retry", "idempot", "compensation", "timeout",
-    ])
     retry_policy = extract_prefixed(lines, ("retry", "retry policy", "重试", "重试策略"))
     idempotency = extract_prefixed(lines, ("idempotency", "idempotency key", "幂等", "幂等键"))
     compensation = extract_prefixed(lines, ("compensation", "compensation rule", "补偿", "补偿规则"))
     timeout = extract_prefixed(lines, ("timeout", "超时", "超时规则"))
     invalid_transitions = extract_prefixed(lines, ("invalid transition", "非法流转", "禁止流转"))
+    mq_context = any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"])
+    requires_state_model = bool(transitions or retry_policy or idempotency or compensation or timeout or invalid_transitions) or mq_context or any(term in lower or term in text for term in [
+        "状态流转", "状态从", "状态变更", "状态更新", "异步", "幂等", "补偿", "超时", "idempot", "compensation", "timeout",
+    ])
     status_fields = [
         {"field": str(item.get("name") or ""), "source_evidence": str(item.get("source_evidence") or "project_evidence")}
         for item in project_items or []
@@ -920,7 +979,8 @@ def state_machine_model(lines: list[str], text: str, transitions: list[dict[str,
     missing: list[str] = []
     if requires_state_model and not transitions:
         missing.append("state_transitions")
-    if requires_state_model and any(term in lower or term in text for term in ["重试", "retry"]) and not retry_policy:
+    retry_action_terms = ["重试策略", "失败重试", "需要重试", "重试和", "retry policy", "retry on failure", "must retry"]
+    if requires_state_model and any(term in lower or term in text for term in retry_action_terms) and not retry_policy:
         missing.append("retry_policy")
     if requires_state_model and any(term in lower or term in text for term in ["幂等", "重复", "idempot", "duplicate"]) and not idempotency:
         missing.append("idempotency_key")
@@ -937,7 +997,7 @@ def state_machine_model(lines: list[str], text: str, transitions: list[dict[str,
         "states_declared": bool(states),
         "transitions_declared": bool(transitions),
         "invalid_transitions_declared": bool(invalid_transitions),
-        "retry_policy_declared": bool(retry_policy) or not any(term in lower or term in text for term in ["重试", "retry"]),
+        "retry_policy_declared": bool(retry_policy) or not any(term in lower or term in text for term in retry_action_terms),
         "idempotency_declared": bool(idempotency) or not any(term in lower or term in text for term in ["幂等", "重复", "idempot", "duplicate"]),
         "timeout_rule_declared": bool(timeout) or not any(term in lower or term in text for term in ["超时", "timeout"]),
         "compensation_rule_declared": bool(compensation),
@@ -986,7 +1046,7 @@ def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[s
     missing = []
     if requires_chain and len(chain) < 2 and bool(repo_impact.get("multi_repo_required")):
         missing.append("multi_repo_dependency_order")
-    if requires_chain and any(term in lower or term in text for term in ["mq", "consumer", "topic", "消息"]) and not any("mq" in item["dependency"].lower() or "topic" in item["dependency"].lower() or "消息" in item["dependency"] for item in chain):
+    if requires_chain and any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"]) and not any("mq" in item["dependency"].lower() or "topic" in item["dependency"].lower() or "消息" in item["dependency"] for item in chain):
         missing.append("mq_upstream_downstream")
     return {"required": requires_chain, "chain": chain, "missing": missing, "ready": not missing}
 
@@ -1293,16 +1353,16 @@ def extract_prefixed(lines: list[str], prefixes: tuple[str, ...]) -> list[str]:
     return result
 
 
-def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, Any] | None = None, requirement_ir: dict[str, Any] | None = None) -> dict[str, Any]:
     lines = split_lines(text)
     project_evidence = project_evidence or {}
     project_items = project_evidence_items(project_evidence, f"{title}\n{text}") if project_evidence else []
     summary = lines[0] if lines else title
     lane = classify_lane(text)
-    acceptance = extract_acceptance(lines, text)
+    acceptance = extract_acceptance(lines, text, requirement_ir)
     rules = extract_rules(lines)
     questions = extract_open_questions(lines)
-    requirements = extract_requirements(lines, text)
+    requirements = extract_requirements(lines, text, requirement_ir)
     out_of_scope = extract_prefixed(lines, ("out of scope", "非目标", "不包含"))
     assumptions = extract_prefixed(lines, ("assumption", "假设"))
     risks = [{"id": f"RISK-{idx + 1}", "risk": item, "source_evidence": "input"} for idx, item in enumerate(extract_prefixed(lines, ("risk", "风险")))]
@@ -1314,7 +1374,9 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
             actors.append(candidate)
     if not actors:
         actors = ["user"]
-    impact_surface = detect_impact_surface(text)
+    impact_text = str(requirement_ir.get("executable_text") or text) if isinstance(requirement_ir, dict) else text
+    impact_surface = detect_impact_surface(impact_text)
+    impact_applicability = classify_impact_applicability(impact_text, impact_surface)
     business_objects = extract_business_objects(text)
     data_fields = extract_data_fields(text, lines)
     operations = extract_operations(text)
@@ -1343,9 +1405,10 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     compatibility_constraints = extract_prefixed(lines, ("compatibility", "兼容", "backward compatible", "向后兼容"))
     derived_constraint_questions = constraint_questions(implicit_constraints, questions)
     readiness_gaps = expert_readiness_gaps(impact_surface, acceptance, objectives, scenarios, risks, compatibility_constraints)
-    ambiguities = detect_ambiguities(text, acceptance, intent, business_flow, entrypoints, state_transitions, closure_model, state_model, dependency_chain, repo_impact, goal_quality, runtime_graph)
+    ambiguities = detect_ambiguities(impact_text, acceptance, intent, business_flow, entrypoints, state_transitions, closure_model, state_model, dependency_chain, repo_impact, goal_quality, runtime_graph)
     requirements_understanding = understanding_decision(ambiguities, acceptance, intent, business_flow, entrypoints, current_business_state, success_metrics, closure_model, state_model, dependency_chain, goal_quality, runtime_graph)
-    source_location_evidence = (project_evidence.get("artifacts") or {}).get("source_location_evidence", {}) if isinstance(project_evidence, dict) else {}
+    project_artifacts = (project_evidence.get("artifacts") or {}) if isinstance(project_evidence, dict) else {}
+    source_location_evidence = (project_artifacts.get("evidence_bundle") or project_artifacts.get("source_location_evidence") or {}) if isinstance(project_artifacts, dict) else {}
     if isinstance(source_location_evidence, dict) and source_location_evidence and source_location_evidence.get("decision") != "pass":
         location_blocker = {"source": "source_location_evidence", "message": "no requirement-specific source location is confirmed"}
         requirements_understanding["blockers"] = [*as_list(requirements_understanding.get("blockers")), location_blocker]
@@ -1392,6 +1455,7 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
         "design_allowed": requirements_understanding["design_allowed"],
         "implementation_allowed": requirements_understanding["implementation_allowed"],
         "source": {"type": "text", "line_count": len(lines)},
+        "requirement_ir": {"schema": requirement_ir.get("schema", ""), "section_count": len(as_list(requirement_ir.get("sections")))} if isinstance(requirement_ir, dict) else {},
         "project_evidence": {
             "source_dir": project_evidence.get("source_dir", "") if isinstance(project_evidence, dict) else "",
             "artifact_names": sorted((project_evidence.get("artifacts") or {}).keys()) if isinstance(project_evidence.get("artifacts") if isinstance(project_evidence, dict) else {}, dict) else [],
@@ -1416,6 +1480,7 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
         "state_machine": state_model,
         "business_goal_quality": goal_quality,
         "impact_surface": impact_surface,
+        "impact_applicability": impact_applicability,
         "data_classification": classify_data(text),
         "permission_scope": {
             "actors": sorted(set(actors)),
@@ -1521,6 +1586,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 PROJECT_EVIDENCE_FILES = (
+    "evidence_bundle.json",
     "baseline.json",
     "api_surface.json",
     "code_index.json",
@@ -1609,6 +1675,26 @@ def project_evidence_items(project_evidence: dict[str, Any], requirement_text: s
             row.update(extra)
         items.append(row)
 
+    bundle = artifacts.get("evidence_bundle") if isinstance(artifacts.get("evidence_bundle"), dict) else {}
+    if bundle:
+        project = str(bundle.get("project") or "").strip()
+        if project:
+            add("repo", project, "evidence_bundle.json")
+        for anchor in as_list(bundle.get("anchors")):
+            if not isinstance(anchor, dict) or not anchor.get("path"):
+                continue
+            reference_only = anchor.get("role") == "confirmed_reference"
+            add("source_anchor", str(anchor["path"]), "evidence_bundle.json", status="reference_only" if reference_only else "confirmed", extra={
+                "symbol": anchor.get("symbol", ""),
+                "confidence": anchor.get("confidence", ""),
+                "role": "reference_only" if reference_only else "modify_candidate",
+                "source_digest": anchor.get("source_digest", ""),
+            })
+        for contract in as_list(bundle.get("contracts")):
+            if str(contract).strip():
+                add("api_route", str(contract), "evidence_bundle.json")
+        return items
+
     api = artifacts.get("api_surface") if isinstance(artifacts.get("api_surface"), dict) else {}
     for route in as_list(api.get("routes")):
         if not isinstance(route, dict):
@@ -1691,13 +1777,20 @@ def main() -> int:
     p_norm.add_argument("--input", required=True)
     p_norm.add_argument("--out", required=True)
     p_norm.add_argument("--project-understanding", help="Optional directory containing baseline/api_surface/code_index/config_surface/dependency_surface JSON artifacts")
+    p_norm.add_argument("--requirement-ir", help="Optional structured requirement IR emitted by requirement-document-ingestor")
     p_val = sub.add_parser("validate")
     p_val.add_argument("--file", required=True)
     p_val.add_argument("--out")
     args = parser.parse_args()
 
     if args.cmd == "normalize":
-        result = normalize(args.doc_id, args.title, read_text(Path(args.input)), load_project_evidence(Path(args.project_understanding)) if args.project_understanding else {})
+        result = normalize(
+            args.doc_id,
+            args.title,
+            read_text(Path(args.input)),
+            load_project_evidence(Path(args.project_understanding)) if args.project_understanding else {},
+            load_json(Path(args.requirement_ir)) if args.requirement_ir else {},
+        )
         write_json(Path(args.out), result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["decision"] != "blocked" else 1
