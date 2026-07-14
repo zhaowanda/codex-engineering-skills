@@ -366,9 +366,13 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         name = str(stage["name"])
         if not artifacts.get(name):
             continue
+        dependency_decisions = stage.get("dependency_decisions") if isinstance(stage.get("dependency_decisions"), dict) else {}
         missing_dependencies = [
             str(dep) for dep in stage.get("depends_on", [])
-            if str(dep) in selected_names and str(dep) not in completed
+            if str(dep) in selected_names
+            and str(dep) not in completed
+            and str(artifacts.get(str(dep), {}).get("decision") or artifacts.get(str(dep), {}).get("status") or "")
+            not in {str(item) for item in dependency_decisions.get(str(dep), [])}
         ]
         if missing_dependencies:
             blockers.append({"source": name, "message": "stage completed before required dependencies", "missing_dependencies": missing_dependencies})

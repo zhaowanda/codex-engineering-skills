@@ -629,7 +629,7 @@ def test_auto_runner_generates_specialty_design_before_technical_design() -> Non
         step_names = [step.get("name") for step in result["steps"]]
         assert step_names.index("domain_model_design") < step_names.index("architecture_framing") < step_names.index("technical_design")
         assert step_names.index("ui_ue_design") < step_names.index("technical_design")
-        assert step_names.index("design_review") < step_names.index("test_design")
+        assert step_names.index("test_design") < step_names.index("design_review")
         assert step_names.index("delivery_plan") < step_names.index("initial_traceability") < step_names.index("delivery_plan_review")
         assert step_names.index("frontend_implementation_plan") > step_names.index("technical_design")
         assert result["steps"][step_names.index("initial_traceability")]["traceability_phase"] == "initial_design_plan"

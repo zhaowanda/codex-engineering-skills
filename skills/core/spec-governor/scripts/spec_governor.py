@@ -177,7 +177,7 @@ def classify_lane(text: str) -> str:
 
 def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    ac_pattern = re.compile(r"^(ac|acceptance|acceptance criteria|验收|验收标准|标准)[:：\s-]*(.+)$", re.I)
+    ac_pattern = re.compile(r"^(acceptance criteria|acceptance|验收标准|标准|验收|ac)(?:[:：\s-]+)(.+)$", re.I)
     for line in lines:
         match = ac_pattern.match(line)
         if match:
@@ -209,8 +209,8 @@ def extract_acceptance(lines: list[str], raw_text: str = "") -> list[dict[str, A
 
 def extract_requirements(lines: list[str], raw_text: str = "") -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
-    req_pattern = re.compile(r"^(req|requirement|需求|功能)[:：\s-]*(.+)$", re.I)
-    skip_pattern = re.compile(r"^(ac|acceptance|验收|验收标准|标准|rule|规则|out of scope|非目标|assumption|假设|risk|风险)[:：\s-]*", re.I)
+    req_pattern = re.compile(r"^(requirement|需求|功能|req)(?:[:：\s-]+)(.+)$", re.I)
+    skip_pattern = re.compile(r"^(acceptance criteria|acceptance|验收标准|标准|验收|ac|rule|规则|out of scope|非目标|assumption|假设|risk|风险)(?:[:：\s-]+)", re.I)
     for idx, line in enumerate(lines, start=1):
         match = req_pattern.match(line)
         if match:
@@ -699,7 +699,7 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
         entries.append({"type": kind, "trigger": trigger, "source_evidence": evidence, "confidence": confidence})
 
     for line in lines:
-        match = re.match(r"^(entry|入口|触发|trigger)[:：\s-]*(.+)$", line, flags=re.I)
+        match = re.match(r"^(entrypoint|trigger|入口|触发|entry)(?:[:：\s-]+)(.+)$", line, flags=re.I)
         if match:
             add("explicit", match.group(2).strip(), "input", "high")
         scenario = re.match(r"^(scenario|场景)[:：\s-]*(.+)$", line, flags=re.I)
@@ -1283,7 +1283,8 @@ def classify_data(text: str) -> dict[str, Any]:
 
 
 def extract_prefixed(lines: list[str], prefixes: tuple[str, ...]) -> list[str]:
-    pattern = re.compile(rf"^({'|'.join(re.escape(item) for item in prefixes)})[:：\s-]*(.+)$", re.I)
+    ordered = sorted(prefixes, key=len, reverse=True)
+    pattern = re.compile(rf"^({'|'.join(re.escape(item) for item in ordered)})(?:[:：\s-]+)(.+)$", re.I)
     result: list[str] = []
     for line in lines:
         match = pattern.match(line)

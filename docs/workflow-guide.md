@@ -14,13 +14,12 @@ requirement source
 -> technical-design-governor
 -> architecture-design-governor
 -> configuration/performance/data-security design governors as applicable
--> design-architecture-reviewer
--> test-design-governor
--> test-data-governor
 -> delivery-plan-templates draft when more than one repository or contract boundary is involved
 -> cross-repo-planner when applicable
--> design-architecture-reviewer with cross-repo readiness
--> final test design / test data / delivery plan
+-> test-design-governor using the complete design and cross-repo evidence
+-> design-architecture-reviewer with test design and cross-repo readiness
+-> test-data-governor
+-> final delivery plan
 -> traceability-governor initial pass after delivery_plan exists to prove requirement/design/test/task coverage
 -> delivery-plan-reviewer
 -> git-worktree-governor
@@ -65,12 +64,10 @@ requirement-document-ingestor
 -> technical-design-governor
 -> architecture-design-governor
 -> configuration/performance/data-security design governors as applicable
--> design-architecture-reviewer
--> test-design-governor
--> test-data-governor
 -> delivery plan draft and cross-repo readiness when repository order or contract compatibility can change the plan
--> final design review with cross-repo readiness
--> final test design, test data, and delivery plan
+-> test-design-governor
+-> final design review with test design and cross-repo readiness
+-> test-data-governor and final delivery plan
 -> traceability-governor initial pass
 -> delivery-plan-reviewer
 ```
@@ -79,7 +76,7 @@ requirement-document-ingestor
 
 | Scenario | Required path |
 | --- | --- |
-| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> design-architecture-reviewer -> test-design-governor -> test-data-governor -> delivery-plan-templates -> traceability-governor initial pass -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo/MQ/async/scheduler/task/job/cache/integration/permission/security signals elevate above the light path. |
+| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> test-design-governor -> design-architecture-reviewer -> test-data-governor -> delivery-plan-templates -> traceability-governor initial pass -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo/MQ/async/scheduler/task/job/cache/integration/permission/security signals elevate above the light path. |
 | `small_feature` | Standard design-first profile, then Git/edit readiness gates. |
 | `frontend_change` | Standard design-first profile plus pre-technical `ui-ue-design-governor`, `ui-ue-reviewer`, and `frontend-implementation-planner`. Real `frontend-acceptance-runner -> test-evidence-gate` evidence is collected after implementation, before release. UI/UE design must name concrete user entry surfaces and cover loading, empty, success, validation error, permission denied, and dependency error states. |
 | `cross_repo_api` | API/cross-repo contract profile with project understanding, pre-technical API/observability design, delivery plan, cross-repo execution graph/readiness before delivery plan review, initial traceability, and release evidence gates. |
@@ -92,11 +89,15 @@ Profile `artifact_steps` declare profile-specific artifact generation or inspect
 
 `open_questions.json` is bound to the canonical current spec through `spec_digest`. Regeneration preserves answers only for unchanged stable question IDs, records answer provenance, and marks questions removed by the new spec as non-blocking `obsolete`. A digest mismatch blocks profile readiness even when every required question in the old artifact was answered.
 
-Every applicable artifact records its direct input digests. Updating an input recursively invalidates downstream readiness. Cross-repo work uses a draft plan before aggregate design review, so final test and delivery artifacts are generated only after `cross_repo_readiness.json` exists.
+The question stage may consume a blocked `spec.json` as a draft to break the clarification cycle. That exception does not complete the Spec stage: requirement text or project evidence must be updated and Spec must be regenerated before any design stage can pass.
+
+Every applicable artifact records its direct input digests. Updating an input recursively invalidates downstream readiness. Cross-repo work uses a draft plan before test design and aggregate design review, so testability is reviewed against `cross_repo_readiness.json` before final test data and delivery artifacts are generated.
 
 The shared artifact contract also declares `evidence_fields` and optional typed field constraints. Correct schema and an accepted decision are insufficient when evidence is empty, has the wrong type, violates cardinality, or conflicts with a readiness constant. Lineage v2 binds the semantic artifact digest, deterministic direct inputs, producer version, command digest, Git context, and permit when available.
 
 Profiles declare `governance_level` as `light`, `standard`, `heavy`, or `critical`. Auto-run summaries report executed/skipped steps, generated/reused artifact counts, and command duration so teams can measure whether light bugfix paths reduce artifact cost without weakening elevated controls.
+
+Regulated release policy overlays can require structured approval identities, separation of duties, immutable audit retention, and provider evidence from CI, change management, deployment, and observability systems. Provider credentials and organization-specific adapters remain in the private overlay; open-core artifacts retain only provider names and evidence identifiers or URLs.
 
 Traceability is intentionally two-pass. The initial pass (`traceability_matrix.json`) runs before implementation and proves that requirements, design, tests, and delivery tasks line up. The post-implementation pass (`post_implementation_traceability_matrix.json`) runs after changes exist and binds requirements to diff, test evidence, review evidence, and release evidence.
 

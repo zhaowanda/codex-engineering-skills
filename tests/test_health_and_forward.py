@@ -98,6 +98,14 @@ def test_root_skill_health_wrapper_exists_for_readme_command() -> None:
     assert "skills/core/skill-health/scripts/skill_health.py" in wrapper.read_text(encoding="utf-8")
 
 
+def test_skill_health_counts_only_validated_real_project_replays() -> None:
+    calibration = skill_health.real_project_calibration(ROOT)
+    assert calibration["validation_decision"] == "pass"
+    assert calibration["count"] == 0
+    assert calibration["families"] == []
+    assert calibration["agreement_rate"] == 0
+
+
 def test_all_skill_docs_declare_output_section() -> None:
     offenders = []
     for path in sorted((ROOT / "skills").glob("*/*/SKILL.md")):
@@ -202,8 +210,8 @@ def test_workflow_stage_registry_uses_pre_technical_design_order() -> None:
         "data_security_design_review",
         "performance_design_review",
         "cross_repo_plan",
-        "design_review",
         "test_design",
+        "design_review",
         "test_data_plan",
         "delivery_plan",
         "initial_traceability",
@@ -752,7 +760,8 @@ def test_human_doc_review_tracks_unresolved_items_with_context() -> None:
             "- 测试：覆盖功能、回归和数据兼容。\n\n"
             "## 六、追踪关系\n\n"
             "- 追踪到 `spec.json`、`technical_design.json` 和 `test_design.json`。\n\n"
-            "```mermaid\nflowchart LR\nA-->B\n```\n",
+            "```mermaid\nflowchart LR\nA-->B\n```\n\n"
+            "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: 核对表结构\n```\n",
             encoding="utf-8",
         )
         result = human_doc_review.review(doc, strict=True)
@@ -801,6 +810,13 @@ def test_forward_test_runner_passes_synthetic_case() -> None:
     assert result["cases"][0]["blocked_case_passed"] is True
     assert result["cases"][0]["happy_path_case_passed"] is True
     assert all(result["cases"][0]["scenario_results"].values())
+    shape_results = result["cases"][0]["requirement_shape_results"]
+    assert shape_results["details"] == {
+        "one_line_decision": "blocked",
+        "long_prd_decision": "ready_for_design",
+        "vague_bugfix_decision": "blocked",
+        "resolved_bugfix_decision": "ready_for_design",
+    }
 
 
 def test_scenario_catalog_documents_supported_development_scenarios() -> None:

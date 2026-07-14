@@ -16,6 +16,8 @@ GENERIC_TERMS = {
 }
 WEAK_EQUIVALENTS = {"设备": "device", "页面": "page", "服务": "service", "功能": "feature"}
 SOURCE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".vue", ".java", ".kt", ".go", ".rs", ".php", ".rb", ".cs"}
+HTTP_METHOD_ROUTE = re.compile(r"\b(?:GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+((?:/[A-Za-z0-9_{}.*-]+)+)", re.I)
+BACKTICK_ROUTE = re.compile(r"`((?:/[A-Za-z0-9_{}.*-]+)+)`")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -33,12 +35,21 @@ def requirement_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
+def requirement_contracts(text: str) -> list[str]:
+    contracts: list[str] = []
+    for contract in [*HTTP_METHOD_ROUTE.findall(text), *BACKTICK_ROUTE.findall(text)]:
+        if contract.lower().endswith(tuple(SOURCE_SUFFIXES)) or contract in contracts:
+            continue
+        contracts.append(contract)
+    return contracts
+
+
 def query_terms(text: str) -> list[str]:
     quoted = re.findall(r"[`'\"]([^`'\"]{3,120})[`'\"]", text)
     identifiers = re.findall(r"(?:/[A-Za-z0-9_{}.-]+){2,}|[A-Za-z_][A-Za-z0-9_]{3,}", text)
     chinese = re.findall(r"[\u4e00-\u9fff]{3,12}", text)
     terms: list[str] = []
-    for term in [*quoted, *identifiers, *chinese]:
+    for term in [*requirement_contracts(text), *quoted, *identifiers, *chinese]:
         clean = term.strip().lower()
         if clean.startswith("<") or clean in {"/>", ">"} or "=" in clean or not re.search(r"[a-z0-9\u4e00-\u9fff]", clean):
             continue
@@ -120,12 +131,15 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
         text = raw.decode("utf-8", errors="ignore")
         matched, evidence = source_matches(text, terms)
         strong = [term for term in matched if is_strong(term)]
+        matched_symbols = [term for term in strong if not term.startswith("/")]
         source_digests[relative] = digest_bytes(raw)
         if len(strong) >= 2 and len(matched) >= 2:
             confirmed.append({
                 **candidate,
                 "matched_requirement_terms": matched[:20],
                 "matched_contract_terms": [term for term in matched if term.startswith("/")],
+                "matched_symbols": matched_symbols[:12],
+                "symbol": matched_symbols[0] if matched_symbols else "",
                 "strong_terms": strong[:12],
                 "evidence_chain": evidence,
                 "source_digest": source_digests[relative],
@@ -148,8 +162,8 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
         if term.startswith("/")
     }
     confirmed_contracts: list[str] = []
-    for contract in re.findall(r"(?:/[A-Za-z0-9_{}.*-]+){2,}", requirement):
-        if contract.lower() not in matched_contract_terms or contract.lower().endswith(tuple(SOURCE_SUFFIXES)) or not ("/api/" in contract.lower() or "{" in contract):
+    for contract in requirement_contracts(requirement):
+        if contract.lower() not in matched_contract_terms:
             continue
         if contract not in confirmed_contracts:
             confirmed_contracts.append(contract)

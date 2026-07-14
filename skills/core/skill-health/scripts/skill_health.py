@@ -49,8 +49,8 @@ REQUIRED_SEMANTIC_DEPENDENCIES = {
     "technical_design": {"requirement_questions", "architecture_framing"},
     "architecture_design": {"technical_design", "architecture_framing"},
     "cross_repo_plan": {"delivery_plan_draft"},
-    "design_review": {"architecture_design", "cross_repo_plan"},
-    "test_design": {"design_review"},
+    "test_design": {"architecture_design", "cross_repo_plan"},
+    "design_review": {"test_design"},
     "test_data_plan": {"test_design"},
     "delivery_plan": {"test_data_plan"},
     "delivery_plan_review": {"initial_traceability"},
@@ -136,6 +136,36 @@ def design_template_regression(root: Path) -> dict[str, Any]:
         "decision": "block" if blockers else "pass",
         "blockers": blockers,
         "examples": example_results,
+    }
+
+
+def real_project_calibration(root: Path) -> dict[str, Any]:
+    validator_path = root / "skills/core/delivery-case-capture/scripts/capture_case.py"
+    replay_dir = root / "examples/replay-cases"
+    if not validator_path.exists() or not replay_dir.exists():
+        return {"count": 0, "families": [], "agreement_rate": 0, "validation_decision": "missing"}
+    try:
+        spec = importlib.util.spec_from_file_location("health_replay_validator", validator_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+        validation = module.validate_replay_dir(replay_dir)
+    except Exception as exc:
+        return {"count": 0, "families": [], "agreement_rate": 0, "validation_decision": "block", "error": str(exc)}
+    real_cases = [
+        item for item in as_list(validation.get("cases"))
+        if isinstance(item, dict)
+        and item.get("valid") is True
+        and item.get("source_type") == "anonymized_real_project"
+        and isinstance(item.get("ground_truth_match"), bool)
+    ]
+    families = sorted({str(item.get("scenario")) for item in real_cases if item.get("scenario")})
+    agreement_count = sum(1 for item in real_cases if item.get("ground_truth_match") is True)
+    return {
+        "count": len(real_cases),
+        "families": families,
+        "agreement_rate": round(100 * agreement_count / len(real_cases), 2) if real_cases else 0,
+        "validation_decision": validation.get("decision"),
     }
 
 
@@ -638,26 +668,25 @@ def check(root: Path) -> dict[str, Any]:
     stage_blockers = [item for item in blockers if item.get("source") == "config/workflow-stages.example.yaml"]
     gate_blockers = [item for item in blockers if str(item.get("source") or "").startswith("workflow_profile.")]
     runtime_assessment = workflow_runtime_assessment(root, stage_entries)
-    real_replay_count = 0
-    real_replay_families: set[str] = set()
-    for replay_path in (root / "examples/replay-cases").glob("*.json") if (root / "examples/replay-cases").exists() else []:
-        try:
-            replay = json.loads(replay_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if isinstance(replay, dict) and replay.get("source_type") == "anonymized_real_project":
-            real_replay_count += 1
-            if replay.get("scenario"):
-                real_replay_families.add(str(replay["scenario"]))
+    if runtime_assessment.get("decision") != "pass":
+        blockers.append({
+            "source": "workflow_runtime_assessment",
+            "message": "synthetic happy/blocked paths or fail-closed runtime validation did not pass",
+            "decision": runtime_assessment.get("decision"),
+        })
+    calibration = real_project_calibration(root)
+    real_replay_count = int(calibration.get("count") or 0)
+    real_replay_families = set(as_list(calibration.get("families")))
+    real_replay_agreement = float(calibration.get("agreement_rate") or 0)
     framework_dimensions = {
         "skill_contract_quality": round(100 * advanced_or_better_count / len(skills), 2) if skills else 0,
         "dag_integrity": 100 if not stage_blockers else 0,
         "gate_semantics": 100 if not gate_blockers and runtime_assessment.get("fail_closed_stage_count") == runtime_assessment.get("stage_count") else 0,
         "happy_blocked_path_reality": 100 if runtime_assessment.get("decision") == "pass" else 0,
-        "real_project_calibration": 100 if real_replay_count >= 3 and len(real_replay_families) >= 3 else 60 if real_replay_count else 0,
+        "real_project_calibration": 100 if real_replay_count >= 3 and len(real_replay_families) >= 3 and real_replay_agreement >= 80 else 60 if real_replay_count else 0,
     }
     framework_overall = round(sum(framework_dimensions.values()) / len(framework_dimensions), 2)
-    framework_level = "expert" if framework_overall >= 90 and real_replay_count >= 3 and len(real_replay_families) >= 3 else "advanced" if framework_overall >= 80 else "mixed"
+    framework_level = "expert" if framework_overall >= 90 and real_replay_count >= 3 and len(real_replay_families) >= 3 and real_replay_agreement >= 80 else "advanced" if framework_overall >= 80 else "mixed"
     return {
         "schema": "codex-skill-health-v1",
         "decision": "block" if blockers else "warn" if warnings else "pass",
@@ -674,7 +703,9 @@ def check(root: Path) -> dict[str, Any]:
             "dimensions": framework_dimensions,
             "real_project_replay_count": real_replay_count,
             "real_project_replay_family_count": len(real_replay_families),
-            "expert_rule": "expert requires overall>=90 plus at least three anonymized real-project replays across three scenario families",
+            "real_project_agreement_rate": real_replay_agreement,
+            "replay_validation_decision": calibration.get("validation_decision"),
+            "expert_rule": "expert requires overall>=90, three validated anonymized real-project replays across three scenario families, and >=80% expert/framework agreement",
         },
         "workflow_runtime_assessment": runtime_assessment,
         "integrated_quality_gates": {

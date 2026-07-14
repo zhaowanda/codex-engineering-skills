@@ -9,6 +9,8 @@ gate: true
 
 # Post Release Observer
 
+Use `--regulated` for production workflows that require structured evidence from observability providers. Regulated closeout requires provider/evidence identifiers, observation timestamps, healthy status for metrics/logs/alerts/business checks, resolved incidents, and auditable close evidence.
+
 Use this skill after deployment and before closing release evidence.
 
 ## Position

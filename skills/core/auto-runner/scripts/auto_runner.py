@@ -1497,6 +1497,29 @@ def run(
         )
         run_pre_review_planning_steps(selected_profile, out, spec, delivery_plan_draft, force, generated, skipped, steps)
 
+    test_design = out / "test_design.json"
+    run_if_needed(
+        "test_design",
+        test_design,
+        [
+            "python3",
+            "skills/core/test-design-governor/scripts/test_design.py",
+            "render",
+            "--spec",
+            str(spec),
+            "--technical-design",
+            str(technical),
+            "--architecture-design",
+            str(architecture),
+            "--out",
+            str(test_design),
+        ],
+        force,
+        generated,
+        skipped,
+        steps,
+    )
+
     design_review = out / "design_architecture_review.json"
     design_review_command = [
         "python3",
@@ -1519,6 +1542,7 @@ def run(
         ("--data-security-review", "data_security_review.json"),
         ("--performance-review", "performance_review.json"),
         ("--cross-repo-readiness", "cross_repo_readiness.json"),
+        ("--test-design", "test_design.json"),
     ]:
         artifact = out / artifact_name
         if artifact.exists():
@@ -1527,29 +1551,6 @@ def run(
         "design_review",
         design_review,
         design_review_command,
-        force,
-        generated,
-        skipped,
-        steps,
-    )
-
-    test_design = out / "test_design.json"
-    run_if_needed(
-        "test_design",
-        test_design,
-        [
-            "python3",
-            "skills/core/test-design-governor/scripts/test_design.py",
-            "render",
-            "--spec",
-            str(spec),
-            "--technical-design",
-            str(technical),
-            "--architecture-design",
-            str(architecture),
-            "--out",
-            str(test_design),
-        ],
         force,
         generated,
         skipped,

@@ -278,6 +278,43 @@ def test_bind_regulated_policy_requires_all_environments_and_roles() -> None:
         assert "observation metric required: business_success_rate" in messages
 
 
+def test_bind_regulated_policy_enforces_identity_audit_and_integrations() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        release_change = json.loads((root / "release_change.json").read_text(encoding="utf-8"))
+        release_change["approvers"] = [
+            {"name": "engineer-a", "role": "release_owner", "approved_at": "2026-07-14T10:00:00+08:00", "evidence_id": "APR-1"},
+            {"name": "qa-b", "role": "qa_owner", "approved_at": "2026-07-14T10:01:00+08:00", "evidence_id": "APR-2"},
+        ]
+        release_change["implementers"] = ["engineer-a"]
+        write_json(root / "release_change.json", release_change)
+        policy = {
+            "required_approver_roles": ["release_owner", "qa_owner", "business_owner"],
+            "approver_required_fields": ["name", "role", "approved_at", "evidence_id"],
+            "minimum_distinct_approvers": 3,
+            "separation_of_duties": True,
+            "required_audit_fields": ["recorded_at", "retention_days", "immutable_evidence_uri"],
+            "required_integration_evidence": ["ci", "change_management", "deployment", "observability"],
+        }
+
+        result = bind_release.bind(root, policy=policy)
+
+        messages = " ".join(item["message"] for item in result["blockers"])
+        assert result["decision"] == "no_go"
+        assert "required approver role missing: business_owner" in messages
+        assert "at least 3 distinct approvers are required" in messages
+        assert "implementers must not approve their own release" in messages
+        assert "approval_audit.recorded_at is required" in messages
+        assert "integration_evidence.ci requires provider" in messages
+
+        release_change["approvers"] = ["release_owner", "qa_owner", "business_owner"]
+        release_change["implementers"] = ["implementer"]
+        write_json(root / "release_change.json", release_change)
+        string_result = bind_release.bind(root, policy=policy)
+        assert any("approver must be structured" in item["message"] for item in string_result["blockers"])
+
+
 def test_docs_change_uses_light_required_evidence() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

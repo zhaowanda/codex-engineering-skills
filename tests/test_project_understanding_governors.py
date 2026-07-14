@@ -123,6 +123,31 @@ def test_source_location_evidence_blocks_reference_only_matches() -> None:
         assert result["blockers"]
 
 
+def test_source_location_evidence_confirms_single_segment_http_route_and_symbol() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "api"
+        repo.mkdir()
+        (repo / "main.py").write_text(
+            '@app.post("/orders")\ndef create_order(payload):\n    return payload\n',
+            encoding="utf-8",
+        )
+        index = build_index.build(repo, "api")
+        index_path = root / "code_index.json"
+        index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+        requirement = root / "requirement.md"
+        requirement.write_text(
+            "Update create_order so POST /orders returns the completed-order confirmation.",
+            encoding="utf-8",
+        )
+
+        result = source_location_evidence.build(repo, index_path, requirement)
+
+        assert result["decision"] == "pass"
+        assert result["confirmed_contracts"] == ["/orders"]
+        assert result["confirmed_anchors"][0]["symbol"] == "create_order"
+
+
 def test_project_onboard_writes_skill_and_manifest() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         overlay = Path(tmp) / "overlay"

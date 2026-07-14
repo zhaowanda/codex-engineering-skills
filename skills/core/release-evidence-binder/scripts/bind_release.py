@@ -219,8 +219,13 @@ def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, A
     release_required_fields = [str(item) for item in as_list(policy.get("release_change_required_fields"))] or ["release_window", "approvers", "rollback_owner"]
     environment_aliases = policy.get("environment_aliases") if isinstance(policy.get("environment_aliases"), dict) else {}
     approver_roles = [str(item) for item in as_list(policy.get("required_approver_roles"))]
+    approver_required_fields = [str(item) for item in as_list(policy.get("approver_required_fields"))]
+    minimum_distinct_approvers = int(policy.get("minimum_distinct_approvers") or 0)
+    separation_of_duties = policy.get("separation_of_duties") is True
     ticket_fields = [str(item) for item in as_list(policy.get("required_ticket_fields"))]
     observation_metrics = [str(item) for item in as_list(policy.get("required_observation_metrics"))]
+    audit_fields = [str(item) for item in as_list(policy.get("required_audit_fields"))]
+    integration_evidence = [str(item) for item in as_list(policy.get("required_integration_evidence"))]
     require_prod_rollback = policy.get("require_prod_rollback_ready", True) is not False
     environment = evidence.get("environment_promotion", {})
     envs = environment.get("environments") if isinstance(environment.get("environments"), list) else []
@@ -252,18 +257,50 @@ def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, A
             gaps.append({"source": "release_change", "message": message})
     approvers = as_list(release_change.get("approvers"))
     approver_role_values = set()
+    approver_identities = set()
     for item in approvers:
         if isinstance(item, dict):
             approver_role_values.add(str(item.get("role") or item.get("type") or item.get("name") or ""))
+            identity = str(item.get("identity") or item.get("name") or "").strip()
+            if identity:
+                approver_identities.add(identity)
+            for field in approver_required_fields:
+                if not item.get(field):
+                    gaps.append({"source": "release_change", "message": f"approver.{field} is required"})
         elif isinstance(item, str):
             approver_role_values.add(item)
+            approver_identities.add(item)
+            if approver_required_fields:
+                gaps.append({"source": "release_change", "message": "approver must be structured under the active release policy"})
     missing_roles = [role for role in approver_roles if role not in approver_role_values]
     for role in missing_roles:
         gaps.append({"source": "release_change", "message": f"required approver role missing: {role}"})
+    if minimum_distinct_approvers and len(approver_identities) < minimum_distinct_approvers:
+        gaps.append({"source": "release_change", "message": f"at least {minimum_distinct_approvers} distinct approvers are required"})
+    if separation_of_duties:
+        implementers = {
+            str(item.get("identity") or item.get("name") or "").strip() if isinstance(item, dict) else str(item).strip()
+            for item in as_list(release_change.get("implementers"))
+            if item
+        }
+        if not implementers:
+            gaps.append({"source": "release_change", "message": "implementers are required for separation-of-duties validation"})
+        overlap = sorted(identity for identity in approver_identities & implementers if identity)
+        if overlap:
+            gaps.append({"source": "release_change", "message": "implementers must not approve their own release", "identities": overlap})
     ticket = release_change.get("ticket") if isinstance(release_change.get("ticket"), dict) else {}
     for field in ticket_fields:
         if not ticket.get(field):
             gaps.append({"source": "release_change", "message": f"ticket.{field} is required"})
+    audit = release_change.get("approval_audit") if isinstance(release_change.get("approval_audit"), dict) else {}
+    for field in audit_fields:
+        if not audit.get(field):
+            gaps.append({"source": "release_change", "message": f"approval_audit.{field} is required"})
+    integrations = release_change.get("integration_evidence") if isinstance(release_change.get("integration_evidence"), dict) else {}
+    for integration in integration_evidence:
+        item = integrations.get(integration) if isinstance(integrations.get(integration), dict) else {}
+        if not item.get("provider") or not (item.get("evidence_id") or item.get("url")):
+            gaps.append({"source": "release_change", "message": f"integration_evidence.{integration} requires provider and evidence_id/url"})
     post_release = evidence.get("post_release_checks", {})
     metric_sources = []
     metric_sources.extend(as_list(release_change.get("observation_metrics")))

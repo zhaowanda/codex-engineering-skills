@@ -79,6 +79,28 @@ def test_post_release_requires_observation_and_close() -> None:
         "closed_by": "owner",
     })
     assert post_release.validate(data)["decision"] == "pass"
+    data.pop("incidents", None)
+    assert post_release.validate(data)["decision"] == "pass"
+
+
+def test_regulated_post_release_requires_provider_bound_audit_evidence() -> None:
+    data = {
+        "schema": "codex-post-release-observation-v1",
+        "observation_window": {"start": "10:00", "end": "10:30", "duration_minutes": 30},
+        "metrics": [{"provider": "metrics", "evidence_id": "MET-1", "observed_at": "10:30", "status": "healthy"}],
+        "logs_checked": [{"provider": "logs", "evidence_id": "LOG-1", "observed_at": "10:30", "status": "healthy"}],
+        "alerts_checked": [{"provider": "alerts", "evidence_id": "ALT-1", "observed_at": "10:30", "status": "healthy"}],
+        "business_checks": [{"provider": "analytics", "evidence_id": "BIZ-1", "observed_at": "10:30", "status": "pass"}],
+        "incidents": [{"id": "INC-1", "status": "resolved"}],
+        "close": True,
+        "closed_by": "release-owner",
+        "closed_at": "2026-07-14T10:31:00+08:00",
+        "close_evidence_id": "CLOSE-1",
+    }
+
+    assert post_release.validate(data, regulated=True)["decision"] == "pass"
+    data["metrics"][0]["status"] = "degraded"
+    assert post_release.validate(data, regulated=True)["decision"] == "block"
 
 
 def run_all() -> None:

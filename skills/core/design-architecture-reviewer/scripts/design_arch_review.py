@@ -181,6 +181,7 @@ def review_specialty_artifacts(specialty_artifacts: dict[str, dict[str, Any]], f
         "data_security_review.json": "security_review",
         "performance_review.json": "performance_review",
         "cross_repo_readiness.json": "cross_repo_contract_review",
+        "test_design.json": "testability_review",
     }
     summary: list[dict[str, Any]] = []
     blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "needs_review", "needs_evidence", "no_go"}
@@ -1009,6 +1010,7 @@ def main() -> int:
     p_review.add_argument("--data-security-review")
     p_review.add_argument("--performance-review")
     p_review.add_argument("--cross-repo-readiness")
+    p_review.add_argument("--test-design")
     p_review.add_argument("--out")
     p_validate = sub.add_parser("validate")
     p_validate.add_argument("--file", required=True)
@@ -1024,6 +1026,7 @@ def main() -> int:
             "data_security_review.json": args.data_security_review,
             "performance_review.json": args.performance_review,
             "cross_repo_readiness.json": args.cross_repo_readiness,
+            "test_design.json": args.test_design,
         }
         result = review(
             read_json(args.technical_design),

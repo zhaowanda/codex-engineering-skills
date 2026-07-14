@@ -30,6 +30,13 @@ required_approver_roles:
   - release_owner
   - qa_owner
   - business_owner
+approver_required_fields:
+  - name
+  - role
+  - approved_at
+  - evidence_id
+minimum_distinct_approvers: 3
+separation_of_duties: true
 required_ticket_fields:
   - id
   - url
@@ -38,3 +45,12 @@ required_observation_metrics:
   - error_rate
   - latency_p95
   - business_success_rate
+required_audit_fields:
+  - recorded_at
+  - retention_days
+  - immutable_evidence_uri
+required_integration_evidence:
+  - ci
+  - change_management
+  - deployment
+  - observability

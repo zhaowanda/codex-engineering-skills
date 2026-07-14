@@ -11,8 +11,9 @@ requirement input
 -> UI/API/data/observability specialty designs as applicable
 -> technical design
 -> architecture design
--> design review
--> test design and test data plan
+-> executable test design
+-> integrated design review including testability
+-> test data plan
 -> delivery plan
 -> traceability matrix when required
 -> delivery plan review
