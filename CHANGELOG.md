@@ -5,6 +5,7 @@
 ### Changed
 
 - Added requirement-specific source-location evidence with confirmed, reference-only, and rejected code candidates; spec, design, test, plan, traceability, and auto-runner gates now fail closed instead of promoting broad code-index matches into implementation scope.
+- Preserved source-confirmed API contracts in system sequences, rebuilt ordered business process flows from triggers and acceptance outcomes, and required human designs to include both Mermaid flowcharts and sequence diagrams.
 - Upgraded the shared artifact validator with typed fields, non-empty evidence, cardinality, constants, patterns, cross-field rules, and adversarial correct-schema/vacuous-evidence rejection for all 45 stages.
 - Upgraded workflow lineage to `codex-workflow-artifact-lineage-v2` with semantic artifact digests, deterministic input replacement, command digests, Git context, and permit binding where available.
 - Split skill maturity into behavior-backed `expert_contract` and real-project-backed `expert_proven`; no skill or framework receives proven expert status without approved replay calibration.

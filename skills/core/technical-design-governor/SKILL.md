@@ -43,6 +43,8 @@ Then run `design-architecture-reviewer` after architecture design exists.
 - When project-understanding artifacts are available, populate current-state analysis, code entrypoints, modules, routes, tests, and compatibility notes from real repository facts.
 - When source-location evidence exists, select owner modules only from `confirmed_anchors` and block when none are confirmed.
 - Never promote `rejected_candidates` or broad repository-index hints into implementation modules.
+- Build `process_flow` as one ordered business flow from confirmed triggers, system actions, and observable acceptance outcomes; do not turn document headings or correction notes into standalone flows.
+- Prefer `source_location_evidence.confirmed_contracts` for API contracts and system interaction sequence participants.
 - Do not present fallback phrases such as `target module to be confirmed` as expert-ready facts; keep them as review-blocking uncertainty.
 - Preserve open questions; do not hide uncertainty.
 - Include at least two solution options and a selected option.

@@ -368,6 +368,25 @@ def test_rejected_source_candidate_blocks_design_even_with_high_confidence() -> 
     assert "rejected source candidates leaked" in messages
 
 
+def test_rejected_source_candidate_in_sequence_blocks_design() -> None:
+    technical, architecture = complete_design()
+    evidence = {
+        "decision": "pass",
+        "confirmed_anchors": [{"path": "src/checkout/CheckoutSummary.tsx", "confidence": "high"}],
+        "rejected_candidates": [{"path": "src/device/iotPoolMonitor.vue", "reason": "weak match"}],
+    }
+    technical["source_location_evidence"] = evidence
+    architecture["source_location_evidence"] = evidence
+    technical["system_interaction_sequence"]["participants"].append("src/device/iotPoolMonitor.vue")
+    technical["system_interaction_sequence"]["sequence"].append({
+        "from": "src/checkout/CheckoutSummary.tsx",
+        "to": "src/device/iotPoolMonitor.vue",
+        "action": "wrong inferred call",
+    })
+    result = design_arch_review.review(technical, architecture)
+    assert "rejected source candidates leaked" in json_dumps(result)
+
+
 def test_complex_breakdown_flattened_to_one_module_needs_revision() -> None:
     technical, architecture = complete_design()
     technical["requirement_breakdown"] = [

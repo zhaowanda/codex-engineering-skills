@@ -385,6 +385,7 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
         ]},
         "source_location_evidence": {
             "decision": "pass",
+            "confirmed_contracts": ["/operate/api/dualCamera/playbackStreamControl"],
             "confirmed_anchors": [
                 {"path": "src/views/plugIn/accidentAnalysis.vue", "confidence": "high", "evidence_chain": [{"term": "playbackStreamControl"}]},
                 {"path": "src/components/DualCameraLivePlayer.vue", "confidence": "high", "evidence_chain": [{"term": "DualCameraLivePlayer"}]},
@@ -397,6 +398,9 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
     assert tech["code_entrypoint_confidence"]["level"] == "high"
     assert tech["source_location_evidence"]["decision"] == "pass"
     assert {item["module"] for item in tech["module_decomposition"]} == {"src/views/plugIn/accidentAnalysis.vue", "src/components/DualCameraLivePlayer.vue"}
+    assert tech["api_contracts"][0]["contract"] == "/operate/api/dualCamera/playbackStreamControl"
+    assert {item["to"] for item in tech["system_interaction_sequence"]["sequence"]} >= {"/operate/api/dualCamera/playbackStreamControl", "src/components/DualCameraLivePlayer.vue"}
+    assert len(tech["process_flow"][0]["steps"]) >= 2
 
 
 def test_design_options_are_generated_from_impact_surface() -> None:

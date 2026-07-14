@@ -76,11 +76,11 @@ def test_source_location_evidence_rejects_generic_device_matches() -> None:
         (repo / "src/views/device").mkdir(parents=True)
         (repo / "src/components").mkdir(parents=True)
         (repo / "src/views/plugIn/accidentAnalysis.vue").write_text(
-            "视频回放 openPlaybackDialog controlPlayback playbackStreamControl DualCameraLivePlayer",
+            "视频回放 openPlaybackDialog controlPlayback /operate/api/dualCamera/playbackStreamControl DualCameraLivePlayer",
             encoding="utf-8",
         )
         (repo / "src/components/DualCameraLivePlayer.vue").write_text(
-            "DualCameraLivePlayer playbackStreamControl refreshPlaybackStream flvjs",
+            "DualCameraLivePlayer playbackMode refreshPlaybackStream flvjs",
             encoding="utf-8",
         )
         (repo / "src/views/device/replacementSettlement.vue").write_text(
@@ -92,7 +92,7 @@ def test_source_location_evidence_rejects_generic_device_matches() -> None:
         index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
         requirement = root / "requirement.md"
         requirement.write_text(
-            "设备视频回放：从 openPlaybackDialog 调用 playbackStreamControl，并复用 DualCameraLivePlayer。",
+            "设备视频回放：从 openPlaybackDialog 调用 `/operate/api/dualCamera/playbackStreamControl`，并通过 DualCameraLivePlayer 的 playbackMode 刷新播放。",
             encoding="utf-8",
         )
         result = source_location_evidence.build(repo, index_path, requirement)
@@ -101,6 +101,7 @@ def test_source_location_evidence_rejects_generic_device_matches() -> None:
         assert result["schema"] == "codex-source-location-evidence-v1"
         assert "src/views/plugIn/accidentAnalysis.vue" in confirmed
         assert "src/components/DualCameraLivePlayer.vue" in confirmed
+        assert result["confirmed_contracts"] == ["/operate/api/dualCamera/playbackStreamControl"]
         assert "src/views/device/replacementSettlement.vue" not in confirmed
         assert "src/views/device/replacementSettlement.vue" in rejected
 

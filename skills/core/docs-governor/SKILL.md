@@ -35,6 +35,7 @@ delivery docs repository setup
 - Human-readable docs default to English. Pass `--doc-language zh` when the requirement or user explicitly asks for Chinese docs.
 - Synced human docs should read as formal review documents, not JSON dumps: include background, goals, clarification log, decisions, diagrams, evidence references, test/rollback/release sections, and explicit missing-input explanations.
 - Human-readable design docs should expose expert review sections for data model/table schema, multi-system sequence, MQ upstream/downstream trigger mechanism, cache strategy, transaction consistency, and observability when those artifacts exist.
+- Every human-readable design must render both a Mermaid business `flowchart` and a Mermaid `sequenceDiagram`; render an explicit single-module sequence note when cross-system interaction is not applicable.
 - Prefer language-neutral document models plus i18n rendering for human docs; do not generate English prose first and translate the finished document into Chinese.
 - Keep code identifiers, table names, fields, API routes, and user-provided business text unchanged while translating section titles, field labels, statuses, and fixed review phrases.
 - Before implementation, validate docs root with `--require-git`; a plain local folder is not enough.

@@ -1813,7 +1813,16 @@ def render_system_sequence_mermaid(
     sequence = technical.get("system_interaction_sequence") if isinstance(technical.get("system_interaction_sequence"), dict) else {}
     if sequence.get("applicable") is not True:
         reason = text(sequence.get("not_applicable_reason") or sequence.get("reason"), "未涉及多系统交互" if language == "zh" else "no multi-system interaction")
-        return f"- {reason}"
+        owner = human_value((as_list(technical.get("module_decomposition")) or [{}])[0].get("module") if isinstance((as_list(technical.get("module_decomposition")) or [{}])[0], dict) else "", language, "责任模块" if language == "zh" else "Owner module")
+        return "\n".join([
+            f"- {reason}",
+            "",
+            "```mermaid",
+            "sequenceDiagram",
+            f"  participant M as {mermaid_flow_label(owner, language, 48)}",
+            f"  Note over M: {mermaid_flow_label(reason, language, 96)}",
+            "```",
+        ])
     participant_names = [human_value(item, language, "") for item in as_list(sequence.get("participants")) if human_value(item, language, "")]
     steps: list[dict[str, str]] = []
     for item in as_list(sequence.get("sequence")):

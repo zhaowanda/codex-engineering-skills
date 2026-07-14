@@ -890,6 +890,18 @@ def test_process_mermaid_renders_reviewable_flow_lanes() -> None:
     assert "classDef action" in rendered
 
 
+def test_non_cross_system_design_still_renders_sequence_explanation() -> None:
+    rendered = docs_governor.render_system_sequence_mermaid(
+        {
+            "module_decomposition": [{"module": "src/service.py"}],
+            "system_interaction_sequence": {"applicable": False, "reason": "single module local behavior"},
+        },
+        "en",
+    )
+    assert "sequenceDiagram" in rendered
+    assert "src/service.py" in rendered
+
+
 def test_engineering_sequence_includes_reused_contract_for_single_repo_boundary() -> None:
     rendered = docs_governor.render_system_sequence_mermaid(
         {"system_interaction_sequence": {"applicable": True, "participants": ["用户或客户端"], "sequence": ["用户点击"]}},

@@ -39,6 +39,8 @@ spec
 - Require current-state analysis with concrete code entrypoints, interface examples for API changes, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
 - When source-location evidence exists, block selected entrypoints and implementation modules outside `confirmed_anchors`.
 - Block rejected candidates that leak into modules, selected options, deployment, rollback, or implementation scope.
+- Also block rejected candidates in process flow, current-state analysis, logical data flow, API contracts, and system interaction sequences.
+- Require a multi-step business flow when multiple acceptance mappings describe an ordered user/system workflow.
 - Do not accept manually asserted high entrypoint confidence without direct source confirmation.
 - Require data model/table schema detail when data changes are signaled.
 - Require multi-system sequence, timeout/retry, idempotency, and consistency handling when API/cross-system interaction is signaled.

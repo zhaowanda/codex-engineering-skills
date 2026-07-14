@@ -554,6 +554,7 @@ def test_human_doc_review_strict_requires_design_depth_for_designs() -> None:
         assert result["decision"] == "block"
         blocked_sources = {item["source"] for item in result["blockers"]}
         assert {"options", "risk", "rollback", "test", "traceability", "implementation_boundary"}.issubset(blocked_sources)
+        assert "system_sequence_diagram" in blocked_sources
 
 
 def test_human_doc_review_blocks_design_decision_before_options() -> None:

@@ -125,6 +125,7 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
             confirmed.append({
                 **candidate,
                 "matched_requirement_terms": matched[:20],
+                "matched_contract_terms": [term for term in matched if term.startswith("/")],
                 "strong_terms": strong[:12],
                 "evidence_chain": evidence,
                 "source_digest": source_digests[relative],
@@ -139,6 +140,19 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
             })
     confirmed.sort(key=lambda item: (item["confidence"] == "high", len(item["matched_requirement_terms"]), item["index_score"]), reverse=True)
     modify_candidates = [item for item in confirmed if item.get("role") == "modify_candidate"]
+    matched_contract_terms = {
+        term.lower()
+        for item in confirmed
+        if item.get("role") == "modify_candidate"
+        for term in item.get("matched_contract_terms", [])
+        if term.startswith("/")
+    }
+    confirmed_contracts: list[str] = []
+    for contract in re.findall(r"(?:/[A-Za-z0-9_{}.*-]+){2,}", requirement):
+        if contract.lower() not in matched_contract_terms or contract.lower().endswith(tuple(SOURCE_SUFFIXES)) or not ("/api/" in contract.lower() or "{" in contract):
+            continue
+        if contract not in confirmed_contracts:
+            confirmed_contracts.append(contract)
     decision = "pass" if modify_candidates else "block"
     return {
         "schema": SCHEMA,
@@ -147,6 +161,7 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
         "query_terms": terms,
         "candidates": candidates,
         "confirmed_anchors": confirmed,
+        "confirmed_contracts": confirmed_contracts,
         "rejected_candidates": rejected,
         "decision": decision,
         "blockers": [] if modify_candidates else [{"source": "source_location_evidence", "message": "no requirement-specific modify candidate was confirmed"}],
