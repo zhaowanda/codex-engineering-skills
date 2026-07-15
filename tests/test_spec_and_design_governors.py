@@ -6,7 +6,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -31,11 +30,37 @@ api_contract = load_module("api_contract", ROOT / "skills/core/api-contract-gove
 data_model = load_module("data_model", ROOT / "skills/core/data-model-governor/scripts/data_model.py")
 domain_model = load_module("domain_model", ROOT / "skills/core/domain-model-governor/scripts/domain_model.py")
 observability_design = load_module("observability_design", ROOT / "skills/core/observability-design-governor/scripts/observability_design.py")
+agent_runtime = load_module("agent_runtime_spec_tests", ROOT / "skills/core/auto-runner/scripts/agent_runtime.py")
+harness_validation = load_module("harness_validation_spec_tests", ROOT / "skills/core/auto-runner/scripts/harness_validation.py")
+requirement_ingestor = load_module("requirement_ingestor_spec_tests", ROOT / "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py")
 
 
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def test_video_playback_requirement_golden_scope_and_readiness() -> None:
+    requirement = ROOT / "examples/real-case-regressions/REQ-device-video-playback-smooth.md"
+    text = requirement.read_text(encoding="utf-8")
+    ir = requirement_ingestor.parse_markdown_ir(text, "REQ-VIDEO", requirement)
+    normalized = spec_governor.normalize("REQ-VIDEO", "设备视频回放流畅性优化", text, requirement_ir=ir)
+    assert normalized["decision"] == "ready_for_design"
+    assert normalized["repo_impact_map"]["multi_repo_required"] is False
+    assert set(normalized["scope_model"]["modify"]) >= {"src/views/plugIn/accidentAnalysis.vue", "src/components/DualCameraLivePlayer.vue"}
+    assert set(normalized["scope_model"]["forbidden"]) >= {"src/views/device/replacementSettlement.vue", "src/views/device/iotPoolMonitor.vue"}
+    assert not [item for item in normalized["ambiguities"] if item.get("required")]
+
+
+def test_settlement_pagination_requirement_keeps_single_owner_scope() -> None:
+    requirement = ROOT / "examples/real-case-regressions/REQ-operate-settlement-order-pagination.md"
+    text = requirement.read_text(encoding="utf-8")
+    ir = requirement_ingestor.parse_markdown_ir(text, "REQ-PAGE", requirement)
+    normalized = spec_governor.normalize("REQ-PAGE", "Settlement order pagination", text, requirement_ir=ir)
+    assert normalized["decision"] == "ready_for_design"
+    assert normalized["repo_impact_map"]["multi_repo_required"] is False
+    assert "src/views/device/replacementSettlement.vue" in normalized["scope_model"]["modify"]
+    assert "src/views/device/stockManager.vue" in normalized["scope_model"]["forbidden"]
 
 
 def test_spec_preserves_long_prefixed_field_values() -> None:
@@ -114,6 +139,14 @@ def write_ready_small_feature(root: Path, docs_root: Path, doc_id: str = "REQ-1"
     }
     for name, payload in payloads.items():
         write_json(root / name, payload)
+    agent_runtime.start(root, doc_id, "small_feature")
+    agent_runtime.append_event(root, "requirement_ingested", "test-fixture")
+    agent_runtime.checkpoint(root, "intake", ["requirement_ingestion.json"])
+    agent_runtime.append_event(root, "design_completed", "test-fixture")
+    agent_runtime.checkpoint(root, "design", ["technical_design.json", "architecture_design.json", "delivery_plan.json"])
+    write_json(root / "harness_validation.json", harness_validation.validate(root, checkpoint="design"))
+    agent_runtime.append_event(root, "edit_authorized", "test-fixture", target="src/app.py")
+    agent_runtime.checkpoint(root, "pre_edit", ["edit_permit.json", "delivery_plan.json"])
     questions = json.loads((root / "open_questions.json").read_text(encoding="utf-8"))
     questions["spec_digest"] = delivery_runner.canonical_artifact_digest(payloads["spec.json"])
     write_json(root / "open_questions.json", questions)
@@ -423,6 +456,35 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
     assert len(tech["process_flow"][0]["steps"]) >= 2
 
 
+def test_contract_selection_uses_breakdown_action_semantics() -> None:
+    contracts = [
+        "/operate/api/dualCamera/playbackStreamStart",
+        "/operate/api/dualCamera/playbackStreamControl",
+        "/operate/api/dualCamera/playbackStreamEnd",
+    ]
+    assert technical_design.contract_for_breakdown(contracts, {"id": "BRK-1", "summary": "9201 成功后开始回放"}).endswith("playbackStreamStart")
+    assert technical_design.contract_for_breakdown(contracts, {"id": "BRK-2", "summary": "快进；发送一次 9202 控制请求；成功后清理旧缓冲"}).endswith("playbackStreamControl")
+    assert technical_design.contract_for_breakdown(contracts, {"id": "BRK-3", "summary": "拖拽定位后恢复播放"}).endswith("playbackStreamControl")
+    assert technical_design.contract_for_breakdown(contracts, {"id": "BRK-4", "summary": "关闭弹窗时停止并清理播放器"}).endswith("playbackStreamEnd")
+
+
+def test_requirement_breakdown_prefers_multiple_executable_acceptance_slices() -> None:
+    spec = {
+        "requirements": [
+            {"id": "REQ-1", "summary": "Improve the overall playback experience."},
+            {"id": "REQ-2", "summary": "Current playback can stall after controls."},
+        ],
+        "acceptance_criteria": [
+            {"id": "AC-1", "criteria": "Start playback and show the first frame."},
+            {"id": "AC-2", "criteria": "Fast-forward sends one control request and rebuilds the player."},
+            {"id": "AC-3", "criteria": "Closing the dialog stops playback and cleans resources."},
+        ],
+    }
+    breakdown = technical_design.requirement_breakdown(spec)
+    assert [item["source_id"] for item in breakdown] == ["AC-1", "AC-2", "AC-3"]
+    assert all(item["source"] == "spec.acceptance_criteria" for item in breakdown)
+
+
 def test_design_options_are_generated_from_impact_surface() -> None:
     spec = spec_governor.normalize(
         "REQ-DYNAMIC",
@@ -442,6 +504,10 @@ def test_design_options_are_generated_from_impact_surface() -> None:
         {"area": "data"},
         {"area": "permission"},
         {"area": "business_flow"},
+    ]
+    spec["impact_applicability"] = [
+        {"area": area, "status": "required", "reason": "test fixture exercises multi-surface option generation"}
+        for area in ["ui", "api", "data", "permission", "business_flow"]
     ]
     tech = technical_design.render(spec)
     arch = architecture_design.render(spec, tech)
@@ -666,7 +732,7 @@ def test_delivery_runner_reports_next_stage() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         status = delivery_runner.inspect(root)
-        assert status["next_stage"] == "requirement_ingestion"
+        assert status["next_stage"] == "runtime_session"
         assert status["next_action_type"] == "fix_blocker"
         assert status["primary_next_action"]["action_type"] == "fix_blocker"
         assert status["can_implement"] is False
@@ -675,8 +741,23 @@ def test_delivery_runner_reports_next_stage() -> None:
         (root / "requirement.normalized.txt").write_text("Requirement\n", encoding="utf-8")
         spec = {"schema": "codex-spec-v1", "doc_id": "REQ-4", "decision": "pass", "requirements": [{"id": "REQ-4", "statement": "Synthetic requirement"}], "acceptance_criteria": [{"id": "AC-1", "statement": "Synthetic acceptance"}]}
         write_json(root / "spec.json", spec)
+        agent_runtime.start(root, "REQ-4", "small_feature")
+        agent_runtime.append_event(root, "requirement_ingested", "test-fixture")
+        agent_runtime.checkpoint(root, "intake", ["requirement_ingestion.json"])
         delivery_runner.CONTRACT.bind_lineage(root / "requirement_ingestion.json", "test-fixture", [], command=["test-fixture", "requirement_ingestion"])
-        delivery_runner.CONTRACT.bind_lineage(root / "spec.json", "test-fixture", [root / "requirement.normalized.txt"], command=["test-fixture", "spec"])
+        delivery_runner.CONTRACT.bind_lineage(root / "runtime/session.json", "test-fixture", [], command=["test-fixture", "runtime_session"])
+        delivery_runner.CONTRACT.bind_lineage(
+            root / "runtime/checkpoints/intake.json",
+            "test-fixture",
+            [root / "requirement_ingestion.json"],
+            command=["test-fixture", "runtime_intake"],
+        )
+        delivery_runner.CONTRACT.bind_lineage(
+            root / "spec.json",
+            "test-fixture",
+            [root / "requirement.normalized.txt", root / "runtime/checkpoints/intake.json"],
+            command=["test-fixture", "spec"],
+        )
         write_bound_questions(root)
         status = delivery_runner.inspect(root)
         assert status["next_stage"] == "domain_model_design"

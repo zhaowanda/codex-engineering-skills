@@ -19,6 +19,7 @@ design review
 -> code review gate
 -> test evidence gate
 -> release change approval
+-> Agent Runtime release checkpoint / provider attestations
 -> release-evidence-binder
 -> post-release observation
 ```
@@ -33,6 +34,7 @@ design review
 - `code_review_gate.json`
 - `test_evidence_gate.json`
 - `ci_execution_evidence.json`
+- `runtime/checkpoints/release.json` with passed CI, change-management, deployment, and observability attestations
 - rollback evidence from `delivery_plan.json`, `release_change.json`, or `post_release_checks.json`
 - post-release checks from `post_release_checks.json`, `release_change.json`, or `delivery_plan.json`
 
@@ -51,13 +53,15 @@ Optional but binding when present:
 ## Rules
 
 - Bind every required and optional evidence artifact that is relevant to the change type.
+- Require a passed `codex-runtime-checkpoint-v1` release checkpoint and one verified attestation for each required provider type, including documentation-only release binding.
 - Do not downgrade missing required evidence to a warning for code changes.
 - Treat failed commands, blocked gates, unresolved high-risk findings, missing rollback, or missing post-release checks as blockers.
 - Treat unclosed `implementation_completion_gate.evidence_followups` as blockers for code/config releases.
 - Require `evidence_gap_summary.json` when implementation follow-ups exist, so release binding can prove required evidence was not skipped.
 - Require `evidence_gap_summary.implementation_followup_requirements` to cover every surface declared by `implementation_completion_gate.evidence_followups`; an empty pass summary is not sufficient.
 - Require surface-specific artifacts for implementation follow-ups when the surface has a dedicated gate; for example `frontend_acceptance` requires `frontend_acceptance.json`, and `configuration` requires `configuration_readiness.json`.
-- Treat accepted risks, manual waivers, non-blocking warnings, or incomplete optional evidence as conditional release signals.
+- Validate optional `governance_waivers.json` bundles against `codex-governance-waiver-v1`; invalid, self-approved, mismatched, or expired waivers block release.
+- Treat valid structured waivers, accepted risks, non-blocking warnings, or incomplete optional evidence as conditional release signals; a waiver never erases an upstream blocker.
 - Keep documentation-only release binding separate from code-change release binding.
 
 ## Decision Rules

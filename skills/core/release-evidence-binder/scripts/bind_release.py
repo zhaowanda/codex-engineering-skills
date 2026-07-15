@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
-
 
 SCHEMA = "codex-release-gate-v1"
 BLOCK_DECISIONS = {"block", "blocked", "no_go", "fail", "failed", "request_changes", "needs_refactor"}
@@ -30,6 +30,18 @@ FOLLOWUP_REQUIRED_ARTIFACTS = {
 }
 
 
+def load_governance_contract() -> Any:
+    path = Path(__file__).resolve().parents[4] / "skills/core/delivery-runner/scripts/governance_contract.py"
+    spec = importlib.util.spec_from_file_location("release_governance_contract", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GOVERNANCE_CONTRACT = load_governance_contract()
+
+
 def load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -51,7 +63,7 @@ def load_policy(path: Path | None) -> dict[str, Any]:
             return {}
         return data if isinstance(data, dict) else {}
     try:
-        import yaml  # type: ignore
+        import yaml  # type: ignore[import-untyped]
 
         data = yaml.safe_load(text)
         return data if isinstance(data, dict) else {}
@@ -217,7 +229,7 @@ def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, A
     required_envs = [str(item) for item in as_list(policy.get("required_environments"))] or ["pre", "prod"]
     env_required_fields = [str(item) for item in as_list(policy.get("environment_required_fields"))] or ["entry_criteria", "exit_criteria", "validation_evidence", "approver"]
     release_required_fields = [str(item) for item in as_list(policy.get("release_change_required_fields"))] or ["release_window", "approvers", "rollback_owner"]
-    environment_aliases = policy.get("environment_aliases") if isinstance(policy.get("environment_aliases"), dict) else {}
+    environment_aliases: dict[str, Any] = dict(policy.get("environment_aliases") or {}) if isinstance(policy.get("environment_aliases"), dict) else {}
     approver_roles = [str(item) for item in as_list(policy.get("required_approver_roles"))]
     approver_required_fields = [str(item) for item in as_list(policy.get("approver_required_fields"))]
     minimum_distinct_approvers = int(policy.get("minimum_distinct_approvers") or 0)
@@ -228,8 +240,10 @@ def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, A
     integration_evidence = [str(item) for item in as_list(policy.get("required_integration_evidence"))]
     require_prod_rollback = policy.get("require_prod_rollback_ready", True) is not False
     environment = evidence.get("environment_promotion", {})
-    envs = environment.get("environments") if isinstance(environment.get("environments"), list) else []
-    by_name = {item.get("name"): item for item in envs if isinstance(item, dict)}
+    envs: list[Any] = list(environment.get("environments") or []) if isinstance(environment.get("environments"), list) else []
+    by_name: dict[str, dict[str, Any]] = {
+        str(item.get("name")): item for item in envs if isinstance(item, dict) and item.get("name")
+    }
     for env in required_envs:
         aliases = [env, *[str(item) for item in as_list(environment_aliases.get(env))]]
         item = next((by_name.get(alias) for alias in aliases if by_name.get(alias)), None)
@@ -244,7 +258,7 @@ def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, A
         if env == "prod" and require_prod_rollback and item.get("rollback_ready") is not True:
             gaps.append({"source": "environment_promotion", "message": "prod.rollback_ready must be true"})
     release_change = evidence.get("release_change", {})
-    window = release_change.get("release_window") if isinstance(release_change.get("release_window"), dict) else {}
+    window: dict[str, Any] = dict(release_change.get("release_window") or {}) if isinstance(release_change.get("release_window"), dict) else {}
     if "release_window" in release_required_fields and not all(window.get(key) for key in ["start", "end", "timezone"]):
         gaps.append({"source": "release_change", "message": "release_window start/end/timezone are required"})
     for key in release_required_fields:
@@ -288,18 +302,18 @@ def release_policy_gaps(evidence: dict[str, dict[str, Any]], policy: dict[str, A
         overlap = sorted(identity for identity in approver_identities & implementers if identity)
         if overlap:
             gaps.append({"source": "release_change", "message": "implementers must not approve their own release", "identities": overlap})
-    ticket = release_change.get("ticket") if isinstance(release_change.get("ticket"), dict) else {}
+    ticket: dict[str, Any] = dict(release_change.get("ticket") or {}) if isinstance(release_change.get("ticket"), dict) else {}
     for field in ticket_fields:
         if not ticket.get(field):
             gaps.append({"source": "release_change", "message": f"ticket.{field} is required"})
-    audit = release_change.get("approval_audit") if isinstance(release_change.get("approval_audit"), dict) else {}
+    audit: dict[str, Any] = dict(release_change.get("approval_audit") or {}) if isinstance(release_change.get("approval_audit"), dict) else {}
     for field in audit_fields:
         if not audit.get(field):
             gaps.append({"source": "release_change", "message": f"approval_audit.{field} is required"})
-    integrations = release_change.get("integration_evidence") if isinstance(release_change.get("integration_evidence"), dict) else {}
+    integrations: dict[str, Any] = dict(release_change.get("integration_evidence") or {}) if isinstance(release_change.get("integration_evidence"), dict) else {}
     for integration in integration_evidence:
-        item = integrations.get(integration) if isinstance(integrations.get(integration), dict) else {}
-        if not item.get("provider") or not (item.get("evidence_id") or item.get("url")):
+        integration_item: dict[str, Any] = dict(integrations.get(integration) or {}) if isinstance(integrations.get(integration), dict) else {}
+        if not integration_item.get("provider") or not (integration_item.get("evidence_id") or integration_item.get("url")):
             gaps.append({"source": "release_change", "message": f"integration_evidence.{integration} requires provider and evidence_id/url"})
     post_release = evidence.get("post_release_checks", {})
     metric_sources = []
@@ -324,6 +338,58 @@ def bind(artifact_dir: Path, change_type: str = "code", policy: dict[str, Any] |
     warnings: list[dict[str, Any]] = []
     evidence_summary: list[dict[str, Any]] = []
     source_files: list[str] = []
+
+    waiver_bundle = load_json(artifact_dir / "governance_waivers.json")
+    waiver_validations: list[dict[str, Any]] = []
+    if waiver_bundle:
+        source_files.append("governance_waivers.json")
+        if waiver_bundle.get("schema") != "codex-governance-waiver-bundle-v1":
+            blockers.append({"source": "governance_waivers", "message": "governance waiver bundle schema is invalid"})
+        bundle_subject = str(waiver_bundle.get("subject") or "")
+        runtime_session = load_json(artifact_dir / "runtime/session.json")
+        runtime_subject = str(runtime_session.get("doc_id") or "")
+        if runtime_subject and bundle_subject != runtime_subject:
+            blockers.append({"source": "governance_waivers", "message": "governance waiver bundle subject does not match Runtime session"})
+        waivers = waiver_bundle.get("waivers") if isinstance(waiver_bundle.get("waivers"), list) else []
+        if not bundle_subject or not waivers:
+            blockers.append({"source": "governance_waivers", "message": "governance waiver bundle requires subject and waivers"})
+        for item in waivers:
+            validation = GOVERNANCE_CONTRACT.validate_waiver(
+                item if isinstance(item, dict) else {},
+                expected_subject=bundle_subject,
+            )
+            waiver_validations.append(validation)
+            if validation.get("decision") != "pass":
+                blockers.extend(
+                    {"source": "governance_waivers", "message": blocker.get("message", "invalid governance waiver")}
+                    for blocker in validation.get("blockers", [])
+                )
+        if waivers and waiver_validations and all(item.get("decision") == "pass" for item in waiver_validations):
+            warnings.append({"source": "governance_waivers", "message": "release includes approved governance waivers", "waiver_count": len(waivers)})
+
+    runtime_release = load_json(artifact_dir / "runtime/checkpoints/release.json")
+    if not runtime_release:
+        blockers.append({"source": "runtime_release", "message": "runtime/checkpoints/release.json is required for release"})
+    elif runtime_release.get("schema") != "codex-runtime-checkpoint-v1" or runtime_release.get("decision") != "pass":
+        blockers.append({"source": "runtime_release", "message": "Runtime release checkpoint is missing, invalid, or blocked"})
+    else:
+        provider_attestations = as_list(runtime_release.get("provider_attestations"))
+        verified_types = {
+            str(item.get("provider_type"))
+            for item in provider_attestations
+            if isinstance(item, dict) and item.get("decision") == "pass" and item.get("provider_type")
+        }
+        required_provider_types = {"ci", "change_management", "deployment", "observability"}
+        missing_provider_types = sorted(required_provider_types - verified_types)
+        if missing_provider_types:
+            blockers.append(
+                {
+                    "source": "runtime_release",
+                    "message": "Runtime release checkpoint is missing required verified provider attestations",
+                    "provider_types": missing_provider_types,
+                }
+            )
+        source_files.append("runtime/checkpoints/release.json")
 
     required = required_for(change_type)
     for name in required:
@@ -404,6 +470,7 @@ def bind(artifact_dir: Path, change_type: str = "code", policy: dict[str, Any] |
         "source_files": sorted(set(source_files)),
         "release_policy": policy or {},
         "implementation_evidence_followups": as_list(evidence.get("implementation_completion_gate", {}).get("evidence_followups")),
+        "waiver_validations": waiver_validations,
         "next_action": "Do not release. Fix blockers and re-bind evidence." if blockers else "Proceed to release approval/change process.",
     }
 

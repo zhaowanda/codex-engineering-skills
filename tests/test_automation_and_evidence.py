@@ -217,7 +217,22 @@ def test_post_change_sync_allows_explicit_project_skill_index_waiver() -> None:
             {
                 "schema": "codex-project-skill-index-sync-v1",
                 "decision": "waived",
-                "waiver_reason": "touches experimental code that is not promoted to the project skill index",
+                "doc_id": "REQ-1",
+                "waiver": {
+                    "schema": "codex-governance-waiver-v1",
+                    "waiver_id": "WV-INDEX-1",
+                    "subject": "REQ-1",
+                    "affected_gates": ["project_skill_index_sync"],
+                    "reason": "touches experimental code that is not promoted to the project skill index",
+                    "risk": "index lookup may omit the experimental module",
+                    "owner": {"identity": "implementation-owner"},
+                    "approver": {"identity": "architecture-owner", "approved_at": "2026-07-15T08:00:00Z", "evidence_id": "APR-1"},
+                    "issued_at": "2026-07-15T08:00:00Z",
+                    "expires_at": "2099-07-16T08:00:00Z",
+                    "compensating_controls": ["retain source-location evidence in delivery artifacts"],
+                    "audit": {"immutable_evidence_uri": "https://evidence.example/waivers/WV-INDEX-1", "retention_days": 365},
+                    "status": "approved",
+                },
             },
         )
         result = post_change_sync.generate(repo, artifact_dir, doc_id="REQ-1")

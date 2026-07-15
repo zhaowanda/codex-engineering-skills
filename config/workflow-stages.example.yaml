@@ -1,4 +1,4 @@
-schema: codex-workflow-stages-v3
+schema: codex-workflow-stages-v4
 default_validator: builtin:artifact-contract-v2
 default_lineage_schema: codex-workflow-artifact-lineage-v2
 phase_order:
@@ -10,6 +10,29 @@ phase_order:
   - release_readiness
   - post_release
 stages:
+  - name: runtime_session
+    artifact: runtime/session.json
+    expected_schema: codex-agent-runtime-session-v1
+    required_fields: [session_id, doc_id, status, event_count, event_root_digest, decision, blockers]
+    evidence_fields: [session_id, event_root_digest]
+    field_constraints:
+      session_id:
+        type: string
+        non_empty: true
+      status:
+        type: string
+        enum: [active, closed]
+      event_count:
+        type: number
+        min_value: 1
+      event_root_digest:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+    phase: requirement
+    depends_on: []
+    implementation_required: true
+    release_required: true
+    accepted_decisions: [ready]
   - name: requirement_ingestion
     artifact: requirement_ingestion.json
     expected_schema: codex-requirement-ingestion-v1
@@ -23,27 +46,62 @@ stages:
         type: string
         min_length: 10
     phase: requirement
-    depends_on: []
+    depends_on: [runtime_session]
     implementation_required: true
     accepted_decisions: [ready]
+  - name: runtime_intake
+    artifact: runtime/checkpoints/intake.json
+    expected_schema: codex-runtime-checkpoint-v1
+    required_fields: [checkpoint, session_id, runtime_root_digest, event_count, event_refs, decision, blockers]
+    evidence_fields: [event_refs, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: intake
+      event_count:
+        type: number
+        min_value: 2
+    phase: requirement
+    depends_on: [requirement_ingestion]
+    input_artifacts: [requirement_ingestion.json, requirement_ir.json]
+    implementation_required: true
+    accepted_decisions: [pass]
   - name: project_understanding
     artifact: project_understanding/baseline_quality.json
     expected_schema: codex-baseline-quality-v1
     required_fields: [decision, blockers]
     evidence_fields: [baseline]
     phase: requirement
-    depends_on: [requirement_ingestion]
+    depends_on: [runtime_intake]
     conditional_skill: project-understanding-runner
     implementation_required: true
     accepted_decisions: [pass, ready]
+  - name: source_location_harness
+    artifact: harness/source_location.json
+    expected_schema: codex-harness-checkpoint-v2
+    required_fields: [checkpoint, decision, blockers, checkpoints, session_id, runtime_root_digest, event_refs]
+    evidence_fields: [checkpoints, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: source_location
+      checkpoints:
+        type: array
+        min_items: 1
+    phase: requirement
+    depends_on: [project_understanding]
+    input_artifacts: [runtime/checkpoints/intake.json, project_understanding/code_index.json, project_understanding/source_location_evidence.json, project_understanding/evidence_bundle.json]
+    conditional_skill: project-understanding-runner
+    implementation_required: true
+    accepted_decisions: [pass]
   - name: spec
     artifact: spec.json
     expected_schema: codex-spec-v1
     required_fields: [doc_id, decision]
     evidence_fields: [requirements, acceptance_criteria]
     phase: requirement
-    depends_on: [requirement_ingestion, project_understanding]
-    input_artifacts: [requirement.normalized.txt, project_understanding, project_understanding/source_location_evidence.json]
+    depends_on: [runtime_intake, project_understanding, source_location_harness]
+    input_artifacts: [requirement.normalized.txt, runtime/checkpoints/intake.json, project_understanding, project_understanding/source_location_evidence.json, harness/source_location.json]
     implementation_required: true
     accepted_decisions: [ready_for_design, pass]
     next_command: python3 skills/core/spec-governor/scripts/spec_governor.py normalize --doc-id REQ-001 --title "Title" --input requirement.normalized.txt --out artifacts/REQ-001/spec.json
@@ -329,14 +387,45 @@ stages:
     input_artifacts: [delivery_plan.json, traceability_matrix.json]
     implementation_required: true
     accepted_decisions: [pass]
+  - name: runtime_design
+    artifact: runtime/checkpoints/design.json
+    expected_schema: codex-runtime-checkpoint-v1
+    required_fields: [checkpoint, session_id, runtime_root_digest, event_count, event_refs, decision, blockers]
+    evidence_fields: [event_refs, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: design
+    phase: pre_implementation_design
+    depends_on: [delivery_plan_review]
+    input_artifacts: [technical_design.json, architecture_design.json, delivery_plan.json, delivery_plan_review.json]
+    implementation_required: true
+    accepted_decisions: [pass]
+  - name: design_harness
+    artifact: harness_validation.json
+    expected_schema: codex-harness-checkpoint-v2
+    required_fields: [checkpoint, decision, blockers, checkpoints, session_id, runtime_root_digest, event_refs]
+    evidence_fields: [checkpoints, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: design
+      checkpoints:
+        type: array
+        min_items: 1
+    phase: pre_implementation_design
+    depends_on: [runtime_design]
+    input_artifacts: [runtime/checkpoints/design.json, spec.json, project_understanding/evidence_bundle.json, technical_design.json, architecture_design.json, delivery_plan.json, delivery_plan_review.json]
+    implementation_required: true
+    accepted_decisions: [pass]
   - name: docs_quality
     artifact: docs_quality.json
     expected_schema: codex-docs-quality-aggregate-v1
     required_fields: [decision, blockers]
     evidence_fields: [reviews]
     phase: implementation_readiness
-    depends_on: [delivery_plan_review]
-    input_artifacts: [delivery_plan_review.json]
+    depends_on: [design_harness]
+    input_artifacts: [delivery_plan_review.json, harness_validation.json]
     implementation_required: true
     accepted_decisions: [pass, ready]
   - name: git
@@ -373,6 +462,20 @@ stages:
     input_artifacts: [delivery_plan.json, git_worktree_evidence.json]
     implementation_required: true
     accepted_decisions: [ready, pass]
+  - name: runtime_pre_edit
+    artifact: runtime/checkpoints/pre_edit.json
+    expected_schema: codex-runtime-checkpoint-v1
+    required_fields: [checkpoint, session_id, runtime_root_digest, event_count, event_refs, decision, blockers]
+    evidence_fields: [event_refs, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: pre_edit
+    phase: implementation_readiness
+    depends_on: [edit_permit]
+    input_artifacts: [edit_permit.json, delivery_plan.json]
+    implementation_required: true
+    accepted_decisions: [pass]
   - name: write_guard_snapshot
     artifact: write_guard_snapshot.json
     expected_schema: codex-write-guard-snapshot-v1
@@ -383,8 +486,8 @@ stages:
         type: string
         non_empty: true
     phase: implementation_readiness
-    depends_on: [edit_permit]
-    input_artifacts: [edit_permit.json]
+    depends_on: [edit_permit, runtime_pre_edit]
+    input_artifacts: [edit_permit.json, runtime/checkpoints/pre_edit.json]
     implementation_required: true
     accepted_decisions: [ready]
   - name: implementation
@@ -445,6 +548,37 @@ stages:
     conditional_skill: diff-impact-analyzer
     release_required: true
     accepted_decisions: [pass, ready]
+  - name: runtime_post_implementation
+    artifact: runtime/checkpoints/post_implementation.json
+    expected_schema: codex-runtime-checkpoint-v1
+    required_fields: [checkpoint, session_id, runtime_root_digest, event_count, event_refs, decision, blockers]
+    evidence_fields: [event_refs, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: post_implementation
+    phase: post_implementation_evidence
+    depends_on: [post_change, diff_impact]
+    input_artifacts: [delivery_plan.json, implementation_completion_gate.json, post_change_implementation_report.json, diff_impact.json]
+    release_required: true
+    accepted_decisions: [pass]
+  - name: post_implementation_harness
+    artifact: harness/post_implementation.json
+    expected_schema: codex-harness-checkpoint-v2
+    required_fields: [checkpoint, decision, blockers, checkpoints, session_id, runtime_root_digest, event_refs]
+    evidence_fields: [checkpoints, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: post_implementation
+      checkpoints:
+        type: array
+        min_items: 1
+    phase: post_implementation_evidence
+    depends_on: [post_change, diff_impact, runtime_post_implementation]
+    input_artifacts: [runtime/checkpoints/post_implementation.json, delivery_plan.json, implementation_completion_gate.json, post_change_implementation_report.json, diff_impact.json]
+    release_required: true
+    accepted_decisions: [pass]
   - name: change_risk
     artifact: change_risk.json
     expected_schema: codex-change-risk-v1
@@ -455,8 +589,8 @@ stages:
         type: string
         enum: [low, medium, high, critical]
     phase: post_implementation_evidence
-    depends_on: [diff_impact]
-    input_artifacts: [diff_impact.json, delivery_plan.json]
+    depends_on: [diff_impact, post_implementation_harness]
+    input_artifacts: [diff_impact.json, delivery_plan.json, harness/post_implementation.json]
     conditional_skill: change-risk-governor
     release_required: true
     accepted_decisions: [pass, ready]
@@ -532,6 +666,37 @@ stages:
     input_artifacts: [implementation_completion_gate.json, write_guard_audit.json, evidence_gap_summary.json, code_design_quality.json, frontend_acceptance.json, test_evidence_gate.json, test_execution_evidence.json, ci_execution_evidence.json]
     release_required: true
     accepted_decisions: [pass, approve, approved]
+  - name: runtime_pre_push
+    artifact: runtime/checkpoints/pre_push.json
+    expected_schema: codex-runtime-checkpoint-v1
+    required_fields: [checkpoint, session_id, runtime_root_digest, event_count, event_refs, decision, blockers]
+    evidence_fields: [event_refs, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: pre_push
+    phase: post_implementation_evidence
+    depends_on: [review]
+    input_artifacts: [post_change_implementation_report.json, post_implementation_traceability_matrix.json, test_evidence_gate.json, code_review_gate.json]
+    release_required: true
+    accepted_decisions: [pass]
+  - name: pre_push_harness
+    artifact: harness/pre_push.json
+    expected_schema: codex-harness-checkpoint-v2
+    required_fields: [checkpoint, decision, blockers, checkpoints, session_id, runtime_root_digest, event_refs]
+    evidence_fields: [checkpoints, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: pre_push
+      checkpoints:
+        type: array
+        min_items: 1
+    phase: post_implementation_evidence
+    depends_on: [runtime_pre_push]
+    input_artifacts: [runtime/checkpoints/pre_push.json, post_change_implementation_report.json, post_implementation_traceability_matrix.json, test_evidence_gate.json, code_review_gate.json]
+    release_required: true
+    accepted_decisions: [pass]
   - name: environment
     artifact: environment_promotion.json
     expected_schema: codex-environment-promotion-v1
@@ -542,8 +707,8 @@ stages:
         type: array
         min_items: 1
     phase: release_readiness
-    depends_on: [review]
-    input_artifacts: [code_review_gate.json, test_evidence_gate.json, change_risk.json]
+    depends_on: [review, pre_push_harness]
+    input_artifacts: [code_review_gate.json, test_evidence_gate.json, change_risk.json, harness/pre_push.json]
     release_required: true
     accepted_decisions: [pass, ready]
   - name: uat
@@ -566,14 +731,31 @@ stages:
     input_artifacts: [change_risk.json, environment_promotion.json, uat_acceptance.json]
     release_required: true
     accepted_decisions: [pass, ready]
+  - name: runtime_release_attestation
+    artifact: runtime/checkpoints/release.json
+    expected_schema: codex-runtime-checkpoint-v1
+    required_fields: [checkpoint, session_id, runtime_root_digest, event_count, event_refs, provider_attestations, decision, blockers]
+    evidence_fields: [provider_attestations, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: release
+      provider_attestations:
+        type: array
+        min_items: 4
+    phase: release_readiness
+    depends_on: [release_change]
+    input_artifacts: [ci_execution_evidence.json, release_change.json, environment_promotion.json, uat_acceptance.json]
+    release_required: true
+    accepted_decisions: [pass]
   - name: release
     artifact: release_gate.json
     expected_schema: codex-release-gate-v1
     required_fields: [decision, blockers, evidence_summary, rollback_plan, post_release_checks]
     evidence_fields: [evidence_summary, rollback_plan, post_release_checks]
     phase: release_readiness
-    depends_on: [release_change]
-    input_artifacts: [design_architecture_review.json, implementation_completion_gate.json, write_guard_audit.json, evidence_gap_summary.json, code_review_gate.json, test_evidence_gate.json, environment_promotion.json, uat_acceptance.json, release_change.json]
+    depends_on: [release_change, runtime_release_attestation]
+    input_artifacts: [runtime/checkpoints/release.json, design_architecture_review.json, implementation_completion_gate.json, write_guard_audit.json, evidence_gap_summary.json, code_review_gate.json, test_evidence_gate.json, environment_promotion.json, uat_acceptance.json, release_change.json]
     release_required: true
     accepted_decisions: [go]
   - name: post_release
@@ -585,3 +767,16 @@ stages:
     depends_on: [release]
     input_artifacts: [release_gate.json, release_change.json]
     accepted_decisions: [pass, ready]
+  - name: runtime_close
+    artifact: runtime/checkpoints/close.json
+    expected_schema: codex-runtime-checkpoint-v1
+    required_fields: [checkpoint, session_id, runtime_root_digest, event_count, event_refs, decision, blockers]
+    evidence_fields: [event_refs, runtime_root_digest]
+    field_constraints:
+      checkpoint:
+        type: string
+        const: close
+    phase: post_release
+    depends_on: [post_release]
+    input_artifacts: [post_release_observation.json]
+    accepted_decisions: [pass]

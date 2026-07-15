@@ -225,6 +225,24 @@ def as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
 
 
+def runtime_applicability(runtime_evidence: dict[str, Any], area: str) -> tuple[str, str]:
+    """Return normalized applicability and its source-backed reason."""
+    entries = runtime_evidence.get("impact_applicability") if isinstance(runtime_evidence, dict) else []
+    if isinstance(entries, dict):
+        raw = entries.get(area)
+        if isinstance(raw, dict):
+            return text(raw.get("status"), "").lower(), text(raw.get("reason"), "")
+        return text(raw, "").lower(), ""
+    for item in as_list(entries):
+        if isinstance(item, dict) and text(item.get("area"), "").lower() == area.lower():
+            return text(item.get("status"), "").lower(), text(item.get("reason"), "")
+    return "", ""
+
+
+def runtime_area_excluded(runtime_evidence: dict[str, Any], area: str) -> bool:
+    return runtime_applicability(runtime_evidence, area)[0] in {"excluded", "not_applicable"}
+
+
 def text(value: Any, default: str = "TBD") -> str:
     if value in (None, "", [], {}):
         return default
@@ -1420,7 +1438,15 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
     frontend_bits = [item for item in [frontend_page, frontend_route, frontend_repo] if item]
     backend_bits = [item for item in [backend_service or backend_controller, backend_repo] if item]
     frontend_label = "<br/>".join(frontend_bits[:3]) or ("浏览器/前端" if language == "zh" else "Browser / frontend")
-    backend_label = "<br/>".join(backend_bits[:2]) or ("后端服务需确认" if language == "zh" else "Backend service TBD")
+    api_excluded = runtime_area_excluded(runtime_evidence, "api")
+    backend_label = "<br/>".join(backend_bits[:2])
+    if not backend_label:
+        backend_label = (
+            "既有 API<br/>契约保持不变" if api_excluded and language == "zh"
+            else "Existing API<br/>contract unchanged" if api_excluded
+            else "后端服务需确认" if language == "zh"
+            else "Backend service TBD"
+        )
     downstream_label = downstream_name or human_value(downstream.get("repo"), language, "")
     downstream_aliases: dict[str, str] = {}
     downstream_participants: list[tuple[str, str]] = []
@@ -1965,10 +1991,15 @@ def render_engineering_sequence_summary(
                 apis.append(contract)
         route = human_value(frontend.get("route"), language, "")
         page = human_value(frontend.get("page"), language, "")
+        api_excluded = runtime_area_excluded(runtime_evidence, "api")
         if language == "zh":
             return "\n".join(
                 [
-                    "- 时序口径：以下图优先使用源码/项目证据，表达用户在浏览器里的真实操作、前端请求、后端工程和已确认的下游处理。",
+                    (
+                        "- 时序口径：以下图表达用户操作、前端组件、既有 API 契约和控制成功后的播放器状态更新；服务端不在修改范围。"
+                        if api_excluded and not backend
+                        else "- 时序口径：以下图优先使用源码/项目证据，表达真实入口、责任模块和已确认的下游处理。"
+                    ),
                     f"- 前端入口：{page or '未同步页面'}{('（' + route + '）') if route else ''}。",
                     f"- 涉及工程：{', '.join(repos) if repos else '未同步到工程信息'}。",
                     f"- 前端调用接口：{', '.join(apis[:8]) if apis else '未同步到接口信息'}。",
@@ -1976,7 +2007,11 @@ def render_engineering_sequence_summary(
             )
         return "\n".join(
             [
-                "- Sequence scope: the diagram uses source/project evidence for the real browser action, frontend request, backend owner, and confirmed downstream processing.",
+                (
+                    "- Sequence scope: the diagram shows the user action, frontend component, unchanged existing API contract, and post-success player state update; server code is outside modify scope."
+                    if api_excluded and not backend
+                    else "- Sequence scope: the diagram uses source/project evidence for the real entrypoint, owner modules, and confirmed downstream processing."
+                ),
                 f"- Frontend entry: {page or 'not synced'}{(' (' + route + ')') if route else ''}.",
                 f"- Engineering units: {', '.join(repos) if repos else 'not synced'}.",
                 f"- Frontend APIs: {', '.join(apis[:8]) if apis else 'not synced'}.",
@@ -2279,9 +2314,13 @@ def render_problem_analysis(technical: dict[str, Any], language: str = "en", run
                 scenario_gaps.append(f"{scenario}：{gap}")
         if language == "zh":
             sections = [
-                ("当前真实行为", f"运营人员通过 {frontend_entry or '前端页面'} 触发续期结算、结算单和续期池操作，前端调用 operate 后端接口完成查询、试算、生成结算单和移出续期池。"),
+                ("当前真实行为", f"用户通过 {frontend_entry or '前端入口'} 执行 {triggers or '当前需求动作'}；前端按已确认链路调用 {', '.join(apis[:6]) or '现有依赖'} 并呈现可观察结果。"),
                 ("用户触发点", triggers),
-                ("代码入口", f"前端：{frontend_entry or '未同步'}；后端：{backend_entry or '未同步'}"),
+                (
+                    "代码入口",
+                    f"前端：{frontend_entry or '未同步'}；"
+                    + (f"后端：{backend_entry}" if backend_entry else "服务端：不在修改范围，仅引用既有 API 契约"),
+                ),
                 ("关键接口", ", ".join(apis[:10])),
                 ("业务问题", data.get("business_problem")),
                 ("现有流程缺口", scenario_gaps or data.get("process_gap")),
@@ -2294,9 +2333,13 @@ def render_problem_analysis(technical: dict[str, Any], language: str = "en", run
                 if value not in (None, "", [], {})
             )
         sections = [
-            ("Current real behavior", f"Operators use {frontend_entry or 'the frontend page'} to trigger renewal settlement, settlement order, and renewal pool actions; the frontend calls operate backend APIs for queries, trials, order creation, and renewal-pool exclusion."),
+            ("Current real behavior", f"Users execute {triggers or 'the requirement action'} through {frontend_entry or 'the frontend entrypoint'}; the frontend follows {', '.join(apis[:6]) or 'the confirmed dependency path'} and presents the observable result."),
             ("User triggers", triggers),
-            ("Code entrypoints", f"Frontend: {frontend_entry or 'not synced'}; backend: {backend_entry or 'not synced'}"),
+            (
+                "Code entrypoints",
+                f"Frontend: {frontend_entry or 'not synced'}; "
+                + (f"backend: {backend_entry}" if backend_entry else "server: outside modify scope; existing API contract reference only"),
+            ),
             ("Key APIs", ", ".join(apis[:10])),
             ("Business problem", data.get("business_problem")),
             ("Process gap", scenario_gaps or data.get("process_gap")),
@@ -2919,17 +2962,35 @@ def render_current_architecture_context(
             value = " ".join(part for part in [method, api] if part)
             if value and value not in apis:
                 apis.append(value)
+        api_status, api_reason = runtime_applicability(runtime_evidence, "api")
+        data_status, data_reason = runtime_applicability(runtime_evidence, "data")
         if language == "zh":
+            if api_status in {"excluded", "not_applicable"} and not backend_entry:
+                return "\n".join([
+                    "- 系统上下文：本需求由已确认前端入口承担实现；已有 API 仅作为运行时依赖，路径、字段和响应结构保持不变。",
+                    f"  - 前端责任：{frontend_entry or '以 scope_model.modify 为准'}",
+                    f"  - API 适用性：excluded；原因：{api_reason or '需求明确保持既有契约'}；已引用接口：{', '.join(apis[:10]) or '以技术设计中的既有接口清单为准'}",
+                    f"  - 数据适用性：{data_status or 'excluded'}；原因：{data_reason or '无持久化结构变更'}",
+                    f"  - 业务链路：{'; '.join(scenarios[:6]) if scenarios else '以 runtime interactions 为准'}",
+                ])
             lines = [
-                "- 系统上下文：本需求不是纯前端模板变更，运行时链路为运营人员在浏览器页面触发操作，前端调用 operate 后端接口，由后端结算/续期服务处理。",
+                "- 系统上下文：运行时链路从已确认入口触发，并按源码证据连接责任模块和既有依赖。",
                 f"  - 前端入口：{frontend_entry or '未同步前端入口'}",
                 f"  - 后端责任：{backend_entry or '未同步后端责任'}",
                 f"  - 业务链路：{'; '.join(scenarios[:6]) if scenarios else '未同步业务链路'}",
                 f"  - 关键接口：{', '.join(apis[:10]) if apis else '未同步接口'}",
             ]
             return "\n".join(lines)
+        if api_status in {"excluded", "not_applicable"} and not backend_entry:
+            return "\n".join([
+                "- System context: implementation stays in the confirmed frontend owner; existing APIs are runtime dependencies whose paths, fields, and response shapes remain unchanged.",
+                f"  - Frontend owner: {frontend_entry or 'see scope_model.modify'}",
+                f"  - API applicability: excluded; reason: {api_reason or 'the requirement preserves the existing contract'}; referenced APIs: {', '.join(apis[:10]) or 'see the technical-design contract list'}",
+                f"  - Data applicability: {data_status or 'excluded'}; reason: {data_reason or 'no persistence shape changes'}",
+                f"  - Business flow: {'; '.join(scenarios[:6]) if scenarios else 'see runtime interactions'}",
+            ])
         lines = [
-            "- System context: this is not a frontend-only template change; the runtime path starts from an operator action in the browser, then calls operate backend APIs handled by settlement/renewal services.",
+            "- System context: the runtime path starts at the confirmed entrypoint and follows source-backed owner modules and existing dependencies.",
             f"  - Frontend entry: {frontend_entry or 'not synced'}",
             f"  - Backend owner: {backend_entry or 'not synced'}",
             f"  - Business flow: {'; '.join(scenarios[:6]) if scenarios else 'not synced'}",
@@ -3024,6 +3085,7 @@ def render_dependency_graph_items(architecture: dict[str, Any], runtime_evidence
             ]
             if item
         ) or ("前端" if language == "zh" else "Frontend")
+        api_excluded = runtime_area_excluded(runtime_evidence, "api")
         backend_name = " / ".join(
             item
             for item in [
@@ -3031,7 +3093,12 @@ def render_dependency_graph_items(architecture: dict[str, Any], runtime_evidence
                 human_value(backend.get("service") or backend.get("controller"), language, ""),
             ]
             if item
-        ) or ("后端" if language == "zh" else "Backend")
+        ) or (
+            "既有 API（契约不变）" if api_excluded and language == "zh"
+            else "Existing API (contract unchanged)" if api_excluded
+            else "后端" if language == "zh"
+            else "Backend"
+        )
         lines = []
         seen: set[str] = set()
         for item in interactions[:10]:
@@ -3042,9 +3109,11 @@ def render_dependency_graph_items(architecture: dict[str, Any], runtime_evidence
                 continue
             seen.add(contract)
             if language == "zh":
-                lines.append(f"- 来源：{frontend_name}\n  - 契约/API：{contract}\n  - 目标：{backend_name}\n  - 变更：按当前需求校准页面触发、接口参数、响应字段和后端处理口径")
+                change = "仅验证调用兼容性；服务端契约和代码不变" if api_excluded else "按当前需求校准入口、请求、响应和责任模块处理口径"
+                lines.append(f"- 来源：{frontend_name}\n  - 契约/API：{contract}\n  - 目标：{backend_name}\n  - 变更：{change}")
             else:
-                lines.append(f"- From: {frontend_name}\n  - Contract/API: {contract}\n  - To: {backend_name}\n  - Change: calibrate trigger, request, response, and backend handling for this requirement")
+                change = "validate call compatibility only; server contract and code stay unchanged" if api_excluded else "calibrate entrypoint, request, response, and owner-module handling"
+                lines.append(f"- From: {frontend_name}\n  - Contract/API: {contract}\n  - To: {backend_name}\n  - Change: {change}")
         downstream_lines = []
         downstreams = [item for item in as_list(runtime_evidence.get("downstreams")) if isinstance(item, dict)]
         for item in interactions[:10]:
@@ -3094,6 +3163,19 @@ def render_runtime_api_contracts(runtime_evidence: dict[str, Any], language: str
     if not contracts:
         return ""
 
+    unique_contracts: list[dict[str, Any]] = []
+    seen_contracts: set[tuple[str, str]] = set()
+    for item in contracts:
+        key = (
+            human_value(item.get("method"), language, "").upper(),
+            human_value(item.get("path") or item.get("api"), language, ""),
+        )
+        if key in seen_contracts:
+            continue
+        seen_contracts.add(key)
+        unique_contracts.append(item)
+    contracts = unique_contracts
+
     def field_lines(values: Any, empty: str) -> str:
         rows = []
         for field in as_list(values):
@@ -3125,6 +3207,13 @@ def render_runtime_api_contracts(runtime_evidence: dict[str, Any], language: str
         return "\n".join(rows) if rows else f"  - {empty}"
 
     sections = ["### API 契约设计" if language == "zh" else "### API Contract Design"]
+    if runtime_area_excluded(runtime_evidence, "api"):
+        reason = runtime_applicability(runtime_evidence, "api")[1]
+        sections.append(
+            f"- API 适用性：excluded；现有接口路径、字段和响应结构保持不变。原因：{reason or '需求明确保持既有契约'}。"
+            if language == "zh"
+            else f"- API applicability: excluded; existing API paths, fields, and response shapes remain unchanged. Reason: {reason or 'the requirement preserves the existing contract'}."
+        )
     for index, item in enumerate(contracts[:12], start=1):
         name = human_value(item.get("name") or item.get("scenario"), language, f"API {index}")
         method = human_value(item.get("method"), language, "")
@@ -3138,7 +3227,8 @@ def render_runtime_api_contracts(runtime_evidence: dict[str, Any], language: str
         notes = human_value(item.get("notes"), language, "")
         sections.append(f"\n#### {index}. {name}")
         if path:
-            sections.append(f"- API：`{method} {path}`" if language == "zh" else f"- API: `{method} {path}`")
+            method_path = " ".join(part for part in [method, path] if part)
+            sections.append(f"- API：`{method_path}`" if language == "zh" else f"- API: `{method_path}`")
         if caller:
             sections.append(f"- 前端调用：{caller}" if language == "zh" else f"- Frontend caller: {caller}")
         if controller or service:
@@ -3164,6 +3254,13 @@ def render_runtime_api_contracts(runtime_evidence: dict[str, Any], language: str
 
 def render_runtime_data_model(runtime_evidence: dict[str, Any], language: str = "en") -> str:
     runtime_evidence = runtime_evidence if isinstance(runtime_evidence, dict) else {}
+    if runtime_area_excluded(runtime_evidence, "data"):
+        reason = runtime_applicability(runtime_evidence, "data")[1]
+        return (
+            f"### 数据模型与表结构\n- 适用性：excluded；不涉及数据库表、迁移、回填或持久化字段变更。原因：{reason or '需求仅改变运行时交互状态'}。"
+            if language == "zh"
+            else f"### Data Model And Table Schema\n- Applicability: excluded; no database table, migration, backfill, or persistence-field changes. Reason: {reason or 'the requirement changes runtime interaction state only'}."
+        )
     models = [
         item
         for item in as_list(
@@ -3337,6 +3434,13 @@ def render_runtime_exception_cases(runtime_evidence: dict[str, Any], language: s
 
 def render_runtime_data_access(runtime_evidence: dict[str, Any], language: str = "en") -> str:
     runtime_evidence = runtime_evidence if isinstance(runtime_evidence, dict) else {}
+    if runtime_area_excluded(runtime_evidence, "data"):
+        reason = runtime_applicability(runtime_evidence, "data")[1]
+        return (
+            f"### 数据与持久化适用性\n- `excluded`：无数据库读写、表结构、迁移或历史数据处理变更。原因：{reason or '需求仅改变前端运行时状态'}。"
+            if language == "zh"
+            else f"### Data And Persistence Applicability\n- `excluded`: no database read/write, schema, migration, or historical-data changes. Reason: {reason or 'the requirement changes frontend runtime state only'}."
+        )
     models = [
         item
         for item in as_list(
@@ -3400,8 +3504,8 @@ def render_runtime_permission_model(runtime_evidence: dict[str, Any], language: 
             triggers = [human_value(item.get("trigger"), language, "") for item in interactions if human_value(item.get("trigger"), language, "")]
             lines.append(f"- 页面边界：{page or '当前页面'} 沿用现有菜单/按钮权限。")
             lines.append(f"- 按钮边界：{'; '.join(triggers[:6]) if triggers else '当前操作'}需要保持未授权不可见或不可提交。")
-            lines.append("- 后端边界：接口不得只依赖前端可见性；原因必填、续期池状态和租户范围仍需后端校验。")
-            lines.append("- 反向用例：无权限账号不能访问页面入口、不能触发批量不续期/单个移出不续期，越权租户数据不能出现在查询结果中。")
+            lines.append("- 后端边界：接口不得只依赖前端可见性；既有鉴权、租户和数据范围校验必须保持。")
+            lines.append("- 反向用例：无权限账号不能访问受保护入口或触发受保护动作，越权数据不能出现在结果中。")
         return "\n".join(lines)
     lines = ["### Permission And Visibility"]
     if permissions:
@@ -3424,14 +3528,15 @@ def render_runtime_permission_model(runtime_evidence: dict[str, Any], language: 
         triggers = [human_value(item.get("trigger"), language, "") for item in interactions if human_value(item.get("trigger"), language, "")]
         lines.append(f"- Page boundary: {page or 'current page'} preserves existing menu/button permissions.")
         lines.append(f"- Button boundary: {'; '.join(triggers[:6]) if triggers else 'current operations'} must remain hidden or blocked for unauthorized users.")
-        lines.append("- Backend boundary: APIs must not rely on frontend visibility only; reason-required, renewal-pool status, and tenant scope checks remain backend responsibilities.")
-        lines.append("- Negative case: unauthorized accounts cannot enter the page, trigger exclusion actions, or see out-of-scope tenant data.")
+        lines.append("- Backend boundary: APIs must not rely on frontend visibility only; existing authorization, tenant, and data-scope checks remain authoritative.")
+        lines.append("- Negative case: unauthorized accounts cannot access protected entrypoints, trigger protected actions, or see out-of-scope data.")
     return "\n".join(lines)
 
 
 def render_runtime_module_design(runtime_evidence: dict[str, Any], language: str = "en") -> str:
     runtime_evidence = runtime_evidence if isinstance(runtime_evidence, dict) else {}
     contracts = [item for item in as_list(runtime_evidence.get("api_contracts")) if isinstance(item, dict)]
+    interactions = [item for item in as_list(runtime_evidence.get("interactions")) if isinstance(item, dict)]
     if not contracts:
         return ""
     frontend = runtime_evidence.get("frontend") if isinstance(runtime_evidence.get("frontend"), dict) else {}
@@ -3454,28 +3559,32 @@ def render_runtime_module_design(runtime_evidence: dict[str, Any], language: str
         if item
     )
     api_names = [human_value(item.get("name"), language, "") for item in contracts if human_value(item.get("name"), language, "")]
+    api_excluded = runtime_area_excluded(runtime_evidence, "api")
     if language == "zh":
         lines = ["### 模块职责划分"]
         lines.append(f"- 前端模块：{frontend_entry or '未同步前端入口'}")
-        lines.append("  - 职责：承载运营人员在设备置换结算页面的查询、试算、生成续期结算单、批量不续期和单个移出不续期操作。")
-        lines.append("  - 输入：页面筛选条件、分页参数、设备号、原因码和原因说明。")
-        lines.append("  - 输出：列表刷新、汇总刷新、弹窗关闭、成功/失败提示和结算单列表切换。")
-        lines.append(f"- 后端模块：{backend_entry or '未同步后端责任'}")
-        lines.append(f"  - 职责：承接 {', '.join(api_names[:8])} 等接口，统一处理续期池、结算单、试算快照和订单履约透视规则。")
-        lines.append("  - 输入：ReplacementSettlementQueryDto、ReplacementSettlementOrderQueryDto、RenewPoolManualExcludeDto 等请求 DTO。")
-        lines.append("  - 输出：ReplacementSettlementItemVo、ReplacementSettlementOrderVo、ReplacementSettlementSummaryVo、ReplacementSettlementTrialVo 或 ResultVo<String>。")
-        lines.append("  - 耦合控制：前端只组装筛选和交互状态，金额、续期池状态、结算单生成和原因落库由后端作为事实来源。")
+        lines.append("  - 职责：承载已确认用户入口、交互状态和调用编排。")
+        lines.append("  - 输入：" + ("；".join(human_value(item.get("request"), language, "") for item in interactions[:6] if human_value(item.get("request"), language, "")) or "来自当前页面/组件的已确认输入。"))
+        lines.append("  - 输出：" + ("；".join(human_value(item.get("response"), language, "") for item in interactions[:6] if human_value(item.get("response"), language, "")) or "可观察的成功、失败和清理状态。"))
+        if backend_entry:
+            lines.append(f"- 后端模块：{backend_entry}")
+            lines.append(f"  - 职责：承接 {', '.join(api_names[:8]) or '已确认接口'} 并保持已有业务规则和兼容行为。")
+            lines.append("  - 输入/输出：以 API 契约和 runtime interaction 中记录的请求、响应为准。")
+        elif api_excluded:
+            lines.append("- 服务端边界：不在修改范围；现有 API 路径、字段和响应结构保持不变，仅作为前端运行时依赖验证。")
+        lines.append("  - 耦合控制：前端负责交互编排；既有契约和权限边界不得漂移。")
         return "\n".join(lines)
     lines = ["### Module Responsibility Split"]
     lines.append(f"- Frontend module: {frontend_entry or 'not synced'}")
-    lines.append("  - Responsibility: page query, trial, renewal order creation, batch exclusion, and single exclusion interactions.")
-    lines.append("  - Input: filters, pagination, device numbers, reason code, and reason text.")
-    lines.append("  - Output: table/summary refresh, dialog close, success/error messages, and order-list navigation.")
-    lines.append(f"- Backend module: {backend_entry or 'not synced'}")
-    lines.append(f"  - Responsibility: own {', '.join(api_names[:8])} and enforce renewal pool, settlement order, trial snapshot, and order-pivot rules.")
-    lines.append("  - Input: request DTOs such as ReplacementSettlementQueryDto, ReplacementSettlementOrderQueryDto, and RenewPoolManualExcludeDto.")
-    lines.append("  - Output: settlement item/order/summary/trial VOs or ResultVo<String>.")
-    lines.append("  - Coupling control: frontend owns interaction state; backend remains the source of truth for amount, status, order creation, and exclusion persistence.")
+    lines.append("  - Responsibility: own the confirmed user entrypoint, interaction state, and call orchestration.")
+    lines.append("  - Input/output: derive from recorded runtime interactions and API contracts.")
+    if backend_entry:
+        lines.append(f"- Backend module: {backend_entry}")
+        lines.append(f"  - Responsibility: own {', '.join(api_names[:8]) or 'confirmed contracts'} and preserve authoritative business rules.")
+        lines.append("  - Input/output: follow recorded runtime interactions and compatibility constraints.")
+    elif api_excluded:
+        lines.append("- Server boundary: outside modify scope; existing API paths, fields, and response shapes remain unchanged and are validated only as runtime dependencies.")
+    lines.append("  - Coupling control: frontend owns interaction state; existing contracts and authorization boundaries must not drift.")
     return "\n".join(lines)
 
 
@@ -3500,14 +3609,14 @@ def render_runtime_ui_impact(runtime_evidence: dict[str, Any], language: str = "
         lines.append(f"- 用户入口：{human_value(frontend.get('entry_menu_or_button'), language, '') or '未同步入口'}")
         lines.append(f"- 触发动作：{'；'.join(triggers[:8]) if triggers else '未同步触发动作'}")
         lines.append("- 权限可见性：沿用现有菜单/按钮权限；若新增按钮或导入入口，需要补充未授权不可见或不可提交的反向用例。")
-        lines.append("- 验收证据：需要覆盖筛选后试算、生成续期结算单、批量不续期、单个移出不续期、错误提示和刷新结果。")
+        lines.append("- 验收证据：逐条绑定 interaction 的 acceptance_ids，并覆盖成功、失败、网络、控制台和必要截图。")
         return "\n".join(lines)
     lines = ["### UI Interaction Impact"]
     lines.append(f"- Page/route: {page or 'not synced'}")
     lines.append(f"- User entry: {human_value(frontend.get('entry_menu_or_button'), language, '') or 'not synced'}")
     lines.append(f"- Triggers: {'; '.join(triggers[:8]) if triggers else 'not synced'}")
     lines.append("- Permission visibility: preserve existing menu/button permissions; new entries need negative authorization evidence.")
-    lines.append("- Acceptance evidence: cover filtered trial, renewal order creation, batch exclusion, single exclusion, error messages, and refresh result.")
+    lines.append("- Acceptance evidence: bind every interaction to acceptance_ids and cover success, failure, network, console, and required screenshots.")
     return "\n".join(lines)
 
 
@@ -3556,14 +3665,6 @@ def infer_runtime_acceptance_maps(
     for ac_id in ac_ids:
         if ac_id in ac_to_brk:
             continue
-        ac_match = re.search(r"(\d+)", ac_id)
-        if ac_match:
-            numeric_brk = f"BRK-{ac_match.group(1)}"
-            if numeric_brk in grouped:
-                brk_to_acs[numeric_brk].append(ac_id)
-                ac_to_brk[ac_id] = numeric_brk
-                continue
-
         ac_item = next((item for item in acceptance if human_value(item.get("id"), language, "") == ac_id), {})
         ac_text = human_value(ac_item.get("criteria") or ac_item.get("summary"), language, "")
         best_brk = ""
@@ -3588,6 +3689,13 @@ def infer_runtime_acceptance_maps(
         if best_brk and best_score >= 2:
             brk_to_acs[best_brk].append(ac_id)
             ac_to_brk[ac_id] = best_brk
+            continue
+        ac_match = re.search(r"(\d+)", ac_id)
+        if ac_match:
+            numeric_brk = f"BRK-{ac_match.group(1)}"
+            if numeric_brk in grouped:
+                brk_to_acs[numeric_brk].append(ac_id)
+                ac_to_brk[ac_id] = numeric_brk
 
     for brk in list(brk_to_acs):
         deduped: list[str] = []
@@ -3869,6 +3977,8 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
     )
     table_names = [human_value(item.get("table"), language, "") for item in models if human_value(item.get("table"), language, "")]
     contract_map = runtime_contract_by_api(runtime_evidence, language)
+    api_excluded = runtime_area_excluded(runtime_evidence, "api")
+    data_excluded = runtime_area_excluded(runtime_evidence, "data")
     if language == "zh":
         lines = ["### 子需求落地设计"]
         lines.append("- 口径：本节按业务子域组织，每个子域同时回答现状、差距、改动、实现方式和验收证明。")
@@ -3923,10 +4033,16 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
             lines.append(f"- 目标调整：{'；'.join(responses) or title}。")
             action_label = "前端做法" if has_frontend_evidence else "调用方/入口"
             lines.append(f"- {action_label}：{runtime_frontend_action(representative, frontend_file, api_text, language)}")
-            lines.append(f"- 后端做法：{runtime_backend_action(representative, backend_owner, backend_actions, language)}")
+            if backend_owner or not api_excluded:
+                lines.append(f"- 后端做法：{runtime_backend_action(representative, backend_owner, backend_actions, language)}")
+            else:
+                lines.append(f"- 契约边界：现有接口 {api_text} 的路径、字段和响应结构保持不变；本子需求不修改服务端代码。")
             if contract_names:
                 lines.append(f"- 契约绑定：{'；'.join(contract_names[:4])}。")
-            lines.append(f"- 数据影响：{runtime_data_impact_sentence(models, representative, language)}")
+            if data_excluded:
+                lines.append("- 数据影响：不涉及数据库表、迁移或持久化字段变更；仅处理前端运行时状态和播放器资源。")
+            else:
+                lines.append(f"- 数据影响：{runtime_data_impact_sentence(models, representative, language)}")
             lines.append(f"- 异常边界：{'；'.join(failures) or '保留既有错误语义和页面提示'}。")
             lines.append(f"- 验收证明：{ac_text or '需补充验收标准映射'}")
             if assertions:
@@ -3981,10 +4097,16 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         lines.append(f"- Gap: {runtime_gap_sentence(representative, ac_ids, language)}")
         lines.append(f"- Target change: {'; '.join(responses) or title}.")
         lines.append(f"- Frontend approach: {runtime_frontend_action(representative, frontend_file, api_text, language)}")
-        lines.append(f"- Backend approach: {runtime_backend_action(representative, backend_owner, backend_actions, language)}")
+        if backend_owner or not api_excluded:
+            lines.append(f"- Backend approach: {runtime_backend_action(representative, backend_owner, backend_actions, language)}")
+        else:
+            lines.append(f"- Contract boundary: existing APIs {api_text} keep their paths, fields, and response shapes; this slice does not modify server code.")
         if contract_names:
             lines.append(f"- Contract binding: {'; '.join(contract_names[:4])}.")
-        lines.append(f"- Data impact: {runtime_data_impact_sentence(models, representative, language)}")
+        if data_excluded:
+            lines.append("- Data impact: no database table, migration, or persistence-field changes; only frontend runtime state and player resources change.")
+        else:
+            lines.append(f"- Data impact: {runtime_data_impact_sentence(models, representative, language)}")
         lines.append(f"- Exception boundary: {'; '.join(failures) or 'preserve existing error semantics'}.")
         lines.append(f"- Acceptance proof: {ac_text or 'acceptance mapping required'}")
         if assertions:
@@ -4008,7 +4130,10 @@ def render_runtime_process_flows(runtime_evidence: dict[str, Any], language: str
             api = " ".join(part for part in [human_value(item.get("method"), language, ""), human_value(item.get("api"), language, "")] if part)
             request_label = "前端请求" if text(entrypoint.get("kind"), "") == "frontend_action" else "入口载荷/请求"
             lines.append(f"- {request_label}：{api or '未同步接口'}；{human_value(item.get('request'), language, '未同步请求参数')}")
-            lines.append(f"- 后端处理：{human_value(item.get('backend_action'), language, '未同步后端处理')}")
+            if runtime_area_excluded(runtime_evidence, "api") and not runtime_evidence.get("backend"):
+                lines.append("- 契约边界：调用既有 API，路径、字段和响应结构保持不变；控制成功后由前端执行播放器状态重建或清理。")
+            else:
+                lines.append(f"- 后端处理：{human_value(item.get('backend_action'), language, '需结合责任模块证据确认')}")
             lines.append(f"- 正常结果：{human_value(item.get('response'), language, '页面刷新或提示成功')}")
             lines.append(f"- 异常结果：{human_value(item.get('failure'), language, '保留既有错误处理')}")
         return "\n".join(lines)
@@ -4022,7 +4147,10 @@ def render_runtime_process_flows(runtime_evidence: dict[str, Any], language: str
         lines.append(f"- Trigger action: {human_value(item.get('trigger'), language, 'not synced')}")
         request_label = "Frontend request" if text(entrypoint.get("kind"), "") == "frontend_action" else "Entrypoint payload/request"
         lines.append(f"- {request_label}: {api or 'not synced'}; {human_value(item.get('request'), language, 'request not synced')}")
-        lines.append(f"- Backend handling: {human_value(item.get('backend_action'), language, 'not synced')}")
+        if runtime_area_excluded(runtime_evidence, "api") and not runtime_evidence.get("backend"):
+            lines.append("- Contract boundary: call the existing API without path, field, or response-shape changes; frontend rebuilds or cleans player state after success.")
+        else:
+            lines.append(f"- Backend handling: {human_value(item.get('backend_action'), language, 'confirm from owner-module evidence')}")
         lines.append(f"- Normal result: {human_value(item.get('response'), language, 'refresh or success message')}")
         lines.append(f"- Exception result: {human_value(item.get('failure'), language, 'preserve existing error handling')}")
     return "\n".join(lines)
@@ -4066,12 +4194,14 @@ def render_runtime_process_mermaid(runtime_evidence: dict[str, Any], language: s
     interactions = [item for item in as_list(runtime_evidence.get("interactions")) if isinstance(item, dict)]
     if not interactions:
         return ""
+    frontend_only = runtime_area_excluded(runtime_evidence, "api") and not runtime_evidence.get("backend")
     lines = [
         "```mermaid",
         "flowchart TD",
         "  classDef actor fill:#eff6ff,stroke:#2563eb,color:#172554,stroke-width:1px;",
         "  classDef api fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1px;",
         "  classDef backend fill:#ecfdf5,stroke:#16a34a,color:#14532d,stroke-width:1px;",
+        "  classDef frontend fill:#ecfdf5,stroke:#16a34a,color:#14532d,stroke-width:1px;",
         "  classDef failure fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1px;",
     ]
     for index, item in enumerate(interactions[:8], start=1):
@@ -4094,7 +4224,11 @@ def render_runtime_process_mermaid(runtime_evidence: dict[str, Any], language: s
         }.get(kind, "调用后端入口" if language == "zh" else "Backend entrypoint call")
         lines.append(f'  U{index}["{trigger or entry_default}"]:::actor')
         lines.append(f'  A{index}["{api or api_default}"]:::api')
-        lines.append(f'  B{index}["{action or ("后端处理" if language == "zh" else "Backend handling")}"]:::backend')
+        if frontend_only:
+            local_action = action or ("前端更新播放器状态并清理资源" if language == "zh" else "Frontend updates player state and cleans resources")
+            lines.append(f'  B{index}["{local_action}"]:::frontend')
+        else:
+            lines.append(f'  B{index}["{action or ("后端处理" if language == "zh" else "Backend handling")}"]:::backend')
         lines.append(f'  R{index}["{response or ("刷新页面" if language == "zh" else "Refresh UI")}"]:::actor')
         lines.append(f"  U{index} --> A{index} --> B{index} --> R{index}")
         if failure:
@@ -4184,6 +4318,8 @@ def render_runtime_entrypoint_confidence(runtime_evidence: dict[str, Any], langu
         ]
         if item
     )
+    api_excluded = runtime_area_excluded(runtime_evidence, "api")
+    data_excluded = runtime_area_excluded(runtime_evidence, "data")
     if language == "zh":
         lines = [
             "- 置信度：`高`",
@@ -4193,7 +4329,10 @@ def render_runtime_entrypoint_confidence(runtime_evidence: dict[str, Any], langu
         ]
         if frontend_file:
             lines.append(f"- 前端源码：`{frontend_file}`")
-        lines.append(f"- 后端入口：{backend_entry or '未同步'}")
+        if backend_entry:
+            lines.append(f"- 后端入口：{backend_entry}")
+        elif api_excluded:
+            lines.append("- 服务端入口：不在修改范围；仅校验既有 API 契约。")
         if backend_files:
             lines.append("- 后端源码：" + "、".join(f"`{item}`" for item in backend_files[:8]))
         return "\n".join(lines)
@@ -4205,7 +4344,10 @@ def render_runtime_entrypoint_confidence(runtime_evidence: dict[str, Any], langu
     ]
     if frontend_file:
         lines.append(f"- Frontend source: `{frontend_file}`")
-    lines.append(f"- Backend entry: {backend_entry or 'not synced'}")
+    if backend_entry:
+        lines.append(f"- Backend entry: {backend_entry}")
+    elif api_excluded:
+        lines.append("- Server entry: outside modify scope; validate the existing API contract only.")
     if backend_files:
         lines.append("- Backend sources: " + ", ".join(f"`{item}`" for item in backend_files[:8]))
     return "\n".join(lines)
@@ -4225,6 +4367,8 @@ def render_runtime_field_api_permission_impact(runtime_evidence: dict[str, Any],
         ]
         if item
     )
+    api_excluded = runtime_area_excluded(runtime_evidence, "api")
+    data_excluded = runtime_area_excluded(runtime_evidence, "data")
     if language == "zh":
         lines = ["| 子域 | 责任入口 | 字段/数据影响 | 接口影响 | 权限影响 |", "|---|---|---|---|---|"]
         for index, item in enumerate(interactions[:10], start=1):
@@ -4233,9 +4377,10 @@ def render_runtime_field_api_permission_impact(runtime_evidence: dict[str, Any],
             api = " ".join(part for part in [human_value(item.get("method"), language, ""), human_value(item.get("api"), language, "")] if part)
             request = human_value(item.get("request"), language, "")
             response = human_value(item.get("response"), language, "")
-            data = response or request or "按数据模型章节校准字段读写"
-            permission = "沿用现有菜单/按钮权限；后端保留租户范围、原因必填和状态校验"
-            lines.append(f"| `{brk}` {scenario} | {frontend_entry or '前端页面'} / 后端服务 | {data} | `{api or '未同步接口'}` | {permission} |")
+            data = "无持久化变更；仅前端运行时状态" if data_excluded else response or request or "按数据模型章节校准字段读写"
+            api_impact = f"既有 `{api}`；契约不变" if api_excluded and api else f"`{api or '需确认接口'}`"
+            permission = "沿用现有页面权限和既有 API 鉴权边界"
+            lines.append(f"| `{brk}` {scenario} | {frontend_entry or '前端页面'} | {data} | {api_impact} | {permission} |")
         return "\n".join(lines)
     lines = ["| Slice | Owner | Field/Data Impact | API Impact | Permission Impact |", "|---|---|---|---|---|"]
     for index, item in enumerate(interactions[:10], start=1):
@@ -4244,9 +4389,10 @@ def render_runtime_field_api_permission_impact(runtime_evidence: dict[str, Any],
         api = " ".join(part for part in [human_value(item.get("method"), language, ""), human_value(item.get("api"), language, "")] if part)
         request = human_value(item.get("request"), language, "")
         response = human_value(item.get("response"), language, "")
-        data = response or request or "calibrate fields per data-model section"
-        permission = "preserve existing menu/button permissions; backend retains tenant, reason-required, and status checks"
-        lines.append(f"| `{brk}` {scenario} | {frontend_entry or 'frontend'} / backend service | {data} | `{api or 'not synced'}` | {permission} |")
+        data = "no persistence change; frontend runtime state only" if data_excluded else response or request or "calibrate fields per data-model section"
+        api_impact = f"existing `{api}`; contract unchanged" if api_excluded and api else f"`{api or 'confirm API'}`"
+        permission = "preserve existing page permissions and API authorization boundary"
+        lines.append(f"| `{brk}` {scenario} | {frontend_entry or 'frontend'} | {data} | {api_impact} | {permission} |")
     return "\n".join(lines)
 
 
@@ -4260,43 +4406,26 @@ def render_runtime_decision_summary(runtime_evidence: dict[str, Any], language: 
     frontend_file = human_value(frontend.get("source_file") or frontend.get("file"), language, "")
     backend_files = [human_value(item, language, "") for item in as_list(backend.get("source_files") or backend.get("files")) if human_value(item, language, "")]
     api_count = len({human_value(item.get("api"), language, "") for item in interactions if human_value(item.get("api"), language, "")})
+    frontend_only = runtime_area_excluded(runtime_evidence, "api") and runtime_area_excluded(runtime_evidence, "data") and not backend_files
     options = [item for item in as_list(runtime_evidence.get("solution_options") or runtime_evidence.get("runtime_options")) if isinstance(item, dict)]
     if not options:
         options = [
             {
                 "id": "R1",
-                "name": "最小前后端适配，复用现有表和接口",
-                "approach": "按业务子域在现有前端页面、后端 controller/service 和既有数据表内补齐展示、筛选、排序、原因校验和刷新逻辑。",
+                "name": "在已确认责任边界内完成改动",
+                "approach": f"围绕 {frontend_file or '已确认入口'} 和当前 API 契约完成交互、状态和清理行为。",
                 "pros": ["改动边界最小", "复用既有事实源", "回滚路径清晰"],
-                "cons": ["需要把每条子域规则落到现有方法内", "若既有字段不足，实施中仍需补充 DDL 评审"],
-                "risk": "中低：主要风险是筛选/排序/原因校验口径遗漏。",
+                "cons": ["需要逐条绑定验收证据", "共享责任变化时必须重新评审范围"],
+                "risk": "中低：主要风险是异步状态、异常和清理分支遗漏。",
                 "decision": "selected",
             },
             {
                 "id": "R2",
-                "name": "后端新增专用字段或专用接口",
-                "approach": "为续期月份、筛选结果或不续期原因新增更显式的后端字段/API，再由前端消费。",
-                "pros": ["接口语义更直观", "前端适配简单"],
-                "cons": ["可能引入 DDL、回填和兼容成本", "需要额外迁移与回滚方案"],
-                "risk": "中：数据迁移和存量消费方兼容风险高于复用方案。",
-                "decision": "rejected",
-            },
-            {
-                "id": "R3",
-                "name": "纯前端展示修补",
-                "approach": "只在页面侧补列、隐藏状态、调整按钮和本地筛选，不改变后端事实源。",
-                "pros": ["开发快", "后端发布成本低"],
-                "cons": ["无法保证金额、状态、原因落库和筛选条件的事实一致性", "绕过前端时不满足验收"],
-                "risk": "高：结算和权限类规则不能只依赖前端。",
-                "decision": "rejected",
-            },
-            {
-                "id": "R4",
-                "name": "结算/续期模型重构",
-                "approach": "重构续期池、结算单、结算明细和续期记录之间的模型边界。",
-                "pros": ["长期模型更统一", "可减少未来类似需求的重复适配"],
-                "cons": ["范围过大", "测试、迁移、发布和回滚成本显著增加"],
-                "risk": "高：超出本需求验收所需范围。",
+                "name": "扩大契约或模块边界",
+                "approach": "仅在当前入口无法满足验收时，调整生产方契约或抽取共享模块。",
+                "pros": ["可统一多个消费方行为", "共享规则边界更清晰"],
+                "cons": ["扩大集成、发布和回滚范围", "需要额外兼容证据"],
+                "risk": "中高：范围和契约漂移风险高于责任边界内方案。",
                 "decision": "rejected",
             },
         ]
@@ -4304,8 +4433,11 @@ def render_runtime_decision_summary(runtime_evidence: dict[str, Any], language: 
         lines = ["### 候选方案详述"]
         lines.append(f"- 方案数量：{len(options)} 个；按当前需求影响面动态展开，不固定为二选一或三选一。")
         lines.append(f"- 前端责任边界：`{frontend_file or '未同步前端文件'}`。")
-        lines.append("- 后端责任边界：" + ("、".join(f"`{item}`" for item in backend_files[:6]) if backend_files else "后端 controller/service 按接口契约承接业务规则。"))
-        lines.append(f"- 接口边界：本需求涉及 {api_count} 个已识别 API，按 API 契约章节逐项保持兼容。")
+        if frontend_only:
+            lines.append("- 服务端与数据边界：不在修改范围；既有 API 契约保持不变，不涉及持久化结构变更。")
+        else:
+            lines.append("- 后端责任边界：" + ("、".join(f"`{item}`" for item in backend_files[:6]) if backend_files else "按已确认 API 契约承接业务规则。"))
+        lines.append(f"- 接口边界：本需求引用 {api_count} 个既有 API；是否修改由 impact_applicability 决定。")
         for option in options:
             option_id = human_value(option.get("id") or option.get("option_id"), language, "")
             name = human_value(option.get("name"), language, option_id or "方案")
@@ -4329,27 +4461,34 @@ def render_runtime_decision_summary(runtime_evidence: dict[str, Any], language: 
             name = human_value(option.get("name"), language, option_id or "方案")
             decision = human_value(option.get("decision"), language, "")
             if option_id == "R1" or decision.lower() == "selected":
-                lines.append(f"| `{option_id or name}` | 前后端和既有数据表内闭环 | 高：后端保持事实源 | 低到中 | 低 | 选择：满足验收且范围最小 |")
+                selected_scope = "前端责任入口；既有契约不变" if frontend_only else "已确认责任模块内闭环"
+                consistency = "无持久化变更" if frontend_only else "保持既有事实源"
+                lines.append(f"| `{option_id or name}` | {selected_scope} | {consistency} | 低 | 低 | 选择：满足验收且范围最小 |")
             elif option_id == "R3":
                 lines.append(f"| `{option_id}` | 前端局部 | 低：绕过前端不可控 | 中 | 低 | 不选：结算/权限/落库规则不能只靠前端 |")
             elif option_id == "R4":
                 lines.append(f"| `{option_id}` | 跨模型重构 | 高 | 高 | 高 | 不选：超出本次验收范围 |")
             else:
                 lines.append(f"| `{option_id or name}` | 后端接口/字段扩展 | 中到高 | 中到高 | 中 | 暂不选：只有既有字段不足时才升级 |")
+        selected = next((item for item in options if human_value(item.get("decision"), language, "").lower() == "selected"), options[0] if options else {})
+        selected_id = human_value(selected.get("id") or selected.get("option_id"), language, "R1")
+        selected_name = human_value(selected.get("name"), language, selected_id)
         lines.extend([
             "",
             "### 决策结论",
-            "- 选中：`R1` 最小前后端适配，复用现有表和接口。",
-            "- 选择理由：续期月份、状态过滤、原因落库和筛选条件都需要以后端为事实源，但当前证据显示既有接口、DTO/VO 和数据表已能承接主要规则；优先在现有页面与 service 内补齐字段、查询、排序、校验和刷新。",
-            "- 拒绝纯前端修补：无法保证绕过前端时的原因必填、状态过滤和数据一致性。",
-            "- 拒绝大范围重构：当前需求不要求重塑续期/结算模型，重构会显著增加迁移、测试和回滚成本。",
+            f"- 选中：`{selected_id}` {selected_name}。",
+            f"- 选择理由：{human_value(selected.get('decision_reason') or selected.get('approach') or selected.get('description'), language, '在已确认责任边界内满足验收并保持最小发布与回滚范围。')}",
+            "- 备选方案只有在当前责任入口、契约或范围证据被推翻时才能升级，并需重新评审设计与追踪矩阵。",
         ])
         return "\n".join(lines)
     lines = ["### Candidate Options"]
     lines.append(f"- Option count: {len(options)}; generated from the current evidence rather than a fixed two/three-option template.")
     lines.append(f"- Frontend boundary: `{frontend_file or 'not synced'}`.")
-    lines.append("- Backend boundary: " + (", ".join(f"`{item}`" for item in backend_files[:6]) if backend_files else "backend controllers/services own business rules per API contract."))
-    lines.append(f"- API boundary: {api_count} identified APIs remain compatible per the API contract section.")
+    if frontend_only:
+        lines.append("- Server and data boundary: outside modify scope; existing API contracts remain unchanged and no persistence shape changes.")
+    else:
+        lines.append("- Backend boundary: " + (", ".join(f"`{item}`" for item in backend_files[:6]) if backend_files else "follow confirmed API owners."))
+    lines.append(f"- API boundary: {api_count} existing APIs are referenced; impact_applicability determines whether they change.")
     for option in options:
         option_id = human_value(option.get("id") or option.get("option_id"), language, "")
         name = human_value(option.get("name"), language, option_id or "Option")
@@ -4359,13 +4498,15 @@ def render_runtime_decision_summary(runtime_evidence: dict[str, Any], language: 
         lines.append(f"- Pros: {human_value(option.get('pros'), language, 'TBD')}")
         lines.append(f"- Cons: {human_value(option.get('cons'), language, 'TBD')}")
         lines.append(f"- Risk: {human_value(option.get('risk') or option.get('risk_level'), language, 'TBD')}")
+    selected = next((item for item in options if human_value(item.get("decision"), language, "").lower() == "selected"), options[0] if options else {})
+    selected_id = human_value(selected.get("id") or selected.get("option_id"), language, "R1")
+    selected_name = human_value(selected.get("name"), language, selected_id)
     lines.extend([
         "",
         "### Comparison And Decision",
-        "- Selected: `R1` minimal frontend/backend adaptation using existing tables and APIs.",
-        "- Reason: backend remains the source of truth while current contracts and tables can carry the required behavior with the smallest release and rollback scope.",
-        "- Rejected frontend-only patch: it cannot enforce reason-required, status filtering, or persistence when clients bypass the UI.",
-        "- Rejected model rewrite: it exceeds the acceptance scope and increases migration, testing, and rollback cost.",
+        f"- Selected: `{selected_id}` {selected_name}.",
+        f"- Reason: {human_value(selected.get('decision_reason') or selected.get('approach') or selected.get('description'), language, 'satisfies acceptance inside the confirmed owner boundary with the smallest release and rollback scope.')}",
+        "- Alternatives require renewed design and traceability review if owner, contract, or scope evidence changes.",
     ])
     return "\n".join(lines)
 
@@ -4374,6 +4515,13 @@ def render_runtime_decision_record(runtime_evidence: dict[str, Any], language: s
     runtime_evidence = runtime_evidence if isinstance(runtime_evidence, dict) else {}
     if not runtime_evidence.get("interactions"):
         return ""
+    frontend_only = runtime_area_excluded(runtime_evidence, "api") and runtime_area_excluded(runtime_evidence, "data") and not runtime_evidence.get("backend")
+    if language == "zh" and frontend_only:
+        return "\n".join([
+            "- 决策：仅修改 scope_model.modify 中确认的前端入口；reference_only 用于链路验证，forbidden 不得进入实现。",
+            "- 契约与数据：既有 API 路径、字段、响应结构保持不变；不涉及数据库或持久化迁移。",
+            "- 回滚考虑：回滚前端提交即可；若发现服务端或数据变更，必须先提交设计变更并重新过门禁。",
+        ])
     if language == "zh":
         return "\n".join(
             [
@@ -4381,6 +4529,12 @@ def render_runtime_decision_record(runtime_evidence: dict[str, Any], language: s
                 "- 回滚考虑：前端和后端分别回滚；出现 DDL/回填时追加数据回滚脚本。",
             ]
         )
+    if frontend_only:
+        return "\n".join([
+            "- Decision: modify only confirmed frontend entries in scope_model.modify; reference_only validates the chain and forbidden never enters implementation.",
+            "- Contract and data: existing API paths, fields, and response shapes remain unchanged; there is no database or persistence migration.",
+            "- Rollback: revert the frontend commit; any discovered server or data change requires an approved design change and renewed gates first.",
+        ])
     return "\n".join(
         [
             "- Decision: split by business slice and bind frontend page, backend API, and data model to source evidence.",
@@ -4403,6 +4557,23 @@ def render_runtime_architecture_operations(runtime_evidence: dict[str, Any], lan
         api = " ".join(part for part in [human_value(item.get("method"), language, ""), human_value(item.get("api"), language, "")] if part)
         if api and api not in apis:
             apis.append(api)
+    frontend_only = runtime_area_excluded(runtime_evidence, "api") and runtime_area_excluded(runtime_evidence, "data") and not backend_repo
+    if language == "zh" and frontend_only:
+        return "\n".join([
+            "### 集成、发布与回滚口径",
+            f"- 集成边界：`{frontend_repo or '前端仓库'}` 调用既有 API；接口路径、字段和响应结构保持不变，不产生服务端发布单元。",
+            f"- 既有 API：{', '.join(f'`{api}`' for api in apis[:10]) or '以技术设计中的引用清单为准'}",
+            "- 发布顺序：仅发布前端仓库；发布前验证既有接口兼容性和浏览器回归证据。",
+            "- 回滚口径：回滚前端提交并复核播放器资源清理；不需要数据库或服务端回滚。",
+        ])
+    if language != "zh" and frontend_only:
+        return "\n".join([
+            "### Integration, Release, And Rollback Scope",
+            f"- Integration boundary: `{frontend_repo or 'frontend repository'}` calls existing APIs whose paths, fields, and response shapes remain unchanged; no server release unit is created.",
+            f"- Existing APIs: {', '.join(f'`{api}`' for api in apis[:10]) or 'see referenced contracts in the technical design'}",
+            "- Release order: release only the frontend repository after existing-contract compatibility and browser regression evidence pass.",
+            "- Rollback: revert the frontend commit and verify player-resource cleanup; no database or server rollback is required.",
+        ])
     if language == "zh":
         lines = ["### 集成、发布与回滚口径"]
         lines.append(f"- 集成边界：`{frontend_repo or '前端'}` 通过已列 API 调用 `{backend_repo or '后端'}`；本轮证据未显示 MQ 或额外下游系统。")
@@ -4429,6 +4600,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
     if not frontend_file and not backend_files:
         return ""
     interactions = [item for item in as_list(runtime_evidence.get("interactions")) if isinstance(item, dict)]
+    frontend_only = runtime_area_excluded(runtime_evidence, "api") and runtime_area_excluded(runtime_evidence, "data") and not backend_files
     if language == "zh":
         lines = []
         if frontend_file:
@@ -4438,7 +4610,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
                     "",
                     f"- 修改前必须阅读：`{frontend_file}`",
                     f"- 允许修改文件：`{frontend_file}` 及同目录内已存在的局部测试/类型文件；若需要跨目录改动，必须更新交付计划。",
-                    "- 核心任务：校准页面列、筛选参数、按钮/弹窗校验、接口调用和成功后刷新。",
+                    "- 核心任务：按 runtime interaction 实现用户动作、异步状态、接口调用、失败处理和资源清理。",
                     "- 需要覆盖的用户动作：" + ("；".join(human_value(item.get("trigger"), language, "") for item in interactions if human_value(item.get("trigger"), language, "")) or "未同步"),
                     "- 测试命令：`npm run build:test` 或项目实际可用的等价构建命令。",
                     "",
@@ -4451,13 +4623,17 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
                     "",
                     "- 修改前必须阅读：" + "、".join(f"`{item}`" for item in backend_files),
                     "- 允许修改文件：上述 controller/service/DTO/VO 及其直接测试；若新增 Mapper/SQL/迁移，必须补充数据回滚说明。",
-                    "- 核心任务：校准状态过滤、月份推导、筛选条件透传、原因必填和续期池写入语义。",
+                    "- 核心任务：按已确认 API 契约保持请求、响应、兼容性、失败处理和权限边界。",
                     "- 测试命令：`mvn -pl operate-provider -DskipTests compile`，并补充相关 service/API 测试或说明环境阻塞。",
                     "",
                 ]
             )
-        lines.append("- 交付顺序：先后端契约/数据口径，后前端页面适配；若后端确认无需改动，需在证据中说明接口已满足目标。")
-        lines.append("- 回滚策略：前端回滚页面提交；后端回滚接口/服务提交；若引入 DDL 或回填，必须执行配套数据回滚或兼容脚本。")
+        lines.append("- 交付顺序：按仓库角色和依赖图执行；confirm-only 依赖不进入修改范围。")
+        lines.append(
+            "- 回滚策略：回滚前端提交并验证播放器资源清理；既有 API 和数据结构未变，不需要服务端或数据回滚。"
+            if frontend_only
+            else "- 回滚策略：前端回滚页面提交；后端回滚接口/服务提交；若引入 DDL 或回填，必须执行配套数据回滚或兼容脚本。"
+        )
         return "\n".join(lines)
     lines = []
     if frontend_file:
@@ -4467,7 +4643,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
                 "",
                 f"- Read first: `{frontend_file}`",
                 f"- Allowed files: `{frontend_file}` and existing local tests/types in the same area; update the plan before cross-directory edits.",
-                "- Core tasks: calibrate table columns, filter params, button/dialog validation, API calls, and refresh behavior.",
+                "- Core tasks: implement recorded user actions, async state, API calls, failure handling, and cleanup.",
                 "- Test command: `npm run build:test` or the project-equivalent build command.",
                 "",
             ]
@@ -4484,8 +4660,16 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
                 "",
             ]
         )
-    lines.append("- Delivery order: backend contract/data semantics first, frontend adaptation second; if backend does not change, evidence must prove the existing API already satisfies the target.")
-    lines.append("- Rollback: revert frontend page commit and backend API/service commit; DDL/backfill requires paired rollback or compatibility script.")
+    lines.append(
+        "- Delivery order: release the frontend only after existing-contract compatibility and browser evidence pass."
+        if frontend_only
+        else "- Delivery order: backend contract/data semantics first, frontend adaptation second; if backend does not change, evidence must prove the existing API already satisfies the target."
+    )
+    lines.append(
+        "- Rollback: revert the frontend commit and verify player-resource cleanup; unchanged APIs and data structures need no server or data rollback."
+        if frontend_only
+        else "- Rollback: revert frontend page commit and backend API/service commit; DDL/backfill requires paired rollback or compatibility script."
+    )
     return "\n".join(lines)
 
 
@@ -4981,10 +5165,6 @@ def acceptance_ids_for_summary(spec: dict[str, Any], summary: str) -> list[str]:
         ac_id = text(item.get("id"), "")
         if ac_id and (not summary or summary in criteria or criteria in summary):
             result.append(ac_id)
-    if not result:
-        first = next((text(item.get("id"), "") for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict) and text(item.get("id"), "")), "")
-        if first:
-            result.append(first)
     return result
 
 
@@ -5071,7 +5251,13 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
     if not interactions:
         return {}, ["no_interactions_inferred"]
     entrypoints = runtime_entrypoints_from_evidence({"interactions": interactions})
-    data_models = source_table_hints(artifact_dir, owner_entrypoints)
+    data_excluded = any(
+        isinstance(item, dict)
+        and text(item.get("area"), "").lower() == "data"
+        and text(item.get("status"), "").lower() in {"excluded", "not_applicable"}
+        for item in as_list(spec.get("impact_applicability"))
+    )
+    data_models = [] if data_excluded else source_table_hints(artifact_dir, owner_entrypoints)
     frontend_route = page_or_route
     if frontend_route.startswith("@"):
         frontend_route = normalized_route_label(frontend_route)
@@ -5095,6 +5281,7 @@ def synthesize_runtime_sequence_evidence(artifact_dir: Path, doc_id: str = "") -
         "doc_id": doc_id,
         "source": "docs-governor synthesized from spec, technical design, api surface, and code index",
         "confidence": "medium",
+        "impact_applicability": as_list(spec.get("impact_applicability")),
         "actor": actor_from_spec(spec),
         "entrypoint": next((item.get("entrypoint") for item in interactions if isinstance(item.get("entrypoint"), dict) and item.get("entrypoint")), {}),
         "entrypoints": entrypoints,

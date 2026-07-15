@@ -131,7 +131,7 @@ python3 scripts/codex_eng.py auto \
 
 Configure the delivery docs repository once per workspace. Later requirements reuse the configured docs repo by `doc_id`; pass `--docs-root` only when overriding the workspace default.
 
-The auto runner ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/domain/framing/specialty-design/technical-design/architecture-design/test/test-data/plan artifacts, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
+The auto runner starts an append-only Agent Runtime session, ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/domain/framing/specialty-design/technical-design/architecture-design/test/test-data/plan artifacts, runs the intake/design Harness checkpoints, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
 Check the next safe action later:
 
@@ -145,7 +145,17 @@ Preview implementation scope before editing:
 python3 scripts/codex_eng.py implement --artifact-dir /tmp/codex-auto-demo
 ```
 
-Implementation dry-run blocks until the full pre-edit gate is ready: delivery docs manifest, `technical_design.json`, `architecture_design.json`, `design_architecture_review.json` with `implementation_allowed=true`, `delivery_plan_review.json` with `implementation_allowed=true`, Git evidence that fetched the remote and updated the base branch with `pull --ff-only`, and `edit_permit.json`. For direct edits, create `write_guard_snapshot.json` after the permit and require `write_guard_audit.json` before commit or push.
+Implementation dry-run blocks until the full pre-edit gate is ready: delivery docs manifest, `technical_design.json`, `architecture_design.json`, `design_architecture_review.json` with `implementation_allowed=true`, `delivery_plan_review.json` with `implementation_allowed=true`, `harness_validation.json`, Git evidence that fetched the remote and updated the base branch with `pull --ff-only`, and `edit_permit.json`. Repository-backed runs also require the source-location Harness. For direct edits, create `write_guard_snapshot.json` after the permit and require `write_guard_audit.json` before commit. The pre-push Harness then binds plan-to-diff, project skill index, traceability, tests, review, and the current Git commit.
+
+Inspect or advance the Agent Runtime without adding another always-visible skill:
+
+```bash
+python3 scripts/codex_eng.py runtime verify --artifact-dir /tmp/codex-auto-demo
+python3 scripts/codex_eng.py runtime advance --artifact-dir /tmp/codex-auto-demo --name post_implementation
+python3 scripts/codex_eng.py runtime advance --artifact-dir /tmp/codex-auto-demo --name pre_push
+```
+
+Runtime commands append redacted, SHA-256 chained events. Release authorization additionally requires verified attestations from CI, change management, deployment, and observability providers; adapters and credentials stay in private overlays.
 
 Default target: `${CODEX_HOME:-~/.codex}/skills/codex-engineering-skills`.
 

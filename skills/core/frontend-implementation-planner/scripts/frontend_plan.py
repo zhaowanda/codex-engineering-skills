@@ -39,6 +39,9 @@ def plan(ui: dict[str, Any], technical: dict[str, Any] | None = None) -> dict[st
     screens = [item for item in as_list(ui.get("screens")) if isinstance(item, dict)]
     route = str((screens[0].get("page_or_route") if screens else summary.get("entry_surface")) or "")
     read_first = as_list((technical.get("project_context") or {}).get("read_first")) if isinstance(technical.get("project_context"), dict) else []
+    scope_model = technical.get("scope_model") if isinstance(technical.get("scope_model"), dict) else {}
+    modify_files = [str(item) for item in as_list(scope_model.get("modify")) if str(item).strip()]
+    reference_files = [str(item) for item in as_list(scope_model.get("reference_only")) if str(item).strip()]
     if not route or "confirm" in route.lower():
         blockers.append({"source": "route", "message": "Frontend route/page is not concrete."})
     if not read_first:
@@ -51,7 +54,8 @@ def plan(ui: dict[str, Any], technical: dict[str, Any] | None = None) -> dict[st
         "applicable": True,
         "implementation_allowed": not blockers,
         "routes": [{"route": route, "entry_action": summary.get("trigger_action"), "user_goal": summary.get("user_goal")}],
-        "candidate_files": read_first[:10],
+        "candidate_files": (modify_files or [str(item) for item in read_first if str(item) not in reference_files])[:10],
+        "reference_files": reference_files[:10],
         "component_work": [{"component_or_area": route or "affected component", "change": "implement UI/UE interaction flow and state matrix", "design_system_rule": "reuse existing controls before introducing new components"}],
         "state_handling": [item.get("state") for item in as_list(ui.get("state_matrix")) if isinstance(item, dict)],
         "api_dependencies": as_list((ui.get("frontend_contract") or {}).get("api_dependencies")) if isinstance(ui.get("frontend_contract"), dict) else [],

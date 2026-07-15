@@ -1,8 +1,12 @@
-schema: codex-workflow-profiles-v2
+schema: codex-workflow-profiles-v3
 profiles:
   - name: bugfix
     governance_level: light
     target_artifact_reduction_percent: 30
+    cost_budget:
+      max_executed_steps: 30
+      max_generated_artifacts: 24
+      max_command_duration_ms: 180000
     trigger_lanes:
       - bugfix
     required_skills:
@@ -24,6 +28,10 @@ profiles:
       - diff-impact-analyzer
       - test-evidence-gate
     expected_artifacts:
+      - runtime/session.json
+      - runtime/checkpoints/intake.json
+      - runtime/checkpoints/design.json
+      - runtime/checkpoints/pre_edit.json
       - spec.json
       - requirement_ingestion.json
       - open_questions.json
@@ -35,6 +43,7 @@ profiles:
       - delivery_plan.json
       - traceability_matrix.json
       - delivery_plan_review.json
+      - harness_validation.json
       - docs_quality.json
       - git_worktree_evidence.json
       - edit_permit.json
@@ -74,6 +83,9 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: harness_validation.json
+        accepted_decisions:
+          - pass
       - artifact: git_worktree_evidence.json
         accepted_decisions:
           - ready
@@ -92,6 +104,10 @@ profiles:
       - edit permit is ready
   - name: small_feature
     governance_level: standard
+    cost_budget:
+      max_executed_steps: 36
+      max_generated_artifacts: 30
+      max_command_duration_ms: 240000
     trigger_lanes:
       - small_change
       - standard_requirement
@@ -115,6 +131,10 @@ profiles:
       - workspace-write-guard
     optional_skills: []
     expected_artifacts:
+      - runtime/session.json
+      - runtime/checkpoints/intake.json
+      - runtime/checkpoints/design.json
+      - runtime/checkpoints/pre_edit.json
       - spec.json
       - requirement_ingestion.json
       - open_questions.json
@@ -128,6 +148,7 @@ profiles:
       - delivery_plan.json
       - traceability_matrix.json
       - delivery_plan_review.json
+      - harness_validation.json
       - docs_quality.json
       - git_worktree_evidence.json
       - edit_permit.json
@@ -173,6 +194,9 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: harness_validation.json
+        accepted_decisions:
+          - pass
       - artifact: git_worktree_evidence.json
         accepted_decisions:
           - ready
@@ -191,6 +215,10 @@ profiles:
       - edit permit is ready
   - name: frontend_change
     governance_level: standard
+    cost_budget:
+      max_executed_steps: 42
+      max_generated_artifacts: 36
+      max_command_duration_ms: 300000
     trigger_impacts:
       - ui
       - frontend
@@ -217,6 +245,10 @@ profiles:
     optional_skills:
       - code-review-gate
     expected_artifacts:
+      - runtime/session.json
+      - runtime/checkpoints/intake.json
+      - runtime/checkpoints/design.json
+      - runtime/checkpoints/pre_edit.json
       - requirement_ingestion.json
       - spec.json
       - open_questions.json
@@ -233,6 +265,7 @@ profiles:
       - delivery_plan.json
       - traceability_matrix.json
       - delivery_plan_review.json
+      - harness_validation.json
       - docs_quality.json
       - git_worktree_evidence.json
       - edit_permit.json
@@ -341,6 +374,9 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: harness_validation.json
+        accepted_decisions:
+          - pass
       - artifact: git_worktree_evidence.json
         accepted_decisions:
           - ready
@@ -360,6 +396,10 @@ profiles:
       - edit permit is ready
   - name: cross_repo_api
     governance_level: heavy
+    cost_budget:
+      max_executed_steps: 48
+      max_generated_artifacts: 42
+      max_command_duration_ms: 420000
     trigger_impacts:
       - api
     required_skills:
@@ -387,8 +427,13 @@ profiles:
       - api-surface-extractor
       - code-review-gate
     expected_artifacts:
+      - runtime/session.json
+      - runtime/checkpoints/intake.json
+      - runtime/checkpoints/design.json
+      - runtime/checkpoints/pre_edit.json
       - requirement_ingestion.json
       - project_understanding/baseline_quality.json
+      - harness/source_location.json
       - spec.json
       - open_questions.json
       - domain_model_design.json
@@ -407,6 +452,7 @@ profiles:
       - cross_repo_release_plan.json
       - traceability_matrix.json
       - delivery_plan_review.json
+      - harness_validation.json
       - docs_quality.json
       - git_worktree_evidence.json
       - edit_permit.json
@@ -477,6 +523,9 @@ profiles:
         accepted_decisions:
           - pass
           - ready
+      - artifact: harness/source_location.json
+        accepted_decisions:
+          - pass
       - artifact: open_questions.json
         accepted_decisions:
           - pass
@@ -527,6 +576,9 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: harness_validation.json
+        accepted_decisions:
+          - pass
       - artifact: git_worktree_evidence.json
         accepted_decisions:
           - ready
@@ -544,6 +596,10 @@ profiles:
       - delivery plan review passes
   - name: data_migration
     governance_level: critical
+    cost_budget:
+      max_executed_steps: 48
+      max_generated_artifacts: 42
+      max_command_duration_ms: 420000
     trigger_impacts:
       - data
     required_skills:
@@ -572,6 +628,10 @@ profiles:
       - environment-promotion-governor
       - uat-acceptance-governor
     expected_artifacts:
+      - runtime/session.json
+      - runtime/checkpoints/intake.json
+      - runtime/checkpoints/design.json
+      - runtime/checkpoints/pre_edit.json
       - requirement_ingestion.json
       - spec.json
       - open_questions.json
@@ -587,6 +647,7 @@ profiles:
       - delivery_plan.json
       - traceability_matrix.json
       - delivery_plan_review.json
+      - harness_validation.json
       - docs_quality.json
       - configuration_readiness.json
       - data_security_review.json
@@ -744,6 +805,9 @@ profiles:
           - pass
         readiness_path: readiness_gate.implementation_allowed
         readiness_value: true
+      - artifact: harness_validation.json
+        accepted_decisions:
+          - pass
       - artifact: git_worktree_evidence.json
         accepted_decisions:
           - ready
@@ -760,6 +824,10 @@ profiles:
       - configuration/security/performance evidence is planned
   - name: release_readiness
     governance_level: critical
+    cost_budget:
+      max_executed_steps: 24
+      max_generated_artifacts: 22
+      max_command_duration_ms: 240000
     trigger_lanes:
       - release
     required_skills:
@@ -780,8 +848,13 @@ profiles:
     optional_skills:
       - post-release-observer
     expected_artifacts:
+      - runtime/session.json
+      - runtime/checkpoints/post_implementation.json
+      - runtime/checkpoints/pre_push.json
+      - runtime/checkpoints/release.json
       - implementation_completion_gate.json
       - post_change_implementation_report.json
+      - harness/post_implementation.json
       - write_guard_audit.json
       - diff_impact.json
       - change_risk.json
@@ -790,6 +863,7 @@ profiles:
       - code_review_gate.json
       - test_evidence_gate.json
       - post_implementation_traceability_matrix.json
+      - harness/pre_push.json
       - environment_promotion.json
       - uat_acceptance.json
       - release_change.json
@@ -849,6 +923,9 @@ profiles:
         accepted_decisions:
           - pass
           - warn
+      - artifact: harness/post_implementation.json
+        accepted_decisions:
+          - pass
       - artifact: write_guard_audit.json
         accepted_decisions:
           - pass
@@ -881,6 +958,9 @@ profiles:
         accepted_decisions:
           - pass
           - warn
+      - artifact: harness/pre_push.json
+        accepted_decisions:
+          - pass
       - artifact: environment_promotion.json
         accepted_decisions:
           - pass

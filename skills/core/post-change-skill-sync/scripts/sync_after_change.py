@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import subprocess
 from datetime import datetime
@@ -11,6 +12,18 @@ from typing import Any
 
 SCHEMA = "codex-post-change-implementation-report-v1"
 IGNORE_DIRS = (".git/", ".idea/", ".vscode/", "node_modules/", "dist/", "build/", "target/", "__pycache__/")
+
+
+def load_governance_contract() -> Any:
+    path = Path(__file__).resolve().parents[4] / "skills/core/delivery-runner/scripts/governance_contract.py"
+    spec = importlib.util.spec_from_file_location("post_change_governance_contract", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GOVERNANCE_CONTRACT = load_governance_contract()
 
 
 def as_list(value: Any) -> list[Any]:
@@ -210,27 +223,36 @@ def infer_project_skill_candidates(files: list[str], baseline_candidates: list[d
     return candidates
 
 
-def project_skill_index_requirements(artifact_dir: Path, candidates: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+def project_skill_index_requirements(artifact_dir: Path, candidates: list[dict[str, Any]], doc_id: str = "") -> tuple[dict[str, Any], list[dict[str, str]]]:
     evidence_path = artifact_dir / "project_skill_index_sync.json"
     evidence = load_json(evidence_path)
     blockers: list[dict[str, str]] = []
     required = bool(candidates)
     status = "not_required"
     updated_paths = [str(item) for item in as_list(evidence.get("updated_index_paths")) if str(item).strip()]
-    waiver_reason = str(evidence.get("waiver_reason") or "").strip()
+    waiver = as_dict(evidence.get("waiver"))
+    waiver_validation = GOVERNANCE_CONTRACT.validate_waiver(
+        waiver,
+        expected_subject=doc_id,
+        expected_gate="project_skill_index_sync",
+    ) if waiver else {}
     evidence_decision = str(evidence.get("decision") or "").strip()
 
     if required:
         if evidence_decision == "pass" and updated_paths:
             status = "satisfied"
-        elif evidence_decision == "waived" and waiver_reason:
+        elif evidence_decision == "waived" and waiver_validation.get("decision") == "pass":
             status = "waived"
         else:
             status = "missing_evidence"
             blockers.append({
                 "source": "project_skill_index_sync",
-                "message": "project skill sync candidates require project_skill_index_sync.json with decision=pass and updated_index_paths, or decision=waived with waiver_reason",
+                "message": "project skill sync candidates require updated_index_paths or an approved, unexpired structured waiver",
             })
+            blockers.extend(
+                {"source": "project_skill_index_sync", "message": item.get("message", "invalid waiver")}
+                for item in waiver_validation.get("blockers", [])
+            )
 
     return {
         "required": required,
@@ -238,7 +260,8 @@ def project_skill_index_requirements(artifact_dir: Path, candidates: list[dict[s
         "evidence_file": str(evidence_path),
         "candidate_count": len(candidates),
         "updated_index_paths": updated_paths,
-        "waiver_reason": waiver_reason,
+        "waiver": waiver,
+        "waiver_validation": waiver_validation,
         "evidence_decision": evidence_decision,
     }, blockers
 
@@ -310,8 +333,9 @@ def markdown(report: dict[str, Any]) -> str:
         ])
         for path in as_list(index_requirements.get("updated_index_paths")):
             lines.append(f"- Updated index: `{path}`")
-        if index_requirements.get("waiver_reason"):
-            lines.append(f"- Waiver: {index_requirements['waiver_reason']}")
+        waiver = as_dict(index_requirements.get("waiver"))
+        if waiver.get("reason"):
+            lines.append(f"- Waiver `{waiver.get('waiver_id', '')}`: {waiver['reason']}")
     if report.get("diff_stat"):
         lines.extend(["", "## Diff Stat", "", "```text", report["diff_stat"], "```"])
     if report["blockers"]:
@@ -332,7 +356,7 @@ def generate(repo: Path, artifact_dir: Path, doc_id: str = "", docs_root: Path |
         warnings.append({"source": "changed_files", "message": "no changed files detected"})
     baseline = infer_baseline_candidates(changed)
     project_skill_candidates = infer_project_skill_candidates(changed, baseline)
-    project_skill_index, project_skill_index_blockers = project_skill_index_requirements(artifact_dir, project_skill_candidates)
+    project_skill_index, project_skill_index_blockers = project_skill_index_requirements(artifact_dir, project_skill_candidates, doc_id)
     blockers.extend(project_skill_index_blockers)
     docs, docs_blockers = docs_binding(artifact_dir, docs_root, doc_id, require_docs)
     blockers.extend(docs_blockers)

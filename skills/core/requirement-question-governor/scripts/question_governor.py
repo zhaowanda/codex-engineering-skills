@@ -38,13 +38,26 @@ def question_key(question: dict[str, Any]) -> str:
     return str(question.get("question") or "").strip().lower()
 
 
+def semantic_question_key(question: dict[str, Any]) -> str:
+    category = str(question.get("category") or "general")
+    aliases = {
+        "understanding_score": str(question.get("source") or "").rsplit(".", 1)[-1].replace("_score", ""),
+        "ambiguous_action": "behavior",
+        "business_goal": "intent",
+        "business_flow": "flow",
+        "ambiguous_flow": "flow",
+        "acceptance": "acceptance",
+    }
+    return aliases.get(category, category)
+
+
 def canonical_spec_digest(spec: dict[str, Any]) -> str:
     def strip_volatile(value: Any) -> Any:
         if isinstance(value, dict):
             return {
                 key: strip_volatile(item)
                 for key, item in sorted(value.items())
-                if key not in {"generated_at", "updated_at", "producer", "producer_version", "lineage_schema", "input_digests"}
+                if key not in {"artifact_digest", "command_digest", "generated_at", "generated_from_branch", "generated_from_commit", "updated_at", "permit_id", "producer", "producer_version", "lineage_schema", "input_digests"}
             }
         if isinstance(value, list):
             return [strip_volatile(item) for item in value]
@@ -99,7 +112,8 @@ def risk_for_category(category: str) -> str:
 
 
 def add_question(questions: list[dict[str, Any]], question: str, owner: str, required: bool, source: str, category: str = "general", risk: str | None = None) -> None:
-    if question.lower() in {question_key(item) for item in questions}:
+    candidate = {"question": question, "category": category, "source": source}
+    if question.lower() in {question_key(item) for item in questions} or semantic_question_key(candidate) in {semantic_question_key(item) for item in questions}:
         return
     questions.append({
         "id": f"Q-{len(questions) + 1}",
@@ -245,6 +259,8 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
     for ambiguity in as_list(spec.get("ambiguities")) + as_list(understanding.get("blockers")):
         if not isinstance(ambiguity, dict):
             continue
+        if ambiguity.get("required") is False:
+            continue
         category = str(ambiguity.get("category") or "ambiguity")
         message = str(ambiguity.get("message") or "")
         if not message:
@@ -285,6 +301,9 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
         question_text = score_questions.get(dimension, "")
         if question_text:
             add_question(questions, question_text, "product/engineering", True, f"requirements_understanding.{dimension}", "understanding_score")
+    for advisory in as_list(as_dict(spec.get("business_goal_quality")).get("advisories")):
+        if isinstance(advisory, dict) and advisory.get("source") == "measurable_metric":
+            add_question(questions, "What quantitative success threshold should be observed for this requirement?", "product/engineering", False, "business_goal_quality.measurable_metric", "success_metric")
     current_state = as_dict(spec.get("current_business_state"))
     for gap in as_list(current_state.get("evidence_gaps")):
         if isinstance(gap, dict) and gap.get("message"):
@@ -338,7 +357,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
         )
     if not as_list(spec.get("acceptance_criteria")):
         add_question(questions, "What are the acceptance criteria and evidence required?", "product", True, "missing.acceptance_criteria", "acceptance")
-    if as_list(spec.get("acceptance_criteria")) and all(str(item.get("source_evidence")) != "input" for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)):
+    if as_list(spec.get("acceptance_criteria")) and all(not str(item.get("source_evidence") or "").startswith("input") for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)):
         add_question(questions, "Confirm concrete, testable acceptance criteria; current acceptance was inferred from the request.", "product", True, "quality.inferred_acceptance", "acceptance")
     scope = as_dict(spec.get("scope"))
     if not as_list(scope.get("out_of_scope")):

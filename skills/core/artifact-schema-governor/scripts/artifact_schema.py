@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "codex-artifact-schema-inventory-v1"
 SCHEMA_RE = re.compile(r"codex-[a-z0-9-]+-v\d+")
 GATE_TERMS = ["governor", "gate", "review", "runner", "binder", "analyzer"]
@@ -27,6 +26,7 @@ ALLOWED_DUPLICATE_SCHEMAS = {
     "codex-workflow-artifact-lineage-v2": "delivery runner owns lineage while skill health validates the same runtime contract",
     schema_name("post-change-implementation-report"): "post-change sync and synthetic runner intentionally share the implementation report contract",
     schema_name("project-registry"): "framework validation and project onboarding share registry contract",
+    schema_name("runtime-checkpoint"): "Agent Runtime emits checkpoints while release evidence binding validates the release checkpoint contract",
     schema_name("synthetic-e2e-run"): "forward runner reports the synthetic runner contract",
     schema_name("test-data-plan"): "test data governor and synthetic runner intentionally share the test data plan contract",
     schema_name("technical-design"): "generator and template intentionally share the same artifact contract",

@@ -409,7 +409,15 @@ def review(path: Path, strict: bool = False) -> dict:
                 blockers.append({"source": "acceptance_assertion_depth", "message": "acceptance proof uses repeated or generic assertions instead of concrete pass/fail checks"})
         brk_sections = len(re.findall(r"(?m)^####\s+BRK-\d+", text))
         concrete_api_mentions = len(re.findall(r"`(?:GET|POST|PUT|DELETE|PATCH)\s+[^`]+`", text))
-        if brk_sections and concrete_api_mentions < brk_sections:
+        api_unchanged = bool(re.search(
+            r"API\s*(?:适用性\s*[:：]\s*)?(?:excluded|不适用)|(?:现有|既有)\s*(?:API|接口).{0,40}(?:路径|字段).{0,40}(?:保持不变|契约不变)|existing APIs?.{0,60}(?:remain unchanged|contract unchanged)",
+            text,
+            flags=re.I,
+        ))
+        referenced_api_mentions = len(re.findall(r"`(?:[A-Z]+\s+)?/[^`\s]+`", text))
+        if brk_sections and api_unchanged and referenced_api_mentions == 0:
+            blockers.append({"source": "brk_api_binding", "message": "unchanged API scope must still reference the existing contract path"})
+        elif brk_sections and not api_unchanged and concrete_api_mentions < brk_sections:
             blockers.append({"source": "brk_api_binding", "message": "each BRK section should bind to concrete API contracts"})
         if brk_sections:
             frontend_function_hits = len(re.findall(r"涉及函数[:：]|functions:", text, flags=re.I))

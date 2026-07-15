@@ -61,16 +61,23 @@ def has_any_signal(text: str, terms: list[str]) -> bool:
 
 
 def impact_signals(spec: dict[str, Any], breakdown: list[dict[str, Any]], route_refs: list[str]) -> dict[str, bool]:
+    applicability = {
+        str(item.get("area") or ""): str(item.get("status") or "")
+        for item in as_list(spec.get("impact_applicability"))
+        if isinstance(item, dict) and item.get("area")
+    }
     blob = " ".join([
         str(spec.get("title") or ""),
         str(spec.get("requirement_summary") or ""),
-        json_text(spec.get("impact_surface"), spec.get("business_objects"), spec.get("data_fields"), spec.get("operations")),
+        json_text(spec.get("business_objects"), spec.get("operations")),
         " ".join(str(item.get("summary") or "") for item in breakdown),
         " ".join(route_refs),
     ])
-    impact_areas = {str(item.get("area") or "") for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
+    impact_areas = {area for area, status in applicability.items() if status == "required"}
+    if not applicability:
+        impact_areas = {str(item.get("area") or "") for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
     return {
-        "data": "data" in impact_areas or has_any_signal(blob, DATA_TERMS),
+        "data": "data" in impact_areas or (not applicability and has_any_signal(blob, DATA_TERMS)),
         "system": "api" in impact_areas or has_any_signal(blob, SYSTEM_TERMS) or len(route_refs) > 0,
         "mq": has_any_signal(blob, MQ_TERMS),
         "cache": "performance" in impact_areas or has_any_signal(blob, CACHE_TERMS),
@@ -168,9 +175,18 @@ def requirement_breakdown(spec: dict[str, Any]) -> list[dict[str, Any]]:
             "permission_impact": "preserve existing permission; add negative case if role/data scope changes" if "permission" in impact else "preserve existing permission boundary",
         })
 
-    for item in as_list(spec.get("requirements")):
-        if isinstance(item, dict):
-            add_row(str(item.get("summary") or item.get("description") or ""), "spec.requirements", str(item.get("id") or ""))
+    acceptance = [item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
+    if len(acceptance) >= 2:
+        for item in acceptance:
+            add_row(
+                str(item.get("criteria") or item.get("summary") or ""),
+                "spec.acceptance_criteria",
+                str(item.get("id") or ""),
+            )
+    if not rows:
+        for item in as_list(spec.get("requirements")):
+            if isinstance(item, dict):
+                add_row(str(item.get("summary") or item.get("description") or ""), "spec.requirements", str(item.get("id") or ""))
     if not rows:
         for item in as_list(spec.get("business_rules")):
             if isinstance(item, dict):
@@ -243,6 +259,39 @@ def route_relevance_score(route: dict[str, Any], subject: str) -> int:
         if token and token in searchable:
             score += 3
     return score
+
+
+def contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any]) -> str:
+    """Choose an existing contract by action semantics instead of list position."""
+    if not route_refs:
+        return f"{breakdown.get('id')}: No API impact confirmed yet"
+    subject = " ".join(
+        str(breakdown.get(key) or "")
+        for key in ["summary", "business_goal", "behavior_change"]
+    ).lower()
+    primary_action = re.split(r"[；;。\n]", str(breakdown.get("summary") or ""), maxsplit=1)[0].lower()
+    action_families = [
+        (
+            ["停止", "关闭", "销毁", "清理", "结束", "stop", "close", "destroy", "cleanup", " end"],
+            ["stop", "close", "destroy", "delete", "remove", "end"],
+        ),
+        (
+            ["控制", "快进", "快退", "拖拽", "定位", "暂停", "恢复", "9202", "control", "seek", "pause", "resume", "adjust", "update"],
+            ["control", "seek", "pause", "resume", "adjust", "update", "action"],
+        ),
+        (
+            ["开始", "启动", "拉起", "起播", "9201", "start", "open", "create", "begin"],
+            ["start", "open", "create", "begin"],
+        ),
+    ]
+    for action_subject in [primary_action, subject]:
+        for subject_terms, contract_terms in action_families:
+            if not any(term in action_subject for term in subject_terms):
+                continue
+            matched = [contract for contract in route_refs if any(term in contract.lower() for term in contract_terms)]
+            if matched:
+                return matched[0]
+    return route_refs[0]
 
 
 def rank_files_for_subject(subject: str, ctx: dict[str, Any]) -> list[dict[str, Any]]:
@@ -646,7 +695,8 @@ def build_technical_options(
             "rollout_impact": "may require backend-compatible release before frontend rollout",
             "rollback_strategy": "rollback frontend first, then backend contract change if compatibility fails",
         })
-    if complexity_count >= 5:
+    complex_multi_surface = complexity_count >= 5 and len(impacts & {"ui", "api", "data", "permission", "business_flow"}) >= 3
+    if complex_multi_surface:
         options.append({
             "option_id": next_option_id(options),
             "name": "按业务子域拆分交付方案",
@@ -843,11 +893,12 @@ def render_data_model_design(signals: dict[str, bool], spec: dict[str, Any], bre
     return {
         "applicable": applicable,
         "reason": "需求涉及字段、状态、结算、历史数据或显式数据影响。" if applicable else "未识别到字段、表结构、状态或历史数据变更信号。",
+        "not_applicable_reason": "" if applicable else "本次保持现有 API 字段和持久化结构不变，仅调整前端交互与播放器生命周期。",
         "business_objects": business_objects or [str(item.get("summary")) for item in breakdown[:3] if item.get("summary")],
         "entities": table_rows,
         "tables": table_rows,
-        "field_rules": field_rules,
-        "fields": field_rules,
+        "field_rules": field_rules if applicable else [],
+        "fields": field_rules if applicable else [],
         "ownership": f"`{owner_file}` owns code changes;真实数据 owner 和表结构需从项目理解/数据库变更中确认。" if applicable else "",
         "read_write_rules": {"read": "确认查询来源、过滤条件、空值语义和历史数据口径。", "write": "确认写入入口、默认值、幂等和权限校验。"} if applicable else {},
         "migration_strategy": "确认历史记录、空值、默认值和回填范围；无数据结构变化时记录 no-migration evidence。",
@@ -884,12 +935,12 @@ def render_system_interaction_sequence(signals: dict[str, bool], route_refs: lis
     confirmed_modules = confirmed_modules or []
     participants = ["User/Client", owner_file, *[item for item in confirmed_modules if item != owner_file]]
     participants.extend(item for item in route_refs if item not in participants)
-    sequence = [{"step": 1, "from": "User/Client", "to": owner_file, "mode": "sync", "action": summary, "success": "页面接受操作", "failure": "保留输入并展示错误"}]
+    sequence = [{"step": 1, "from": "User/Client", "to": owner_file, "mode": "sync", "action": summary, "success": "页面接受操作", "failure": "保留输入并展示错误", "state_transition": "idle -> handling", "source_evidence": "spec.entrypoints"}]
     for contract in route_refs:
-        sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": contract, "mode": "sync", "action": f"调用或复用已确认契约 {contract}", "success": "契约返回兼容结果", "failure": "超时/错误时保持可观测并返回错误"})
+        sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": contract, "mode": "async_response", "action": f"调用或复用已确认契约 {contract}", "success": "契约返回兼容结果并只提交当前有效响应", "failure": "超时/错误时保持当前稳定状态并展示错误", "state_transition": "handling -> success|failed", "source_evidence": "evidence_bundle.contracts"})
     for module in confirmed_modules:
         if module != owner_file:
-            sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": module, "mode": "sync", "action": "更新直接参与需求的共享模块", "success": "共享模块完成状态或行为更新", "failure": "清理局部状态并保留可恢复路径"})
+            sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": module, "mode": "sync", "action": "更新直接参与需求的共享模块", "success": "共享模块完成状态或行为更新", "failure": "清理局部状态并保留可恢复路径", "state_transition": "component current -> component updated", "source_evidence": "evidence_bundle.anchors"})
     return {
         "applicable": applicable,
         "reason": "需求涉及接口/跨模块调用或已识别业务路由。" if applicable else "未识别到跨系统或接口调用影响。",
@@ -926,14 +977,15 @@ def render_process_flow(spec: dict[str, Any], breakdown: list[dict[str, Any]], a
             str(item.get("expected_outcome") or structured.get("result") or "observable result"),
             "validation, permission, or dependency failure follows the documented exception path",
         )
-    for item in as_list(spec.get("acceptance_criteria")):
-        if not isinstance(item, dict):
-            continue
-        criterion = str(item.get("criteria") or item.get("summary") or "").strip()
-        if criterion and criterion != summary:
-            append("System", criterion, "previous flow state", criterion, "failed assertion keeps the flow incomplete")
-        if len(steps) >= 10:
-            break
+        outcome = str(item.get("expected_outcome") or structured.get("result") or "").strip()
+        behavior = str(item.get("system_behavior") or "").strip()
+        if outcome and outcome != behavior:
+            append("System", f"完成并验证结果：{outcome}", behavior or "business action", outcome, "result remains incomplete and the failure branch is recorded")
+    if len(steps) == 1:
+        first_acceptance = next((item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict) and item.get("criteria")), {})
+        criterion = str(first_acceptance.get("criteria") or "").strip()
+        if criterion:
+            append("System", f"验证 {first_acceptance.get('id', 'acceptance')}：{criterion}", steps[0]["action"], criterion, "acceptance evidence remains incomplete")
     if not steps:
         for item in breakdown[:8]:
             append(actors[0], str(item.get("behavior_change") or item.get("summary") or summary), "user request/context", "observable business result", "existing validation or dependency failure")
@@ -1001,6 +1053,7 @@ def render_transaction_consistency(signals: dict[str, bool], summary: str) -> di
     return {
         "applicable": applicable,
         "reason": "需求涉及写入、结算、金额、多表/多系统、重试或回滚。" if applicable else "未识别多表/多系统写入或强一致风险。",
+        "not_applicable_reason": "" if applicable else "本次只调整前端交互和播放器生命周期，不新增数据写入、事务边界或跨系统一致性。",
         "boundary": "owner service/repository transaction boundary must be confirmed" if applicable else "",
         "local_transaction_boundary": "owner service/repository transaction boundary must be confirmed" if applicable else "",
         "distributed_transaction": "avoid by default; use eventual consistency with idempotency/compensation" if applicable else "",
@@ -1052,11 +1105,12 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         reverse=True,
     )
     location_evidence = ctx.get("source_location_evidence") if isinstance(ctx.get("source_location_evidence"), dict) else {}
-    confirmed_contracts = [str(item) for item in as_list(location_evidence.get("confirmed_contracts")) if item]
+    confirmed_contracts = [str(item) for item in as_list(location_evidence.get("confirmed_contracts") or location_evidence.get("contracts")) if item]
     route_refs = confirmed_contracts or [route_ref(item) for item in business_routes[:5]]
     config_refs = [str(item.get("path")) for item in ctx["config_items"][:5]]
     test_evidence = [f"{cmd} evidence" for cmd in ctx["test_hints"][:3]] or ["test evidence"]
-    impact_areas = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
+    applicability = {str(item.get("area")): str(item.get("status")) for item in as_list(spec.get("impact_applicability")) if isinstance(item, dict)}
+    impact_areas = {area for area, status in applicability.items() if status == "required"} if applicability else {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
     expert_readiness_gaps = [item for item in as_list(spec.get("expert_readiness_gaps")) if isinstance(item, dict)]
     requirements_understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
     design_allowed = bool(spec.get("design_allowed", requirements_understanding.get("design_allowed", True)))
@@ -1146,6 +1200,8 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         },
         "source_location_evidence": location_evidence,
         "design_scope": spec.get("scope") or {"in_scope": [summary], "out_of_scope": [], "assumptions": [], "non_goals": []},
+        "impact_applicability": as_list(spec.get("impact_applicability")),
+        "scope_model": spec.get("scope_model") or {},
         "requirements_understanding": requirements_understanding,
         "requirements_understanding_gate": requirements_understanding_gate,
         "business_intent": requirements_understanding_gate["business_intent"],
@@ -1170,11 +1226,11 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "module_decomposition": module_decomposition,
         "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": str(item.get("summary") or summary), "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
-        "api_contracts": [{"contract": route_refs[0] if route_refs else f"{item.get('id')}: No API impact confirmed yet", "compatibility": "preserve existing consumers unless design updates contract", "old_consumer_impact": "review route consumers before implementation", "requirement_breakdown_id": item.get("id"), "api_impact": item.get("api_impact")} for item in breakdown],
-        "interface_examples": [{"name": route_refs[0] if route_refs else "no API request expected", "request": route_refs[0] if route_refs else "no API request expected", "response": f"response contract for {route_refs[0]}" if route_refs else "no API response change expected", "error_response": f"error contract for {route_refs[0]}" if route_refs else "no API error contract change expected"}],
+        "api_contracts": [{"contract": contract_for_breakdown(route_refs, item), "compatibility": "preserve existing consumers unless design updates contract", "old_consumer_impact": "review route consumers before implementation", "requirement_breakdown_id": item.get("id"), "api_impact": item.get("api_impact")} for item in breakdown],
+        "interface_examples": [] if applicability.get("api") in {"excluded", "not_applicable"} else [{"name": route_refs[0] if route_refs else "no API request expected", "request": route_refs[0] if route_refs else "no API request expected", "response": f"response contract for {route_refs[0]}" if route_refs else "no API response change expected", "error_response": f"error contract for {route_refs[0]}" if route_refs else "no API error contract change expected"}],
         "compatibility_strategy": [{"old_consumer": "existing consumers", "old_data": "existing data", "rollback": "revert changed behavior", "behavior": "preserve backward compatibility"}],
         "compatibility_matrix": [{"consumer": "existing consumers", "old_behavior": "current behavior before this requirement", "new_behavior": summary, "compatibility": "backward compatible by default", "rollback_behavior": "revert changed behavior"}],
-        "data_design": [{"read_rule": f"{item.get('id')}: read through {owner_file}", "write_rule": f"{item.get('id')}: write through {owner_file} only if this slice changes state", "migration": "none unless this slice changes schema/data backfill", "field_impact": item.get("field_impact"), "requirement_breakdown_id": item.get("id")} for item in breakdown],
+        "data_design": [] if applicability.get("data") in {"excluded", "not_applicable"} else [{"read_rule": f"{item.get('id')}: read through {owner_file}", "write_rule": f"{item.get('id')}: write through {owner_file} only if this slice changes state", "migration": "none unless this slice changes schema/data backfill", "field_impact": item.get("field_impact"), "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "data_model_design": data_model_design,
         "table_schema_changes": render_table_schema_changes(data_model_design),
         "system_interaction_sequence": render_system_interaction_sequence(signals, route_refs, owner_file, summary, [str(item) for item in as_list(entrypoint_confidence.get("confirmed_anchors"))]),

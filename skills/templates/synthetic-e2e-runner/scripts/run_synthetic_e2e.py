@@ -8,7 +8,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -22,6 +21,19 @@ def load_delivery_runner() -> Any:
 
 
 DELIVERY_RUNNER = load_delivery_runner()
+
+
+def load_harness() -> Any:
+    path = ROOT / "skills/core/auto-runner/scripts/harness_validation.py"
+    spec = importlib.util.spec_from_file_location("synthetic_harness", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+HARNESS = load_harness()
+AGENT_RUNTIME = HARNESS.AGENT_RUNTIME
 
 
 def run_step(name: str, args: list[str], allow_fail: bool = False) -> dict[str, Any]:
@@ -149,8 +161,32 @@ def write_preimplementation_happy_evidence(out_dir: Path) -> None:
     plan.update({"schema": "codex-delivery-plan-v1", "decision": "ready", "doc_id": "REQ-SYN-HAPPY", "repo_tasks": plan.get("repo_tasks", []), "validation_plan": plan.get("validation_plan", {}), "release_plan": plan.get("release_plan", {}), "rollback_plan": plan.get("rollback_plan", {}), "open_gates": []})
     write_json(out_dir / "delivery_plan.json", plan)
     write_json(out_dir / "delivery_plan_review.json", {"schema": "codex-delivery-plan-review-v1", "decision": "pass", "blockers": [], "readiness_gate": {"implementation_allowed": True}})
+    AGENT_RUNTIME.append_event(
+        out_dir,
+        "design_completed",
+        "synthetic-e2e",
+        evidence_refs=["technical_design.json", "architecture_design.json", "delivery_plan.json", "delivery_plan_review.json"],
+    )
+    AGENT_RUNTIME.checkpoint(
+        out_dir,
+        "design",
+        ["technical_design.json", "architecture_design.json", "delivery_plan.json", "delivery_plan_review.json"],
+    )
+    write_json(out_dir / "harness_validation.json", HARNESS.validate(out_dir, checkpoint="design"))
     write_json(out_dir / "git_worktree_evidence.json", {"schema": "codex-git-baseline-evidence-v1", "decision": "ready", "fetched": True, "base_updated": True, "branch": "feature/REQ-SYN-HAPPY"})
     write_json(out_dir / "edit_permit.json", {"schema": "codex-edit-permit-v1", "decision": "ready", "doc_id": "REQ-SYN-HAPPY", "branch": "feature/REQ-SYN-HAPPY", "allowed_files": ["app/main.py"]})
+    AGENT_RUNTIME.append_event(
+        out_dir,
+        "edit_authorized",
+        "synthetic-e2e",
+        target="app/main.py",
+        evidence_refs=["edit_permit.json", "delivery_plan.json", "harness_validation.json"],
+    )
+    AGENT_RUNTIME.checkpoint(
+        out_dir,
+        "pre_edit",
+        ["edit_permit.json", "delivery_plan.json", "harness_validation.json"],
+    )
     write_json(out_dir / "write_guard_snapshot.json", {"schema": "codex-write-guard-snapshot-v1", "decision": "ready", "doc_id": "REQ-SYN-HAPPY", "branch": "feature/REQ-SYN-HAPPY", "permit_id": "EDIT-SYN-HAPPY"})
     bind_workflow_lineage(out_dir)
 
@@ -206,7 +242,13 @@ def write_frontend_happy_evidence(out_dir: Path) -> None:
 
 
 def write_release_happy_evidence(out_dir: Path) -> None:
-    write_json(out_dir / "delivery_plan.json", {"decision": "pass", "rollback_order": ["rollback synthetic"], "post_release_checks": ["check synthetic metric"]})
+    AGENT_RUNTIME.start(out_dir, "REQ-SYN-RELEASE", "release_readiness")
+    write_json(out_dir / "delivery_plan.json", {
+        "decision": "pass",
+        "repo_tasks": [{"repo": "synthetic", "role": "modify", "allowed_files": ["synthetic.py"]}],
+        "rollback_order": ["rollback synthetic"],
+        "post_release_checks": ["check synthetic metric"],
+    })
     write_json(out_dir / "design_architecture_review.json", {"decision": "pass", "blockers": [], "warnings": []})
     write_json(out_dir / "implementation_completion_gate.json", {"schema": "codex-implementation-completion-v1", "decision": "pass", "blockers": [], "changed_files": ["synthetic.py"], "evidence_followups": []})
     write_json(
@@ -236,6 +278,57 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     write_json(out_dir / "environment_promotion.json", {"schema": "codex-environment-promotion-v1", "decision": "pass", "blockers": [], "environments": [{"name": "pre", "entry_criteria": ["candidate deployed"], "exit_criteria": ["smoke passed"], "validation_evidence": ["pre smoke"], "approver": "release-owner", "rollback_ready": True}, {"name": "prod", "entry_criteria": ["pre passed"], "exit_criteria": ["metrics healthy"], "validation_evidence": ["prod smoke"], "approver": "release-owner", "rollback_ready": True}]})
     write_json(out_dir / "uat_acceptance.json", {"schema": "codex-uat-acceptance-v1", "decision": "pass", "blockers": [], "scope": ["synthetic behavior"], "acceptors": ["synthetic-owner"], "cases": [{"name": "synthetic UAT", "status": "passed"}], "signoff": {"accepted": True, "by": "synthetic-owner", "at": "2026-07-03T10:30:00+08:00"}})
     write_json(out_dir / "release_change.json", {"schema": "codex-release-change-v1", "decision": "pass", "blockers": [], "release_window": {"start": "2026-07-03T10:00:00+08:00", "end": "2026-07-03T11:00:00+08:00", "timezone": "Asia/Shanghai"}, "approvers": ["release-owner"], "rollback_plan": ["rollback synthetic"], "rollback_owner": "release-owner", "post_release_checks": ["check synthetic metric"]})
+    AGENT_RUNTIME.append_event(out_dir, "write_completed", "synthetic-e2e", target="synthetic.py")
+    AGENT_RUNTIME.append_event(
+        out_dir,
+        "implementation_validated",
+        "synthetic-e2e",
+        evidence_refs=["implementation_completion_gate.json", "post_change_implementation_report.json", "diff_impact.json"],
+    )
+    AGENT_RUNTIME.checkpoint(
+        out_dir,
+        "post_implementation",
+        ["implementation_completion_gate.json", "post_change_implementation_report.json", "diff_impact.json"],
+    )
+    write_json(
+        out_dir / "harness/post_implementation.json",
+        HARNESS.validate(out_dir, checkpoint="post_implementation"),
+    )
+    AGENT_RUNTIME.append_event(out_dir, "test_completed", "synthetic-e2e", evidence_refs=["test_evidence_gate.json"])
+    AGENT_RUNTIME.append_event(out_dir, "review_completed", "synthetic-e2e", evidence_refs=["code_review_gate.json"])
+    AGENT_RUNTIME.append_event(out_dir, "push_authorized", "synthetic-e2e", evidence_refs=["post_implementation_traceability_matrix.json"])
+    AGENT_RUNTIME.checkpoint(
+        out_dir,
+        "pre_push",
+        ["post_change_implementation_report.json", "post_implementation_traceability_matrix.json", "test_evidence_gate.json", "code_review_gate.json"],
+    )
+    write_json(
+        out_dir / "harness/pre_push.json",
+        HARNESS.validate(out_dir, checkpoint="pre_push"),
+    )
+    provider_files: list[Path] = []
+    for provider_type in ["ci", "change_management", "deployment", "observability"]:
+        provider_path = out_dir / "runtime/providers" / f"{provider_type}.json"
+        write_json(provider_path, {
+            "schema": "codex-provider-attestation-v1",
+            "provider_type": provider_type,
+            "provider_id": "synthetic-provider",
+            "evidence_id": f"SYN-{provider_type}",
+            "subject": "REQ-SYN-RELEASE",
+            "status": "pass",
+            "issued_at": "2026-07-03T10:30:00+08:00",
+            "immutable_evidence_uri": f"synthetic://{provider_type}",
+            "verification": {
+                "verified": True,
+                "verifier": "synthetic-fixture",
+                "verified_at": "2026-07-03T10:31:00+08:00",
+                "evidence_digest": "a" * 64,
+            },
+        })
+        provider_files.append(provider_path)
+    AGENT_RUNTIME.append_event(out_dir, "release_authorized", "synthetic-e2e", evidence_refs=["release_change.json"])
+    AGENT_RUNTIME.append_event(out_dir, "provider_verified", "synthetic-e2e", evidence_refs=[str(path) for path in provider_files])
+    AGENT_RUNTIME.checkpoint(out_dir, "release", ["release_change.json"], provider_files)
     bind_workflow_lineage(out_dir)
 
 
@@ -452,7 +545,6 @@ def run(out_dir: Path) -> dict[str, Any]:
         ["python3", "skills/core/release-evidence-binder/scripts/bind_release.py", "--artifact-dir", str(release_followup_dir), "--out", str(release_followup_dir / "release_gate.json")],
     )
     steps.append(release_followup_binder)
-    happy_summary = json.loads((happy_dir / "auto_run_summary.json").read_text(encoding="utf-8")) if (happy_dir / "auto_run_summary.json").exists() else {}
     happy_ready_status = json.loads((happy_dir / "implementation_ready_status.json").read_text(encoding="utf-8")) if (happy_dir / "implementation_ready_status.json").exists() else {}
     data_summary = json.loads((data_dir / "auto_run_summary.json").read_text(encoding="utf-8")) if (data_dir / "auto_run_summary.json").exists() else {}
     release_ready_status = json.loads((release_happy_dir / "release_ready_status.json").read_text(encoding="utf-8")) if (release_happy_dir / "release_ready_status.json").exists() else {}

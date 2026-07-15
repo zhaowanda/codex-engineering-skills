@@ -9,6 +9,8 @@ gate: false
 
 # Technical Design Governor
 
+Generate process and sequence models from confirmed entrypoints, source anchors, contracts, states, and acceptance branches. Do not create a process diagram by serializing acceptance text. Every sequence edge must name participants, action, success, failure, state transition, and source evidence.
+
 Use this skill after requirement/domain understanding, architecture framing, and applicable UI/API/data/observability specialty design; run it before architecture refinement or delivery planning.
 
 ## Position

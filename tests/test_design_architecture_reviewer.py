@@ -170,6 +170,25 @@ def complete_design() -> tuple[dict, dict]:
     return technical, architecture
 
 
+def test_reviewer_accepts_explicitly_excluded_api_examples_and_data_design() -> None:
+    technical, architecture = complete_design()
+    technical["impact_applicability"] = [
+        {"area": "api", "status": "excluded", "reason": "existing contract unchanged"},
+        {"area": "data", "status": "excluded", "reason": "no persistence change"},
+        {"area": "ui", "status": "required", "reason": "frontend behavior changes"},
+    ]
+    technical["interface_examples"] = []
+    technical["data_design"] = []
+    technical["data_model_design"] = {
+        "applicable": False,
+        "not_applicable_reason": "The change only updates frontend runtime state and does not alter entities, tables, fields, or persisted values.",
+    }
+    result = design_arch_review.review(technical, architecture)
+    review_findings = result["api_contract_review"] + result["data_model_review"]
+    assert not any(item["message"] == "API/interface examples are missing" for item in review_findings)
+    assert not any(item["message"] == "data design is missing" for item in review_findings)
+
+
 def test_thin_design_blocks() -> None:
     result = design_arch_review.review({"requirement_trace": [{"requirement_id": "REQ-1"}]}, {})
     assert result["schema"] == "codex-design-architecture-review-v1"

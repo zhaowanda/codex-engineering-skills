@@ -4,12 +4,12 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[4]
 SCHEMA = "codex-auto-runner-summary-v1"
@@ -19,13 +19,26 @@ PROFILE_REGISTRY = ROOT / "config/workflow-profiles.example.yaml"
 def load_workflow_contract_module() -> Any:
     path = ROOT / "skills/core/delivery-runner/scripts/workflow_contract.py"
     spec = importlib.util.spec_from_file_location("auto_runner_workflow_contract", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 WORKFLOW_CONTRACT = load_workflow_contract_module()
+
+
+def load_agent_runtime_module() -> Any:
+    path = ROOT / "skills/core/auto-runner/scripts/agent_runtime.py"
+    spec = importlib.util.spec_from_file_location("auto_runner_agent_runtime", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AGENT_RUNTIME = load_agent_runtime_module()
+RUNTIME_ARTIFACT_DIR: Path | None = None
 
 
 def slug(value: str) -> str:
@@ -69,8 +82,8 @@ def load_docs_config_module() -> Any:
     ]
     path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     spec = importlib.util.spec_from_file_location("docs_config", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -82,8 +95,8 @@ def load_docs_governor_module() -> Any:
     ]
     path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     spec = importlib.util.spec_from_file_location("docs_governor", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -304,6 +317,15 @@ def load_profile_registry(path: Path = PROFILE_REGISTRY) -> dict[str, dict[str, 
 
 
 def run_command(name: str, args: list[str]) -> dict[str, Any]:
+    record_runtime = RUNTIME_ARTIFACT_DIR is not None and name != "inspect"
+    if record_runtime:
+        AGENT_RUNTIME.append_event(
+            RUNTIME_ARTIFACT_DIR,
+            "tool_call_requested",
+            "subprocess",
+            target=" ".join(args),
+            details={"step": name},
+        )
     started = time.monotonic()
     proc = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
     payload: dict[str, Any] = {}
@@ -314,6 +336,21 @@ def run_command(name: str, args: list[str]) -> dict[str, Any]:
         payload = {}
     decision = str(payload.get("decision") or payload.get("status") or "")
     passed = proc.returncode == 0 and decision not in {"block", "blocked", "error", "failed"}
+    if record_runtime:
+        AGENT_RUNTIME.append_event(
+            RUNTIME_ARTIFACT_DIR,
+            "tool_call_completed",
+            "subprocess",
+            target=" ".join(args),
+            decision="allow" if passed else "block",
+            details={
+                "step": name,
+                "returncode": proc.returncode,
+                "duration_ms": round((time.monotonic() - started) * 1000, 2),
+                "stdout_digest": AGENT_RUNTIME.digest(proc.stdout),
+                "stderr_digest": AGENT_RUNTIME.digest(proc.stderr),
+            },
+        )
     return {
         "name": name,
         "command": args,
@@ -327,14 +364,41 @@ def run_command(name: str, args: list[str]) -> dict[str, Any]:
 
 
 def workflow_metrics(steps: list[dict[str, Any]], generated: list[str], skipped: list[str], profile: dict[str, Any]) -> dict[str, Any]:
+    executed = sum(1 for step in steps if not step.get("skipped"))
+    reused = sum(1 for step in steps if step.get("cache_status") == "reused")
+    invalidated = sum(1 for step in steps if step.get("cache_status") == "invalidated")
+    duration = round(sum(float(step.get("duration_ms") or 0) for step in steps), 2)
+    budget = profile.get("cost_budget") if isinstance(profile.get("cost_budget"), dict) else {}
+    observed = {
+        "executed_steps": executed,
+        "generated_artifacts": len(set(generated)),
+        "command_duration_ms": duration,
+    }
+    budget_keys = {
+        "max_executed_steps": "executed_steps",
+        "max_generated_artifacts": "generated_artifacts",
+        "max_command_duration_ms": "command_duration_ms",
+    }
+    breaches = [
+        {"metric": metric, "observed": observed[observed_key], "maximum": budget[metric]}
+        for metric, observed_key in budget_keys.items()
+        if isinstance(budget.get(metric), (int, float)) and observed[observed_key] > budget[metric]
+    ]
+    expected_count = len({str(item) for item in as_list(profile.get("expected_artifacts"))})
+    reduction = round(100 * max(0, expected_count - len(set(generated))) / expected_count, 2) if expected_count else 0
     return {
         "governance_level": str(profile.get("governance_level") or "standard"),
-        "executed_step_count": sum(1 for step in steps if not step.get("skipped")),
+        "executed_step_count": executed,
         "skipped_step_count": sum(1 for step in steps if step.get("skipped")),
         "generated_artifact_count": len(set(generated)),
-        "reused_artifact_count": len(set(skipped)),
-        "total_command_duration_ms": round(sum(float(step.get("duration_ms") or 0) for step in steps), 2),
+        "reused_artifact_count": reused,
+        "invalidated_artifact_count": invalidated,
+        "total_command_duration_ms": duration,
         "target_artifact_reduction_percent": int(profile.get("target_artifact_reduction_percent") or 0),
+        "observed_artifact_reduction_percent": reduction,
+        "cost_budget": budget,
+        "cost_budget_decision": "warn" if breaches else "pass",
+        "cost_budget_breaches": breaches,
     }
 
 
@@ -355,15 +419,39 @@ def workflow_stage_inputs(output: Path) -> list[Path]:
     return []
 
 
+def finalize_runtime_lineage(artifact_dir: Path) -> None:
+    runtime_dir = artifact_dir / "runtime"
+    session_path = runtime_dir / "session.json"
+    if session_path.exists():
+        WORKFLOW_CONTRACT.bind_lineage(
+            session_path,
+            "runtime_session",
+            [],
+            command=["agent-runtime", "start"],
+            workspace=ROOT,
+        )
+    for checkpoint in ["intake", "design", "pre_edit", "post_implementation", "pre_push", "release", "close"]:
+        path = runtime_dir / "checkpoints" / f"{checkpoint}.json"
+        if path.exists():
+            WORKFLOW_CONTRACT.bind_lineage(
+                path,
+                f"runtime_{checkpoint}",
+                workflow_stage_inputs(path),
+                command=["agent-runtime", "checkpoint", checkpoint],
+                workspace=ROOT,
+            )
+
+
 def run_if_needed(name: str, output: Path, command: list[str], force: bool, generated: list[str], skipped: list[str], steps: list[dict[str, Any]]) -> None:
     inputs = WORKFLOW_CONTRACT.command_input_paths(command, output) + workflow_stage_inputs(output)
     inputs = list({str(path): path for path in inputs}.values())
     if output.exists() and not force and WORKFLOW_CONTRACT.lineage_is_fresh(output, inputs):
         skipped.append(output.name)
-        steps.append({"name": name, "skipped": True, "output": str(output), "reason": "artifact inputs are unchanged"})
+        steps.append({"name": name, "skipped": True, "cache_status": "reused", "output": str(output), "reason": "artifact inputs are unchanged"})
         return
+    cache_status = "forced" if output.exists() and force else "invalidated" if output.exists() else "miss"
     result = run_command(name, command)
-    steps.append(result | {"output": str(output)})
+    steps.append(result | {"output": str(output), "cache_status": cache_status})
     if output.exists():
         WORKFLOW_CONTRACT.bind_lineage(output, name, inputs, command=command, workspace=ROOT)
         generated.append(output.name)
@@ -490,7 +578,18 @@ def effective_workflow_controls(profile: dict[str, Any], strictness: dict[str, A
     expected_artifacts = as_list(profile.get("expected_artifacts"))
     gate_overrides: list[str] = []
     if tier == "light":
-        allowed = {"spec.json", "technical_design.json", "test_design.json", "delivery_plan_review.json", "docs_quality.json"}
+        allowed = {
+            "runtime/session.json",
+            "runtime/checkpoints/intake.json",
+            "runtime/checkpoints/design.json",
+            "runtime/checkpoints/pre_edit.json",
+            "spec.json",
+            "technical_design.json",
+            "test_design.json",
+            "delivery_plan_review.json",
+            "harness_validation.json",
+            "docs_quality.json",
+        }
         original_gate_count = len(gate_artifacts)
         gate_artifacts = [item for item in gate_artifacts if isinstance(item, dict) and str(item.get("artifact") or "") in allowed]
         expected_artifacts = [item for item in expected_artifacts if str(item) in allowed]
@@ -774,7 +873,7 @@ def run_registry_artifact_steps(
         command = [render_command_item(part, out) for part in as_list(item.get("command"))]
         if artifact in skip_artifacts:
             skipped.append(artifact)
-            steps.append({"name": name, "skipped": True, "output": str(out / artifact), "reason": "artifact is generated in pre-technical stage"})
+            steps.append({"name": name, "skipped": True, "cache_status": "not_applicable", "output": str(out / artifact), "reason": "artifact is generated in pre-technical stage"})
             continue
         if not artifact or not command:
             steps.append({"name": name, "returncode": 1, "passed": False, "reason": "artifact_steps entry requires artifact and command"})
@@ -784,13 +883,14 @@ def run_registry_artifact_steps(
         inputs = list({str(path): path for path in inputs}.values())
         if target.exists() and not force and WORKFLOW_CONTRACT.lineage_is_fresh(target, inputs):
             skipped.append(target.name)
-            steps.append({"name": name, "skipped": True, "output": str(target), "reason": "artifact inputs are unchanged"})
+            steps.append({"name": name, "skipped": True, "cache_status": "reused", "output": str(target), "reason": "artifact inputs are unchanged"})
             continue
+        cache_status = "forced" if target.exists() and force else "invalidated" if target.exists() else "miss"
         result = run_command(name, command)
         if item.get("allow_fail"):
             result["allowed_failure"] = True
             result["passed"] = True
-        steps.append(result | {"output": str(target)})
+        steps.append(result | {"output": str(target), "cache_status": cache_status})
         if target.exists():
             WORKFLOW_CONTRACT.bind_lineage(target, name, inputs, command=command, workspace=ROOT)
             generated.append(target.name)
@@ -1247,6 +1347,7 @@ def run(
     docs_root: Path | None = None,
     doc_language: str = "auto",
 ) -> dict[str, Any]:
+    global RUNTIME_ARTIFACT_DIR
     input_path = input_path.resolve()
     input_text = input_path.read_text(encoding="utf-8", errors="ignore") if input_path.exists() else ""
     effective_doc_language = infer_doc_language(input_text, doc_language)
@@ -1270,6 +1371,14 @@ def run(
     steps: list[dict[str, Any]] = []
     explicit_profiles = load_profile_registry()
     selected_profile = explicit_profiles.get(profile, {}) if profile else {}
+    runtime_session = AGENT_RUNTIME.start(
+        out,
+        doc_id,
+        str(selected_profile.get("name") or profile or "auto"),
+        [repo] if repo else [],
+    )
+    RUNTIME_ARTIFACT_DIR = out
+    generated.extend(["runtime/session.json", "runtime/events.jsonl"])
     profile_selection_reason: dict[str, Any] = {}
     if selected_profile.get("profile_stage_mode") == "release_only":
         profile_selection_reason = {
@@ -1278,6 +1387,7 @@ def run(
             "reason": "Release-only profile was explicitly requested.",
         }
         run_registry_artifact_steps(selected_profile, out, force, generated, skipped, steps)
+        finalize_runtime_lineage(out)
         delivery_status = out / "delivery_status.json"
         inspect_result = run_command(
             "inspect",
@@ -1288,7 +1398,7 @@ def run(
                 "--artifact-dir",
                 str(out),
                 "--profile",
-                profile,
+                str(profile or ""),
                 "--out",
                 str(delivery_status),
             ],
@@ -1369,6 +1479,16 @@ def run(
     )
     if (out / "requirement_ir.json").exists():
         generated.append("requirement_ir.json")
+    if "requirement_ingestion.json" not in skipped or not (out / "runtime/checkpoints/intake.json").exists():
+        AGENT_RUNTIME.append_event(
+            out,
+            "requirement_ingested",
+            "requirement-document-ingestor",
+            target=str(input_path),
+            evidence_refs=["requirement_ingestion.json", "requirement_ir.json"],
+        )
+        AGENT_RUNTIME.checkpoint(out, "intake", ["requirement_ingestion.json", "requirement_ir.json"])
+        generated.append("runtime/checkpoints/intake.json")
 
     if repo and project:
         project_out = out / "project_understanding"
@@ -1395,23 +1515,27 @@ def run(
         project_out = None
 
     if project_out and repo:
+        project_skill_dir = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "skills" / "company" / str(project)
+        source_location_command = [
+            "python3",
+            "skills/core/code-index-lookup/scripts/source_location_evidence.py",
+            "--repo",
+            str(repo),
+            "--index",
+            str(project_out / "code_index.json"),
+            "--requirement",
+            str(normalized),
+            "--out",
+            str(project_out / "source_location_evidence.json"),
+            "--bundle-out",
+            str(project_out / "evidence_bundle.json"),
+        ]
+        if project_skill_dir.is_dir():
+            source_location_command.extend(["--project-skill-dir", str(project_skill_dir)])
         run_if_needed(
             "source_location_evidence",
             project_out / "source_location_evidence.json",
-            [
-                "python3",
-                "skills/core/code-index-lookup/scripts/source_location_evidence.py",
-                "--repo",
-                str(repo),
-                "--index",
-                str(project_out / "code_index.json"),
-                "--requirement",
-                str(normalized),
-                "--out",
-                str(project_out / "source_location_evidence.json"),
-                "--bundle-out",
-                str(project_out / "evidence_bundle.json"),
-            ],
+            source_location_command,
             force,
             generated,
             skipped,
@@ -1419,6 +1543,29 @@ def run(
         )
         if (project_out / "evidence_bundle.json").exists():
             generated.append("evidence_bundle.json")
+        source_harness_output = out / "harness/source_location.json"
+        run_if_needed(
+            "harness_source_location",
+            source_harness_output,
+            [
+                "python3",
+                "skills/core/auto-runner/scripts/harness_validation.py",
+                "--artifact-dir",
+                str(out),
+                "--checkpoint",
+                "source_location",
+                "--policy",
+                "config/harness-policy.example.yaml",
+                "--repo",
+                str(repo),
+                "--out",
+                str(source_harness_output),
+            ],
+            force,
+            generated,
+            skipped,
+            steps,
+        )
 
     spec = out / "spec.json"
     spec_command = [
@@ -1496,6 +1643,7 @@ def run(
             "can_release": False,
             "safety_boundary": "requirements_and_questions_only",
         }
+        finalize_runtime_lineage(out)
         write_json(out / "auto_run_summary.json", summary)
         return summary
 
@@ -1719,21 +1867,49 @@ def run(
     )
     run_profile_artifact_steps(selected_profile, out, spec, technical, architecture, force, generated, skipped, steps)
 
+    design_outputs = {
+        "spec.json",
+        "technical_design.json",
+        "architecture_design.json",
+        "delivery_plan.json",
+        "delivery_plan_review.json",
+    }
+    if design_outputs & set(generated) or not (out / "runtime/checkpoints/design.json").exists():
+        AGENT_RUNTIME.append_event(
+            out,
+            "design_completed",
+            "auto-runner",
+            evidence_refs=sorted(design_outputs),
+        )
+        AGENT_RUNTIME.checkpoint(
+            out,
+            "design",
+            ["technical_design.json", "architecture_design.json", "delivery_plan.json", "delivery_plan_review.json"],
+        )
+        generated.append("runtime/checkpoints/design.json")
+
     harness_output = out / "harness_validation.json"
-    harness_result = run_command(
-        "harness_validation",
+    run_if_needed(
+        "harness_design",
+        harness_output,
         [
             "python3",
             "skills/core/auto-runner/scripts/harness_validation.py",
             "--artifact-dir",
             str(out),
+            "--checkpoint",
+            "design",
+            "--policy",
+            "config/harness-policy.example.yaml",
+            *(["--repo", str(repo)] if repo else []),
             "--out",
             str(harness_output),
         ],
+        force,
+        generated,
+        skipped,
+        steps,
     )
-    steps.append(harness_result | {"output": str(harness_output)})
-    if harness_output.exists():
-        generated.append(harness_output.name)
 
     effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
     docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
@@ -1749,6 +1925,7 @@ def run(
     )
     generated.append("docs_quality.json")
 
+    finalize_runtime_lineage(out)
     delivery_status = out / "delivery_status.json"
     inspect_command = [
         "python3",
@@ -1827,6 +2004,7 @@ def run(
         "next_command": inspect_status.get("next_command", ""),
         "can_implement": bool(inspect_status.get("can_implement")),
         "can_release": bool(inspect_status.get("can_release")),
+        "runtime_session": runtime_session,
         "safety_boundary": "analysis_and_artifact_generation_only",
     }
     write_json(out / "auto_run_summary.json", summary)

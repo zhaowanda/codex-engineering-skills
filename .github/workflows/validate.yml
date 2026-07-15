@@ -44,11 +44,11 @@ jobs:
       - name: Install development dependencies
         run: python -m pip install -e '.[dev]'
       - name: Lint hardened workflow modules
-        run: ruff check skills/core/delivery-runner/scripts/workflow_contract.py skills/core/delivery-case-capture/scripts/capture_case.py tests/test_workflow_contract.py
+        run: ruff check skills/core/delivery-runner/scripts/workflow_contract.py skills/core/delivery-runner/scripts/governance_contract.py skills/core/delivery-case-capture/scripts/capture_case.py skills/core/auto-runner/scripts/agent_runtime.py tests/test_workflow_contract.py tests/test_agent_runtime.py
       - name: Type-check hardened contracts
-        run: mypy skills/core/delivery-runner/scripts/workflow_contract.py skills/core/delivery-case-capture/scripts/capture_case.py
+        run: mypy skills/core/delivery-runner/scripts/workflow_contract.py skills/core/delivery-runner/scripts/governance_contract.py skills/core/delivery-case-capture/scripts/capture_case.py skills/core/auto-runner/scripts/agent_runtime.py
       - name: Security scan hardened contracts
-        run: bandit -q skills/core/delivery-runner/scripts/workflow_contract.py skills/core/delivery-case-capture/scripts/capture_case.py
+        run: bandit -q skills/core/delivery-runner/scripts/workflow_contract.py skills/core/delivery-runner/scripts/governance_contract.py skills/core/delivery-case-capture/scripts/capture_case.py skills/core/auto-runner/scripts/agent_runtime.py
       - name: Coverage baseline
         run: python -m pytest -q --cov --cov-report=term-missing
 

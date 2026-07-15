@@ -127,7 +127,15 @@ def build(artifact_dir: Path) -> dict[str, Any]:
     for idx, task in enumerate(tasks):
         task_id = str(task.get("id") or task.get("task_id") or f"TASK-{idx + 1}")
         allowed = [str(item) for item in as_list(task.get("allowed_files")) if item]
-        validation = as_list(task.get("validation")) or as_list(task.get("validation_evidence"))
+        validation = as_list(task.get("validation")) or as_list(task.get("validation_evidence")) or as_list(task.get("test_commands"))
+        if not validation:
+            validation = [
+                str(item)
+                for subtask in as_list(task.get("tasks"))
+                if isinstance(subtask, dict) and subtask.get("phase") in {"test", "evidence"}
+                for item in as_list(subtask.get("evidence_to_collect"))
+                if str(item).strip()
+            ]
         role = str(task.get("role") or task.get("change_type") or "")
         row = {
             "task_id": task_id,

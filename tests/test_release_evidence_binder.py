@@ -5,7 +5,6 @@ import json
 import tempfile
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/core/release-evidence-binder/scripts/bind_release.py"
 spec = importlib.util.spec_from_file_location("bind_release", SCRIPT)
 bind_release = importlib.util.module_from_spec(spec)
@@ -14,10 +13,32 @@ spec.loader.exec_module(bind_release)
 
 
 def write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def write_runtime_release_checkpoint(root: Path) -> None:
+    write_json(
+        root / "runtime/checkpoints/release.json",
+        {
+            "schema": "codex-runtime-checkpoint-v1",
+            "checkpoint": "release",
+            "decision": "pass",
+            "blockers": [],
+            "provider_attestations": [
+                {"decision": "pass", "provider_type": provider_type}
+                for provider_type in ["ci", "change_management", "deployment", "observability"]
+            ],
+            "runtime_root_digest": "a" * 64,
+            "session_id": "RT-TEST",
+            "event_count": 1,
+            "event_refs": ["release_change.json"],
+        },
+    )
+
+
 def write_passing_release_artifacts(root: Path) -> None:
+    write_runtime_release_checkpoint(root)
     write_json(
         root / "delivery_plan.json",
         {
@@ -110,6 +131,75 @@ def test_bind_conditional_go_with_warnings() -> None:
         result = bind_release.bind(root)
         assert result["decision"] == "conditional_go"
         assert result["warnings"]
+
+
+def governance_waiver(expires_at: str = "2099-07-16T08:00:00Z", approver: str = "risk-owner") -> dict:
+    return {
+        "schema": "codex-governance-waiver-v1",
+        "waiver_id": "WV-RELEASE-1",
+        "subject": "REQ-RELEASE",
+        "affected_gates": ["performance_diff_review"],
+        "reason": "load test evidence is deferred",
+        "risk": "peak-load behavior remains unverified",
+        "owner": {"identity": "delivery-owner"},
+        "approver": {"identity": approver, "approved_at": "2026-07-15T08:00:00Z", "evidence_id": "APR-RELEASE-1"},
+        "issued_at": "2026-07-15T08:00:00Z",
+        "expires_at": expires_at,
+        "compensating_controls": ["canary release with latency alert"],
+        "audit": {"immutable_evidence_uri": "https://evidence.example/waivers/WV-RELEASE-1", "retention_days": 365},
+        "status": "approved",
+    }
+
+
+def test_bind_valid_governance_waiver_is_conditional_go() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "governance_waivers.json", {
+            "schema": "codex-governance-waiver-bundle-v1",
+            "subject": "REQ-RELEASE",
+            "waivers": [governance_waiver()],
+        })
+
+        result = bind_release.bind(root)
+
+        assert result["decision"] == "conditional_go"
+        assert result["waiver_validations"][0]["decision"] == "pass"
+
+
+def test_bind_expired_or_self_approved_waiver_is_no_go() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "governance_waivers.json", {
+            "schema": "codex-governance-waiver-bundle-v1",
+            "subject": "REQ-RELEASE",
+            "waivers": [governance_waiver("2026-07-14T08:00:00Z", "delivery-owner")],
+        })
+
+        result = bind_release.bind(root)
+
+        assert result["decision"] == "no_go"
+        messages = {item["message"] for item in result["blockers"]}
+        assert "waiver has expired" in messages
+        assert "waiver owner must not self-approve" in messages
+
+
+def test_bind_waiver_subject_must_match_runtime_session() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_passing_release_artifacts(root)
+        write_json(root / "runtime/session.json", {"doc_id": "REQ-OTHER"})
+        write_json(root / "governance_waivers.json", {
+            "schema": "codex-governance-waiver-bundle-v1",
+            "subject": "REQ-RELEASE",
+            "waivers": [governance_waiver()],
+        })
+
+        result = bind_release.bind(root)
+
+        assert result["decision"] == "no_go"
+        assert any("does not match Runtime session" in item["message"] for item in result["blockers"])
 
 
 def test_bind_no_go_when_implementation_followups_have_no_gap_summary() -> None:
@@ -318,6 +408,7 @@ def test_bind_regulated_policy_enforces_identity_audit_and_integrations() -> Non
 def test_docs_change_uses_light_required_evidence() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
+        write_runtime_release_checkpoint(root)
         write_json(root / "delivery_plan.json", {"decision": "pass"})
         write_json(root / "code_review_gate.json", {"decision": "approve", "active_blockers": []})
         result = bind_release.bind(root, change_type="docs")

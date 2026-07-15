@@ -1247,7 +1247,7 @@ def test_runtime_data_access_and_permission_replace_template_rules() -> None:
     assert "结构影响：复用既有字段" in data_rendered
     assert "### 权限与可见性" in permission_rendered
     assert "页面边界：设备置换结算 / /device/replacementSettlement 沿用现有菜单/按钮权限" in permission_rendered
-    assert "原因必填、续期池状态和租户范围仍需后端校验" in permission_rendered
+    assert "既有鉴权、租户和数据范围校验必须保持" in permission_rendered
     assert "preserve existing permission boundary" not in permission_rendered
     assert "unauthorized user cannot access changed behavior" not in permission_rendered
 
@@ -1390,6 +1390,26 @@ def test_runtime_acceptance_mapping_supports_dynamic_brk_count() -> None:
     assert "BRK-5" not in rendered
 
 
+def test_runtime_acceptance_mapping_prefers_semantics_over_numeric_position() -> None:
+    grouped = {
+        "BRK-1": [{"scenario": "BRK-1 开始回放"}],
+        "BRK-2": [{"scenario": "BRK-2 当前播放链路背景"}],
+        "BRK-4": [{"scenario": "BRK-4 快进后恢复播放", "api": "/playback/control"}],
+        "BRK-5": [{"scenario": "BRK-5 快退后恢复播放", "api": "/playback/control"}],
+        "BRK-6": [{"scenario": "BRK-6 拖拽定位只以最终位置生效", "api": "/playback/control"}],
+    }
+    spec = {
+        "acceptance_criteria": [
+            {"id": "AC-2", "criteria": "快进 2x 后播放器恢复稳定播放"},
+            {"id": "AC-3", "criteria": "关键帧快退 2x 后播放器恢复稳定播放"},
+            {"id": "AC-4", "criteria": "拖拽定位松手后仅最终位置生效"},
+        ]
+    }
+    brk_to_acs, ac_to_brk = docs_governor.infer_runtime_acceptance_maps(spec, grouped, "zh")
+    assert ac_to_brk == {"AC-2": "BRK-4", "AC-3": "BRK-5", "AC-4": "BRK-6"}
+    assert brk_to_acs["BRK-2"] == []
+
+
 def test_runtime_review_context_prefers_runtime_counts() -> None:
     rendered = docs_governor.render_design_review_context(
         {"module_decomposition": [], "api_contracts": []},
@@ -1449,7 +1469,8 @@ def test_runtime_decision_summary_expands_candidate_options_before_decision() ->
     assert "### 候选方案详述" in rendered
     assert "#### 方案 `R1`" in rendered
     assert "#### 方案 `R2`" in rendered
-    assert "#### 方案 `R3`" in rendered
+    assert "方案数量：2 个" in rendered
+    assert "备选方案只有在当前责任入口、契约或范围证据被推翻时才能升级" in rendered
     assert "### 方案对比与选择" in rendered
     assert "### 决策结论" in rendered
     assert rendered.index("#### 方案 `R1`") < rendered.index("### 决策结论")
@@ -1480,6 +1501,57 @@ def test_runtime_sequence_diagram_includes_database_when_models_exist() -> None:
     assert "participant DB as 数据库表" in rendered
     assert "obd_device_renew_pool" in rendered
     assert "C->>DB: 读取 obd_device_renew_pool.pool_status" in rendered
+
+
+def test_frontend_only_runtime_evidence_uses_applicability_without_backend_or_data_placeholders() -> None:
+    evidence = {
+        "impact_applicability": [
+            {"area": "api", "status": "excluded", "reason": "existing contract is preserved"},
+            {"area": "data", "status": "excluded", "reason": "no persistence change"},
+            {"area": "ui", "status": "required", "reason": "player interaction changes"},
+        ],
+        "actor": "运营人员",
+        "frontend": {
+            "repo": "operate-platform-fe",
+            "page": "事故分析",
+            "route": "/accidentAnalysis",
+            "source_file": "src/views/plugIn/accidentAnalysis.vue",
+        },
+        "backend": {},
+        "api_contracts": [{"path": "/operate/api/dualCamera/playbackStreamControl"}],
+        "interactions": [
+            {
+                "scenario": "BRK-1 快进后重建播放订阅",
+                "entrypoint": {"kind": "frontend_action", "name": "视频回放"},
+                "trigger": "点击快进 2x",
+                "api": "/operate/api/dualCamera/playbackStreamControl",
+                "request": "playbackMode=3, playbackSpeed=2",
+                "response": "重建当前 FLV 订阅",
+                "frontend_functions": ["handlePlaybackControl"],
+            }
+        ],
+    }
+    spec = {"acceptance_criteria": [{"id": "AC-1", "criteria": "快进成功后重建当前 FLV 订阅。"}]}
+
+    sequence = docs_governor.render_runtime_sequence_evidence(evidence, "zh")
+    subrequirements = docs_governor.render_runtime_subrequirement_design(spec, evidence, "zh")
+    modules = docs_governor.render_runtime_module_design(evidence, "zh")
+    process = docs_governor.render_runtime_process_flows(evidence, "zh")
+    process_diagram = docs_governor.render_runtime_process_mermaid(evidence, "zh")
+    data_access = docs_governor.render_runtime_data_access(evidence, "zh")
+    decision = docs_governor.render_runtime_decision_record(evidence, "zh")
+
+    combined = "\n".join([sequence, subrequirements, modules, process, process_diagram, data_access, decision])
+    assert "participant C as 既有 API<br/>契约保持不变" in sequence
+    assert "契约边界：现有接口" in subrequirements
+    assert "不涉及数据库表、迁移或持久化字段变更" in subrequirements
+    assert "服务端边界：不在修改范围" in modules
+    assert "前端更新播放器状态并清理资源" in process_diagram
+    assert "后端处理" not in process_diagram
+    assert "无数据库读写、表结构、迁移或历史数据处理变更" in data_access
+    assert "仅修改 scope_model.modify" in decision
+    assert "未同步后端" not in combined
+    assert "未同步表结构" not in combined
 
 
 def test_runtime_sequence_diagram_renders_all_runtime_entrypoints() -> None:
@@ -1591,7 +1663,7 @@ def test_runtime_module_and_ui_design_replace_template_placeholders() -> None:
     assert "### 模块职责划分" in module_rendered
     assert "前端模块：operate-platform-fe / 设备置换结算 / /device/replacementSettlement" in module_rendered
     assert "后端模块：sigreal-operate-platform / ReplacementSettlementService" in module_rendered
-    assert "ReplacementSettlementQueryDto" in module_rendered
+    assert "以 API 契约和 runtime interaction 中记录的请求、响应为准" in module_rendered
     assert "输入：请求数据" not in module_rendered
     assert "输出：更新后的行为" not in module_rendered
     assert "### 页面与交互影响" in ui_rendered
@@ -1655,7 +1727,7 @@ def test_current_architecture_context_prefers_runtime_evidence_over_stale_archit
         },
         "zh",
     )
-    assert "不是纯前端模板变更" in rendered
+    assert "运行时链路从已确认入口触发" in rendered
     assert "operate-platform-fe / 设备置换结算 / /device/replacementSettlement" in rendered
     assert "sigreal-operate-platform / ReplacementSettlementController / ReplacementSettlementService" in rendered
     assert "POST /operate/api/device/replacementSettlement/renew/paging" in rendered

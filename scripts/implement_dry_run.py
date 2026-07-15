@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "codex-implement-dry-run-v1"
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,10 +24,22 @@ def load_json(path: Path) -> dict[str, Any]:
 def load_docs_config_module() -> Any:
     path = ROOT / "scripts/docs_config.py"
     spec = importlib.util.spec_from_file_location("docs_config", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_agent_runtime_module() -> Any:
+    path = ROOT / "skills/core/auto-runner/scripts/agent_runtime.py"
+    spec = importlib.util.spec_from_file_location("implement_agent_runtime", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AGENT_RUNTIME = load_agent_runtime_module()
 
 
 def default_docs_root() -> Path | None:
@@ -105,6 +116,7 @@ def design_chain_blockers(artifact_dir: Path) -> list[str]:
     blockers.extend(require_artifact(artifact_dir, "docs_quality", "docs_quality.json", {"pass", "ready"}))
     blockers.extend(review_allows_implementation(artifact_dir, "design_architecture_review.json"))
     blockers.extend(review_allows_implementation(artifact_dir, "delivery_plan_review.json"))
+    blockers.extend(require_artifact(artifact_dir, "design_harness", "harness_validation.json", {"pass"}))
     return blockers
 
 
@@ -163,7 +175,11 @@ def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> 
     auto_summary = load_json(artifact_dir / "auto_run_summary.json")
     effective_doc_id = doc_id or str(auto_summary.get("doc_id") or plan.get("doc_id") or "")
     if not docs_root:
-        docs_status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
+        docs_status: dict[str, Any] = (
+            dict(auto_summary.get("docs_readiness") or {})
+            if isinstance(auto_summary.get("docs_readiness"), dict)
+            else {}
+        )
         if docs_status.get("docs_root"):
             docs_root = Path(str(docs_status["docs_root"]))
     if not docs_root:
@@ -181,6 +197,28 @@ def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> 
         missing_gates.append("delivery_plan.allowed_files")
     docs_ok, docs_manifest, docs_blockers = docs_ready(docs_root, effective_doc_id)
     missing_gates.extend(f"docs: {item}" for item in docs_blockers)
+    runtime_verification = AGENT_RUNTIME.verify(artifact_dir)
+    if runtime_verification.get("decision") != "pass":
+        missing_gates.append("runtime session/event chain is missing or invalid")
+    if not missing_gates:
+        authorization = AGENT_RUNTIME.authorize(artifact_dir, "edit", ",".join(allowed_files), "codex-implement")
+        if authorization.get("decision") != "allow":
+            missing_gates.append("runtime edit authorization was denied")
+        else:
+            AGENT_RUNTIME.append_event(
+                artifact_dir,
+                "edit_authorized",
+                "codex-implement",
+                target=",".join(allowed_files),
+                evidence_refs=["edit_permit.json", "delivery_plan.json", "harness_validation.json"],
+            )
+            runtime_checkpoint = AGENT_RUNTIME.checkpoint(
+                artifact_dir,
+                "pre_edit",
+                ["edit_permit.json", "delivery_plan.json", "harness_validation.json"],
+            )
+            if runtime_checkpoint.get("decision") != "pass":
+                missing_gates.append("runtime pre-edit checkpoint did not pass")
     can_edit = not missing_gates and bool(allowed_files)
     return {
         "schema": SCHEMA,
@@ -203,6 +241,7 @@ def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> 
         "repo_tasks": repo_tasks,
         "missing_gates": missing_gates,
         "delivery_next_action_type": delivery_status.get("next_action_type", ""),
+        "runtime_verification": runtime_verification,
         "next_action": "Proceed with scoped implementation only." if can_edit else "Complete missing gates before editing.",
     }
 

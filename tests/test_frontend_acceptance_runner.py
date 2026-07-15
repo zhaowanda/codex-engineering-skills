@@ -14,6 +14,12 @@ assert spec.loader
 spec.loader.exec_module(frontend_acceptance)
 
 
+def evidence_template(page_type: str, url: str) -> dict:
+    evidence = frontend_acceptance.template(page_type, url)
+    evidence["acceptance_refs"] = ["AC-1"]
+    return evidence
+
+
 def test_template_contains_page_specific_fields() -> None:
     result = frontend_acceptance.template("form", "http://localhost:3000/orders/new")
     assert result["schema"] == "codex-frontend-acceptance-v1"
@@ -24,7 +30,7 @@ def test_template_contains_page_specific_fields() -> None:
 
 
 def test_validate_passes_list_evidence_with_clean_browser_state() -> None:
-    evidence = frontend_acceptance.template("list", "http://localhost:3000/orders")
+    evidence = evidence_template("list", "http://localhost:3000/orders")
     evidence.update(
         {
             "pass": True,
@@ -43,7 +49,7 @@ def test_validate_passes_list_evidence_with_clean_browser_state() -> None:
 
 
 def test_validate_blocks_console_and_failed_requests() -> None:
-    evidence = frontend_acceptance.template("detail", "http://localhost:3000/orders/1")
+    evidence = evidence_template("detail", "http://localhost:3000/orders/1")
     evidence.update(
         {
             "page_load": {"loaded": True},
@@ -60,7 +66,7 @@ def test_validate_blocks_console_and_failed_requests() -> None:
 
 
 def test_validate_blocks_thin_form_evidence() -> None:
-    evidence = frontend_acceptance.template("form", "http://localhost:3000/orders/new")
+    evidence = evidence_template("form", "http://localhost:3000/orders/new")
     evidence.update(
         {
             "page_load": {"loaded": True},
@@ -73,7 +79,7 @@ def test_validate_blocks_thin_form_evidence() -> None:
 
 
 def test_validate_blocks_export_without_output() -> None:
-    evidence = frontend_acceptance.template("export", "http://localhost:3000/orders")
+    evidence = evidence_template("export", "http://localhost:3000/orders")
     evidence.update(
         {
             "page_load": {"loaded": True},
@@ -87,7 +93,7 @@ def test_validate_blocks_export_without_output() -> None:
 
 
 def test_validate_blocks_required_or_empty_screenshot_evidence() -> None:
-    evidence = frontend_acceptance.template("detail", "http://localhost:3000/orders/1")
+    evidence = evidence_template("detail", "http://localhost:3000/orders/1")
     evidence.update({"page_load": {"loaded": True}, "dom_evidence": [{"selector": "#order"}], "screenshot_required": True})
     missing = frontend_acceptance.validate_evidence(evidence)
     assert missing["decision"] == "block"
@@ -100,7 +106,7 @@ def test_validate_blocks_required_or_empty_screenshot_evidence() -> None:
 
 
 def test_validate_blocks_browser_evidence_console_and_network_failures() -> None:
-    evidence = frontend_acceptance.template("detail", "http://localhost:3000/orders/1")
+    evidence = evidence_template("detail", "http://localhost:3000/orders/1")
     evidence.update({"page_load": {"loaded": True}, "dom_evidence": [{"selector": "#order"}]})
     evidence["browser_evidence"].update(
         {
@@ -126,6 +132,15 @@ def test_cli_template_writes_file() -> None:
         frontend_acceptance.write_json(path / "frontend_acceptance.json", result)
         loaded = frontend_acceptance.load_json(path / "frontend_acceptance.json")
         assert loaded["page_type"] == "dashboard"
+
+
+def test_validate_blocks_wrong_primary_entrypoint() -> None:
+    evidence = evidence_template("custom", "/accident-analysis")
+    evidence["page_load"] = {"loaded": True}
+    evidence["dom_evidence"] = [{"selector": "#player"}]
+    evidence["browser_evidence"]["tested_route"] = "/dual-camera-setting"
+    result = frontend_acceptance.validate_evidence(evidence)
+    assert any(item["source"] == "entrypoint_binding" for item in result["blockers"])
 
 
 def test_clean_browser_evidence_fixture_passes_validation() -> None:

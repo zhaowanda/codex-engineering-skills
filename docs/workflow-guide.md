@@ -4,8 +4,10 @@
 
 ```text
 requirement source
+-> Agent Runtime session and intake checkpoint
 -> requirement-document-ingestor
 -> project-understanding-runner when existing repositories or legacy code must be understood
+-> Harness source-location checkpoint when repository evidence is present
 -> spec-governor
 -> requirement-question-governor (required questions block design approval and implementation)
 -> domain-model-governor
@@ -22,14 +24,19 @@ requirement source
 -> final delivery plan
 -> traceability-governor initial pass after delivery_plan exists to prove requirement/design/test/task coverage
 -> delivery-plan-reviewer
+-> Agent Runtime design checkpoint
+-> Harness design checkpoint
 -> git-worktree-governor
 -> edit-readiness-governor
+-> Agent Runtime pre-edit checkpoint
 -> workspace-write-guard snapshot
 -> implementation
 -> implementation-completion-gate
 -> post-change-skill-sync
 -> workspace-write-guard audit
 -> diff-impact-analyzer
+-> Agent Runtime post-implementation checkpoint
+-> Harness post-implementation checkpoint for plan-to-diff alignment
 -> traceability-governor post-implementation pass to bind requirements to diff, tests, and release evidence
 -> change-risk-governor
 -> evidence-auto-collector
@@ -37,11 +44,15 @@ requirement source
 -> frontend-acceptance-runner when UI changed
 -> test-evidence-gate
 -> code-review-gate aggregate approval
+-> Agent Runtime pre-push checkpoint
+-> Harness pre-push checkpoint
 -> environment-promotion-governor
 -> uat-acceptance-governor
 -> release-change-governor
+-> Agent Runtime release checkpoint with provider attestations
 -> release-evidence-binder
 -> post-release-observer
+-> Agent Runtime close checkpoint
 -> delivery-case-capture
 -> issue-pr-governor / version-release-governor / dependency-license-governor for open-source publication
 -> artifact-schema-governor / prompt-pack-governor / skill-installation-governor for distribution readiness
@@ -83,7 +94,11 @@ requirement-document-ingestor
 | `data_migration` | Standard design-first profile plus configuration, security, and performance design gates before design approval; release gates run only after implementation evidence exists. |
 | `release_readiness` | `implementation-completion-gate -> post-change-skill-sync -> workspace-write-guard audit -> diff-impact-analyzer -> change-risk-governor -> evidence-auto-collector -> code-design-quality-reviewer -> frontend-acceptance-runner when UI changed -> test-evidence-gate -> post-implementation traceability -> code-review-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
 
-Profiles use schema `codex-workflow-profiles-v2` and select scenario skills and impacts; they do not define execution order. Stage order, schemas, required fields, decisions, dependencies, lineage inputs, conditional skills, conditional impacts, and next commands are defined by the `codex-workflow-stages-v3` registry in `config/workflow-stages.example.yaml`.
+Profiles use schema `codex-workflow-profiles-v3` and select scenario skills and impacts; they do not define execution order. Stage order, schemas, required fields, decisions, dependencies, lineage inputs, Runtime gates, conditional skills, conditional impacts, and next commands are defined by the `codex-workflow-stages-v4` registry in `config/workflow-stages.example.yaml`.
+
+Harness policy uses `config/harness-policy.example.yaml`. The lifecycle checkpoints are source location, design, post implementation, and pre-push. They are normal DAG stages with lineage, so changing a code index, confirmed source file, design, plan, diff, test result, or review evidence invalidates the applicable downstream checkpoint.
+
+Agent Runtime policy uses `config/agent-runtime-policy.example.yaml`. Runtime owns session identity, redacted append-only tool events, action authorization, checkpoint evidence, and provider attestation validation. Harness owns semantic quality checks over delivery artifacts. Runtime checkpoint roots are historical event-chain members, while checkpoint lineage binds immutable business evidence; appending a later event therefore does not make an earlier accepted checkpoint stale.
 Profile `notes` are human guidance only; executable readiness is defined by `required_gate_artifacts` and the stage registry.
 Profile `artifact_steps` declare profile-specific artifact generation or inspection commands. `auto-runner` interprets these steps instead of hard-coding frontend, data, or release behavior.
 
@@ -95,9 +110,13 @@ Every applicable artifact records its direct input digests. Updating an input re
 
 The shared artifact contract also declares `evidence_fields` and optional typed field constraints. Correct schema and an accepted decision are insufficient when evidence is empty, has the wrong type, violates cardinality, or conflicts with a readiness constant. Lineage v2 binds the semantic artifact digest, deterministic direct inputs, producer version, command digest, Git context, and permit when available.
 
-Profiles declare `governance_level` as `light`, `standard`, `heavy`, or `critical`. Auto-run summaries report executed/skipped steps, generated/reused artifact counts, and command duration so teams can measure whether light bugfix paths reduce artifact cost without weakening elevated controls.
+Profiles declare `governance_level` as `light`, `standard`, `heavy`, or `critical`, plus observable step/artifact/duration budgets. Auto-run summaries distinguish cache reuse, invalidation, forced regeneration, first-run misses, and non-applicable steps; budget breaches are warnings for calibration rather than fabricated pass evidence.
+
+Exceptions use `codex-governance-waiver-v1`. A waiver is accepted only when it binds the subject and affected gates, records risk and compensating controls, has distinct owner and approver identities, remains unexpired, and points to immutable retained audit evidence. Valid waivers produce conditional release signals and never erase an upstream blocker.
 
 Regulated release policy overlays can require structured approval identities, separation of duties, immutable audit retention, and provider evidence from CI, change management, deployment, and observability systems. Provider credentials and organization-specific adapters remain in the private overlay; open-core artifacts retain only provider names and evidence identifiers or URLs.
+
+Provider attestations must identify the provider, evidence, subject, immutable evidence URI, issue time, verification result, and accepted status. Optional expiry timestamps must be timezone-aware and unexpired. Release Runtime advancement requires one verified attestation from each of `ci`, `change_management`, `deployment`, and `observability`.
 
 Traceability is intentionally two-pass. The initial pass (`traceability_matrix.json`) runs before implementation and proves that requirements, design, tests, and delivery tasks line up. The post-implementation pass (`post_implementation_traceability_matrix.json`) runs after changes exist and binds requirements to diff, test evidence, review evidence, and release evidence.
 
@@ -113,12 +132,17 @@ Traceability is intentionally two-pass. The initial pass (`traceability_matrix.j
 - `edit_permit.json` exists, is ready, and binds a narrow file scope.
 - `write_guard_snapshot.json` exists after the permit when direct edits are used.
 - `write_guard_audit.json` passes before commit, push, or release evidence.
+- `harness_validation.json` passes before docs/Git readiness.
+- `runtime/checkpoints/pre_edit.json` passes and records edit authorization.
 - `delivery-runner` reports `can_implement=true`, `next_stage=implementation`, `next_action_type=ready_to_implement`, and no blockers for the selected profile.
 
 ## Release Is Allowed Only When
 
 - Implementation completion evidence exists.
 - Post-change evidence passes; when project skill sync candidates exist, `project_skill_index_sync.json` must prove the project-level skill index was updated or carry an explicit owner-reviewed waiver.
+- `harness/post_implementation.json` proves actual changed files stay within the reviewed delivery-plan scope.
+- `harness/pre_push.json` proves post-change, traceability, tests, review, skill-index sync, and commit binding are current.
+- `runtime/checkpoints/post_implementation.json`, `runtime/checkpoints/pre_push.json`, and `runtime/checkpoints/release.json` pass; release carries all four required provider attestations.
 - Write guard audit is clean.
 - Code review gate approves or has accepted residual risks.
 - Test evidence gate passes.

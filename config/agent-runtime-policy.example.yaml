@@ -1,0 +1,38 @@
+schema: codex-agent-runtime-policy-v1
+enforcement: block
+session:
+  max_events: 10000
+  require_doc_id: true
+  require_git_binding: true
+event_log:
+  format: jsonl
+  hash_chain: sha256
+  redact_sensitive_fields: true
+  max_string_length: 2000
+commands:
+  default_timeout_seconds: 300
+  block_destructive_commands: true
+external_tools:
+  require_imported_event: true
+  require_write_guard_for_writes: true
+providers:
+  adapters: private_overlay
+  required_for_release: [ci, change_management, deployment, observability]
+  required_attestation_fields: [provider_type, provider_id, evidence_id, immutable_evidence_uri, subject, status, issued_at, verification]
+  reject_expired_attestations: true
+  verification_required_fields: [verified, verifier, verified_at, evidence_digest]
+waivers:
+  schema: codex-governance-waiver-v1
+  required_fields: [waiver_id, subject, affected_gates, reason, risk, owner, approver, issued_at, expires_at, compensating_controls, audit]
+  require_separation_of_duties: true
+  reject_expired: true
+  audit_required_fields: [immutable_evidence_uri, retention_days]
+profiles:
+  light:
+    required_checkpoints: [intake, design, pre_edit, post_implementation, pre_push, release, close]
+  standard:
+    required_checkpoints: [intake, design, pre_edit, post_implementation, pre_push, release, close]
+  heavy:
+    required_checkpoints: [intake, design, pre_edit, post_implementation, pre_push, release, close]
+  critical:
+    required_checkpoints: [intake, design, pre_edit, post_implementation, pre_push, release, close]

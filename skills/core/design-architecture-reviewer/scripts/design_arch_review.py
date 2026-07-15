@@ -554,6 +554,13 @@ def review(
     compatibility_matrix = as_list(technical.get("compatibility_matrix"))
     project_context = technical.get("project_context") if isinstance(technical.get("project_context"), dict) else {}
     architecture_framing = technical.get("architecture_framing") if isinstance(technical.get("architecture_framing"), dict) else {}
+    applicability = {
+        str(item.get("area", "")).lower(): str(item.get("status", "")).lower()
+        for item in as_list(technical.get("impact_applicability"))
+        if isinstance(item, dict) and item.get("area")
+    }
+    api_excluded = applicability.get("api") in {"excluded", "not_applicable"}
+    data_excluded = applicability.get("data") in {"excluded", "not_applicable"}
 
     current_architecture = architecture.get("current_architecture") if isinstance(architecture.get("current_architecture"), dict) else {}
     arch_entrypoint_confidence = architecture.get("code_entrypoint_confidence") if isinstance(architecture.get("code_entrypoint_confidence"), dict) else {}
@@ -582,7 +589,7 @@ def review(
     rollback = as_list(architecture.get("rollback_strategy"))
     decision_records = as_list(architecture.get("decision_records"))
     design_blob = text_of({"technical": technical, "architecture": architecture})
-    data_signal = has_signal(design_blob, ("database", "table", "field", "schema", "migration", "数据", "字段", "表", "迁移"))
+    data_signal = not data_excluded and has_signal(design_blob, ("database", "table", "field", "schema", "migration", "数据", "字段", "表", "迁移"))
     system_signal = has_signal(design_blob, ("api", "endpoint", "service", "repo", "system", "consumer", "provider", "接口", "服务", "系统", "跨仓", "上下游"))
     mq_signal = has_signal(design_blob, ("mq", "topic", "queue", "producer", "consumer", "message", "event", "kafka", "rocketmq", "rabbitmq", "消息", "队列", "生产者", "消费者"))
     cache_signal = has_signal(design_blob, ("cache", "redis", "ttl", "缓存", "高频", "热点"))
@@ -659,7 +666,7 @@ def review(
         if selected_entrypoint and selected_entrypoint not in confirmed_paths:
             findings.append(finding("technical_design_quality", "high", "selected entrypoint is not a confirmed source anchor", selected_entrypoint, "Select an entrypoint from source_location_evidence.confirmed_anchors."))
         design_text = text_of([
-            technical.get("problem_analysis"), technical.get("current_state_analysis"), technical.get("process_flow"),
+            technical.get("process_flow"),
             technical.get("module_decomposition"), technical.get("logical_data_flow"), technical.get("api_contracts"),
             technical.get("system_interaction_sequence"), architecture.get("current_architecture"), architecture.get("module_topology"),
             architecture.get("integration_sequence"), technical.get("selected_solution"), architecture.get("selected_architecture"),
@@ -715,12 +722,12 @@ def review(
             missing = missing_required(item, ["compatibility", "old_consumer_impact"])
             if missing:
                 findings.append(finding("api_contract_review", "high", "API contract lacks compatibility fields", {"index": idx, "missing": missing}, "Add compatibility and old_consumer_impact."))
-    if api_contracts and not interface_examples:
+    if api_contracts and not interface_examples and not api_excluded:
         findings.append(finding("api_contract_review", "medium", "API/interface examples are missing", "interface_examples empty", "Add request/response/error examples or an explicit no-example reason."))
     if "api" in text_of(technical) and not api_contracts:
         findings.append(finding("api_contract_review", "high", "API-related design lacks API contracts", "api term detected", "Add API contract table or explicit no API impact reason."))
 
-    if not data_design:
+    if not data_design and not data_excluded:
         findings.append(finding("data_model_review", "high", "data design is missing", "data_design empty", "Define read/write/null/default/migration semantics or explicitly state no data impact."))
     for idx, item in enumerate(data_design):
         if isinstance(item, dict):
@@ -741,6 +748,8 @@ def review(
                 findings.append(finding("data_model_review", "high", "data-impact design lacks table_schema_changes", "table_schema_changes empty", "List table/field/type/null/default/index/migration/rollback or explicitly state no physical schema change."))
     for idx, item in enumerate(table_schema_changes):
         if isinstance(item, dict):
+            if item.get("applicable") is False and item.get("change_type") == "none":
+                continue
             missing = missing_required(item, ["table", "field", "type", "nullable", "default", "migration", "rollback"])
             if missing:
                 findings.append(finding("data_model_review", "high", "table schema change lacks implementation-grade fields", {"index": idx, "missing": missing}, "Each schema row needs table, field, type, nullability, default, migration, and rollback."))

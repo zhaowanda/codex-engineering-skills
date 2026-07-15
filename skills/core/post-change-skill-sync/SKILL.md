@@ -26,7 +26,9 @@ implementation changes
 - Capture Git branch, HEAD, changed files, diff stat, file buckets, validation needs, baseline update candidates, project-skill sync candidates, and project skill index sync requirements.
 - Stay open-core: do not depend on private `company/projects.yaml`, private docs governors, or backup code.
 - Treat project-skill and baseline updates as owner-review candidates only; do not mutate project skills or baselines automatically.
-- When project-skill candidates exist, require `project_skill_index_sync.json` in the artifact directory with either `decision=pass` and `updated_index_paths`, or `decision=waived` and `waiver_reason`; missing evidence blocks post-change approval and pre-push/release gates.
+- When project-skill candidates exist, require `project_skill_index_sync.json` with either `decision=pass` and `updated_index_paths`, or `decision=waived` and an approved `codex-governance-waiver-v1` bound to the doc id and `project_skill_index_sync` gate.
+- Reject waiver reasons without structured owner, independent approver, risk, expiry, compensating controls, and immutable audit retention evidence.
+- When implementation changes an approved solution, acceptance criterion, repository role, or file scope, create and approve `design_change.json` with `scripts/design_change.py`. Re-run traceability and affected tests after approval.
 - If `--require-docs` is set, block when the docs repository, manifest, or doc id is missing.
 - This report is not a substitute for test evidence, code review, UAT, CI, or release approval.
 
