@@ -25,5 +25,6 @@ allowed_paths:
   - "__pycache__/"
 
 allowed_files:
+  - ".codex-engineering-docs.json"
   - "config/private-patterns.example.yaml"
   - "tests/test_privacy_scan.py"

@@ -129,7 +129,7 @@ python3 scripts/codex_eng.py auto \
   --format human
 ```
 
-Configure the delivery docs repository once per workspace. Later requirements reuse the configured docs repo by `doc_id`; pass `--docs-root` only when overriding the workspace default.
+Configure the delivery docs repository once per workspace. Later requirements reuse the configured docs repo by `doc_id`; pass `--docs-root` only when overriding the workspace default. `deliveries/<doc_id>` is the canonical input/artifact/evidence/runtime record, while `human/`, `machine/`, and `indexes/` are digest-bound projections.
 
 The auto runner starts an append-only Agent Runtime session, ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/domain/framing/specialty-design/technical-design/architecture-design/test/test-data/plan artifacts, runs the intake/design Harness checkpoints, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
@@ -145,7 +145,7 @@ Preview implementation scope before editing:
 python3 scripts/codex_eng.py implement --artifact-dir /tmp/codex-auto-demo
 ```
 
-Implementation dry-run blocks until the full pre-edit gate is ready: delivery docs manifest, `technical_design.json`, `architecture_design.json`, `design_architecture_review.json` with `implementation_allowed=true`, `delivery_plan_review.json` with `implementation_allowed=true`, `harness_validation.json`, Git evidence that fetched the remote and updated the base branch with `pull --ff-only`, and `edit_permit.json`. Repository-backed runs also require the source-location Harness. For direct edits, create `write_guard_snapshot.json` after the permit and require `write_guard_audit.json` before commit. The pre-push Harness then binds plan-to-diff, project skill index, traceability, tests, review, and the current Git commit.
+Implementation dry-run blocks until the full pre-edit gate is ready: canonical delivery docs and fresh projections, `technical_design.json`, `architecture_design.json`, `design_architecture_review.json` with `implementation_allowed=true`, `delivery_plan_review.json` with `implementation_allowed=true`, `harness_validation.json`, Git evidence that fetched the remote and updated the base branch with `pull --ff-only`, and `edit_permit.json`. Repository-backed runs also require the source-location Harness. For direct edits, create `write_guard_snapshot.json` after the permit and require `write_guard_audit.json` before commit. The pre-push Harness then binds plan-to-diff, project skill index, traceability, tests, review, the current code commit, and a clean pushed docs commit for the same `doc_id`.
 
 Inspect or advance the Agent Runtime without adding another always-visible skill:
 

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
-from datetime import datetime, timedelta, timezone
 import json
+import re
 import subprocess
 import sys
-import re
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1074,10 +1073,7 @@ def test_implement_dry_run_allows_scoped_ready_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
-        manifest = docs_root / "indexes/REQ-1.manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}", encoding="utf-8")
-        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
         write_ready_design_gates(root)
         (root / "delivery_plan.json").write_text(
             '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "repo": "app", "repo_path": ".", "allowed_files": ["src/app.py"], "test_commands": ["pytest"] }] }',
@@ -1097,10 +1093,7 @@ def test_implement_dry_run_blocks_without_design_chain_even_if_git_ready() -> No
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
-        manifest = docs_root / "indexes/REQ-1.manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}", encoding="utf-8")
-        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
         (root / "delivery_plan.json").write_text(
             '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "allowed_files": ["src/app.py"] }] }',
             encoding="utf-8",
@@ -1202,10 +1195,7 @@ def test_implement_dry_run_accepts_git_plan_summary() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
-        manifest = docs_root / "indexes/REQ-1.manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}", encoding="utf-8")
-        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
         write_ready_design_gates(root)
         (root / "delivery_plan.json").write_text(
             '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "repo": "api", "allowed_files": ["api/app.py"] }, { "role": "modify", "repo": "web", "allowed_files": ["web/app.ts"] }] }',
@@ -1234,10 +1224,7 @@ def test_implement_dry_run_uses_configured_docs_root_by_default() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             docs_root = root / "delivery-docs"
-            manifest = docs_root / "indexes/REQ-1.manifest.json"
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text("{}", encoding="utf-8")
-            subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+            implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
             config_file.write_text(json.dumps({"schema": "codex-docs-workspace-config-v1", "docs_root": str(docs_root)}), encoding="utf-8")
             write_ready_design_gates(root)
             (root / "delivery_plan.json").write_text(

@@ -39,7 +39,17 @@ def load_agent_runtime_module() -> Any:
     return module
 
 
+def load_docs_governor_module() -> Any:
+    path = ROOT / "skills/core/docs-governor/scripts/docs_governor.py"
+    spec = importlib.util.spec_from_file_location("implement_docs_governor", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 AGENT_RUNTIME = load_agent_runtime_module()
+DOCS_GOVERNOR = load_docs_governor_module()
 
 
 def default_docs_root() -> Path | None:
@@ -124,13 +134,8 @@ def docs_ready(docs_root: Path | None, doc_id: str) -> tuple[bool, str, list[str
     if not docs_root:
         return False, "", ["docs_root is required"]
     manifest = docs_root / "indexes" / f"{doc_id}.manifest.json"
-    blockers: list[str] = []
-    if not docs_root.exists():
-        blockers.append("docs_root does not exist")
-    if not manifest.exists():
-        blockers.append("docs manifest is missing")
-    if docs_root.exists() and not (docs_root / ".git").exists():
-        blockers.append("docs root must be a git repository")
+    validation = DOCS_GOVERNOR.validate(docs_root, doc_id, require_git=True)
+    blockers = [str(item.get("message") or "docs validation failed") for item in validation.get("blockers", [])]
     return not blockers, str(manifest), blockers
 
 

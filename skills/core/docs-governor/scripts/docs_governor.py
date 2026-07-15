@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -10,9 +11,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[4]
 DIRS = ["human/specs", "human/designs", "human/tests", "human/releases", "machine/specs", "machine/designs", "machine/reviews", "machine/releases", "baseline", "indexes"]
+DELIVERY_DIRS = ["input", "artifacts", "evidence", "runtime"]
+DELIVERY_TEXT_SUFFIXES = {".json", ".md", ".txt", ".log", ".diff", ".yaml", ".yml"}
 MACHINE_ARTIFACTS = {
     "spec": ("machine/specs", ".spec.json"),
     "design": ("machine/designs", ".design.json"),
@@ -73,6 +75,138 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def delivery_paths(docs_root: Path, doc_id: str) -> dict[str, Path]:
+    root = docs_root / "deliveries" / doc_id
+    return {"root": root, **{name: root / name for name in DELIVERY_DIRS}, "manifest": root / "delivery.json"}
+
+
+def managed_digest(root: Path, relative_paths: list[str]) -> str:
+    digest = hashlib.sha256()
+    for relative in sorted(set(relative_paths)):
+        path = root / relative
+        if not path.is_file():
+            continue
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def write_sanitized_copy(source: Path, target: Path, docs_root: Path, artifact_dir: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.suffix.lower() == ".json":
+        try:
+            payload = json.loads(source.read_text(encoding="utf-8"))
+        except Exception:
+            target.write_text(sanitize_local_paths(source.read_text(encoding="utf-8", errors="ignore"), docs_root, artifact_dir), encoding="utf-8")
+            return
+        write_json(target, sanitize_for_docs(payload, docs_root, artifact_dir))
+        return
+    text = source.read_text(encoding="utf-8", errors="ignore")
+    target.write_text(sanitize_local_paths(text, docs_root, artifact_dir), encoding="utf-8")
+
+
+def artifact_doc_id_blockers(artifact_dir: Path, doc_id: str) -> list[dict[str, str]]:
+    blockers: list[dict[str, str]] = []
+    for name in ["spec.json", "technical_design.json", "architecture_design.json", "auto_run_summary.json"]:
+        data = read_json(artifact_dir / name)
+        artifact_doc_id = str(data.get("doc_id") or "")
+        if artifact_doc_id and artifact_doc_id != doc_id:
+            blockers.append({"source": name, "message": f"artifact doc_id {artifact_doc_id} does not match {doc_id}"})
+    return blockers
+
+
+def sync_canonical_delivery(
+    docs_root: Path,
+    doc_id: str,
+    artifact_dir: Path,
+    title: str,
+    language: str,
+    input_file: Path | None = None,
+) -> dict[str, Any]:
+    paths = delivery_paths(docs_root, doc_id)
+    for name in DELIVERY_DIRS:
+        paths[name].mkdir(parents=True, exist_ok=True)
+        write_text_if_missing(paths[name] / ".gitkeep", "")
+    blockers = artifact_doc_id_blockers(artifact_dir, doc_id)
+    if blockers:
+        return {"decision": "block", "blockers": blockers}
+
+    previous = read_json(paths["manifest"])
+    previous_managed = [str(item) for item in as_list(previous.get("managed_files"))]
+    managed: list[str] = []
+    source_is_canonical = artifact_dir == paths["artifacts"]
+    if source_is_canonical:
+        local_path_files = sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
+        if local_path_files:
+            return {
+                "decision": "block",
+                "blockers": [{
+                    "source": "privacy",
+                    "message": "active canonical artifacts contain local paths; sync from external staging so the canonical copy can be sanitized without changing active evidence",
+                }],
+            }
+        managed.extend(
+            str(path.relative_to(paths["root"]))
+            for path in sorted(paths["artifacts"].rglob("*"))
+            if path.is_file() and path.suffix.lower() in DELIVERY_TEXT_SUFFIXES
+        )
+    else:
+        for source in sorted(artifact_dir.rglob("*")):
+            if not source.is_file() or source.suffix.lower() not in DELIVERY_TEXT_SUFFIXES or ".git" in source.parts:
+                continue
+            relative = source.relative_to(artifact_dir)
+            if relative.parts and relative.parts[0] == "runtime":
+                target = paths["runtime"].joinpath(*relative.parts[1:])
+            elif relative.parts and relative.parts[0] == "evidence":
+                target = paths["evidence"].joinpath(*relative.parts[1:])
+            else:
+                target = paths["artifacts"] / relative
+            write_sanitized_copy(source, target, docs_root, artifact_dir)
+            managed.append(str(target.relative_to(paths["root"])))
+
+    normalized = paths["artifacts"] / "requirement.normalized.txt"
+    if normalized.exists():
+        input_target = paths["input"] / "requirement.normalized.txt"
+        write_sanitized_copy(normalized, input_target, docs_root, artifact_dir)
+        managed.append(str(input_target.relative_to(paths["root"])))
+    if input_file and input_file.is_file():
+        input_target = paths["input"] / ("requirement" + input_file.suffix.lower())
+        write_sanitized_copy(input_file, input_target, docs_root, artifact_dir)
+        managed.append(str(input_target.relative_to(paths["root"])))
+    for relative in sorted(set(previous_managed) - set(managed)):
+        stale = paths["root"] / relative
+        if stale.is_file():
+            stale.unlink()
+
+    digest = managed_digest(paths["root"], managed)
+    delivery = {
+        "schema": "codex-delivery-canonical-v1",
+        "doc_id": doc_id,
+        "title": title,
+        "doc_language": language,
+        "status": "synced",
+        "artifact_digest": digest,
+        "managed_files": sorted(set(managed)),
+        "directories": {name: str(paths[name].relative_to(docs_root)) for name in DELIVERY_DIRS},
+        "privacy": {"local_paths_sanitized": True, "binary_files_copied": False},
+    }
+    write_json(paths["manifest"], delivery)
+    return {
+        "decision": "pass",
+        "delivery_root": str(paths["root"].relative_to(docs_root)),
+        "canonical_artifact_dir": str(paths["artifacts"]),
+        "artifact_digest": digest,
+        "managed_files": delivery["managed_files"],
+        "blockers": [],
+    }
+
+
 def sanitize_unmatched_local_path(value: str) -> str:
     if value.startswith(("/private/var/", "/var/folders/", "/tmp/")):
         return "<tmp>"
@@ -113,7 +247,7 @@ def sanitize_for_docs(value: Any, docs_root: Path | None = None, artifact_dir: P
 
 def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path, mutate: bool = False) -> list[str]:
     sanitized: list[str] = []
-    suffixes = {".json", ".md", ".txt", ".log"}
+    suffixes = DELIVERY_TEXT_SUFFIXES
     if not artifact_dir.exists():
         return sanitized
     for path in sorted(item for item in artifact_dir.rglob("*") if item.is_file() and item.suffix.lower() in suffixes):
@@ -5760,6 +5894,7 @@ def sync(
     git_url: str = "",
     doc_language: str = "en",
     human_section: str = "all",
+    input_file: Path | None = None,
 ) -> dict[str, Any]:
     docs_root = docs_root.expanduser().resolve()
     artifact_dir = artifact_dir.expanduser().resolve()
@@ -5770,7 +5905,16 @@ def sync(
     inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir) if design_sync else []
     generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id) if design_sync else {"generated": False, "reason": "runtime evidence is not needed for this human section"}
     sanitized_artifacts = [] if human_section != "all" else sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
-    human_docs = render_synced_human_docs_zh(doc_id, title, artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, artifact_dir)
+    canonical = sync_canonical_delivery(docs_root, doc_id, artifact_dir, title, language, input_file) if human_section == "all" else {}
+    if canonical.get("decision") == "block":
+        return {
+            "schema": "codex-docs-governor-sync-v1",
+            "decision": "block",
+            "doc_id": doc_id,
+            "blockers": canonical.get("blockers", []),
+        }
+    render_artifact_dir = Path(str(canonical.get("canonical_artifact_dir"))) if canonical else artifact_dir
+    human_docs = render_synced_human_docs_zh(doc_id, title, render_artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, render_artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],
         "design": docs_root / manifest["human_docs"]["design"],
@@ -5785,6 +5929,8 @@ def sync(
         human_targets[name].parent.mkdir(parents=True, exist_ok=True)
         if name == "design" and human_targets[name].exists():
             content = merge_manual_preface_sections(human_targets[name].read_text(encoding="utf-8", errors="ignore"), content)
+        if canonical.get("artifact_digest"):
+            content = f"<!-- codex:projection-source-digest:{canonical['artifact_digest']} -->\n" + content
         human_targets[name].write_text(content, encoding="utf-8")
         synced_human_docs.append(str(human_targets[name].relative_to(docs_root)))
 
@@ -5804,6 +5950,7 @@ def sync(
             "inherited_supplemental_artifacts": inherited_supplemental_artifacts,
             "generated_runtime_evidence": generated_runtime_evidence,
             "sanitized_artifacts": sanitized_artifacts,
+            "canonical_delivery": {},
             "blockers": [],
         }, docs_root, artifact_dir)
 
@@ -5820,13 +5967,14 @@ def sync(
             "schema": "codex-docs-machine-bundle-v1",
             "doc_id": doc_id,
             "artifact_type": name,
-            "source_artifact_dir": sanitize_local_paths(str(artifact_dir), docs_root, artifact_dir),
+            "source_artifact_dir": canonical.get("delivery_root", ""),
+            "source_digest": canonical.get("artifact_digest", ""),
             "artifacts": {},
         }
         for filename in files:
-            source = artifact_dir / filename
+            source = render_artifact_dir / filename
             if source.exists():
-                payload["artifacts"][filename] = sanitize_for_docs(read_json(source), docs_root, artifact_dir)
+                payload["artifacts"][filename] = sanitize_for_docs(read_json(source), docs_root, render_artifact_dir)
         if payload["artifacts"]:
             write_json(target, payload)
             synced_machine.append(str(target.relative_to(docs_root)))
@@ -5834,10 +5982,10 @@ def sync(
     raw_dir = docs_root / "machine/raw" / doc_id
     raw_dir.mkdir(parents=True, exist_ok=True)
     copied_raw: list[str] = []
-    for source in sorted(artifact_dir.glob("*.json")):
+    for source in sorted(render_artifact_dir.glob("*.json")):
         dest = raw_dir / source.name
         if source.resolve() != dest.resolve():
-            write_json(dest, sanitize_for_docs(read_json(source), docs_root, artifact_dir))
+            write_json(dest, sanitize_for_docs(read_json(source), docs_root, render_artifact_dir))
         copied_raw.append(str(dest.relative_to(docs_root)))
 
     manifest["synced_from"] = sanitize_local_paths(str(artifact_dir), docs_root, artifact_dir)
@@ -5847,6 +5995,10 @@ def sync(
     manifest["inherited_supplemental_artifacts"] = sanitize_for_docs(inherited_supplemental_artifacts, docs_root, artifact_dir)
     manifest["generated_runtime_evidence"] = sanitize_for_docs(generated_runtime_evidence, docs_root, artifact_dir)
     manifest["sanitized_artifacts"] = sanitized_artifacts
+    manifest["delivery_root"] = canonical.get("delivery_root", "")
+    manifest["canonical_artifact_digest"] = canonical.get("artifact_digest", "")
+    manifest["projection_source_digest"] = canonical.get("artifact_digest", "")
+    manifest["projection_schema"] = "codex-docs-projection-v1"
     manifest = sanitize_for_docs(manifest, docs_root, artifact_dir)
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", manifest)
     return sanitize_for_docs({
@@ -5864,6 +6016,7 @@ def sync(
         "inherited_supplemental_artifacts": inherited_supplemental_artifacts,
         "generated_runtime_evidence": generated_runtime_evidence,
         "sanitized_artifacts": sanitized_artifacts,
+        "canonical_delivery": canonical,
         "blockers": [],
     }, docs_root, artifact_dir)
 
@@ -5931,6 +6084,23 @@ def init(docs_root: Path, doc_id: str, git_url: str = "", title: str = "", doc_l
     config = configure(docs_root, git_url)
     language = normalize_doc_language(doc_language)
     materialized = materialize_doc_files(docs_root, doc_id, title, language)
+    delivery = delivery_paths(docs_root, doc_id)
+    for name in DELIVERY_DIRS:
+        delivery[name].mkdir(parents=True, exist_ok=True)
+        write_text_if_missing(delivery[name] / ".gitkeep", "")
+    if not delivery["manifest"].exists():
+        write_json(delivery["manifest"], {
+            "schema": "codex-delivery-canonical-v1",
+            "doc_id": doc_id,
+            "title": title,
+            "doc_language": language,
+            "status": "initialized",
+            "artifact_digest": "",
+            "managed_files": [],
+            "directories": {name: str(delivery[name].relative_to(docs_root)) for name in DELIVERY_DIRS},
+            "privacy": {"local_paths_sanitized": True, "binary_files_copied": False},
+        })
+    materialized["delivery"] = [str(delivery["manifest"].relative_to(docs_root))]
     manifest = {
         "schema": "codex-docs-governor-v1",
         "doc_id": doc_id,
@@ -5951,6 +6121,10 @@ def init(docs_root: Path, doc_id: str, git_url: str = "", title: str = "", doc_l
             "review": f"machine/reviews/{doc_id}.review.json",
             "release": f"machine/releases/{doc_id}.release.json",
         },
+        "delivery_root": str(delivery["root"].relative_to(docs_root)),
+        "canonical_artifact_digest": "",
+        "projection_source_digest": "",
+        "projection_schema": "codex-docs-projection-v1",
         "materialized": materialized,
         "rule": "Commit docs changes on a branch and merge through normal review; do not store local absolute paths or secrets.",
     }
@@ -5963,7 +6137,60 @@ def is_git_repo(path: Path) -> bool:
     return proc.returncode == 0 and proc.stdout.strip() == "true"
 
 
-def validate(docs_root: Path, doc_id: str, require_git: bool = False) -> dict[str, Any]:
+def docs_git_sync(docs_root: Path, doc_id: str) -> dict[str, Any]:
+    pathspecs = [
+        f"deliveries/{doc_id}",
+        f"human/specs/{doc_id}.md",
+        f"human/designs/{doc_id}.md",
+        f"human/tests/{doc_id}.md",
+        f"human/releases/{doc_id}.md",
+        f"machine/specs/{doc_id}.spec.json",
+        f"machine/designs/{doc_id}.design.json",
+        f"machine/reviews/{doc_id}.review.json",
+        f"machine/releases/{doc_id}.release.json",
+        f"machine/raw/{doc_id}",
+        f"indexes/{doc_id}.manifest.json",
+    ]
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", *pathspecs],
+        cwd=docs_root,
+        text=True,
+        capture_output=True,
+    )
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=docs_root, text=True, capture_output=True)
+    upstream = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=docs_root, text=True, capture_output=True)
+    ahead = behind = -1
+    if upstream.returncode == 0:
+        counts = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+            cwd=docs_root,
+            text=True,
+            capture_output=True,
+        )
+        if counts.returncode == 0:
+            parts = counts.stdout.split()
+            if len(parts) == 2:
+                behind, ahead = (int(parts[0]), int(parts[1]))
+    blockers: list[dict[str, str]] = []
+    if status.returncode != 0 or status.stdout.strip():
+        blockers.append({"source": "docs_git", "message": "delivery docs contain uncommitted changes for this doc_id"})
+    if upstream.returncode != 0:
+        blockers.append({"source": "docs_git", "message": "delivery docs branch has no upstream"})
+    elif ahead != 0 or behind != 0:
+        blockers.append({"source": "docs_git", "message": "delivery docs HEAD is not synchronized with upstream"})
+    return {
+        "decision": "block" if blockers else "pass",
+        "head": head.stdout.strip() if head.returncode == 0 else "",
+        "upstream": upstream.stdout.strip() if upstream.returncode == 0 else "",
+        "ahead": ahead,
+        "behind": behind,
+        "dirty_paths": status.stdout.splitlines(),
+        "blockers": blockers,
+    }
+
+
+def validate(docs_root: Path, doc_id: str, require_git: bool = False, require_git_sync: bool = False) -> dict[str, Any]:
+    docs_root = docs_root.expanduser().resolve()
     manifest_path = docs_root / "indexes" / f"{doc_id}.manifest.json"
     blockers: list[dict[str, str]] = []
     for directory in DIRS:
@@ -5973,6 +6200,8 @@ def validate(docs_root: Path, doc_id: str, require_git: bool = False) -> dict[st
         blockers.append({"source": "manifest", "message": "doc manifest missing"})
     else:
         manifest = read_json(manifest_path)
+        if manifest.get("doc_id") != doc_id:
+            blockers.append({"source": "manifest", "message": "manifest doc_id does not match requested doc_id"})
         for group in ["human_docs", "machine_artifacts"]:
             values = manifest.get(group) if isinstance(manifest.get(group), dict) else {}
             for name, rel_path in values.items():
@@ -5981,17 +6210,51 @@ def validate(docs_root: Path, doc_id: str, require_git: bool = False) -> dict[st
                     blockers.append({"source": f"{group}.{name}", "message": "manifest file missing"})
                 elif not target.read_text(encoding="utf-8").strip():
                     blockers.append({"source": f"{group}.{name}", "message": "manifest file is empty"})
-    if require_git:
+        delivery_root = docs_root / str(manifest.get("delivery_root") or f"deliveries/{doc_id}")
+        delivery_manifest_path = delivery_root / "delivery.json"
+        delivery = read_json(delivery_manifest_path)
+        if delivery.get("schema") != "codex-delivery-canonical-v1" or delivery.get("doc_id") != doc_id:
+            blockers.append({"source": "delivery", "message": "canonical delivery manifest is missing or bound to another doc_id"})
+        for name in DELIVERY_DIRS:
+            if not (delivery_root / name).is_dir():
+                blockers.append({"source": f"delivery.{name}", "message": "canonical delivery directory is missing"})
+        if delivery.get("status") == "synced":
+            managed = [str(item) for item in as_list(delivery.get("managed_files"))]
+            missing_managed = [relative for relative in managed if not (delivery_root / relative).is_file()]
+            if not managed or missing_managed:
+                blockers.append({"source": "delivery", "message": "canonical managed artifact inventory is empty or missing files"})
+            actual_digest = managed_digest(delivery_root, managed)
+            expected_digest = str(delivery.get("artifact_digest") or "")
+            if not expected_digest or actual_digest != expected_digest:
+                blockers.append({"source": "delivery", "message": "canonical delivery artifact digest is stale"})
+            if manifest.get("projection_source_digest") != expected_digest:
+                blockers.append({"source": "projection", "message": "manifest projection digest does not match canonical delivery"})
+            marker = f"<!-- codex:projection-source-digest:{expected_digest} -->"
+            for name, rel_path in (manifest.get("human_docs") or {}).items():
+                target = docs_root / str(rel_path)
+                if target.exists() and marker not in target.read_text(encoding="utf-8", errors="ignore"):
+                    blockers.append({"source": f"human_docs.{name}", "message": "human projection is stale"})
+            for name, rel_path in (manifest.get("machine_artifacts") or {}).items():
+                bundle = read_json(docs_root / str(rel_path))
+                if bundle.get("schema") == "codex-docs-machine-bundle-v1" and bundle.get("source_digest") != expected_digest:
+                    blockers.append({"source": f"machine_artifacts.{name}", "message": "machine projection is stale"})
+    git_sync = {"decision": "not_required", "blockers": []}
+    if require_git or require_git_sync:
         if not docs_root.exists():
             blockers.append({"source": "docs_root", "message": "docs root missing"})
         elif not is_git_repo(docs_root):
             blockers.append({"source": "docs_git", "message": "docs root must be a git repository"})
+        elif require_git_sync:
+            git_sync = docs_git_sync(docs_root, doc_id)
+            blockers.extend(git_sync["blockers"])
     return {
         "schema": "codex-docs-governor-validation-v1",
         "decision": "block" if blockers else "pass",
         "blockers": blockers,
         "manifest": str(manifest_path),
         "git_required": require_git,
+        "git_sync_required": require_git_sync,
+        "git_sync": git_sync,
     }
 
 
@@ -6010,6 +6273,7 @@ def main() -> int:
     p_sync.add_argument("--doc-language", choices=["en", "zh"], default="en")
     p_sync.add_argument("--human-section", choices=["all", "spec", "design", "test", "release"], default="all")
     p_sync.add_argument("--design-only", action="store_true")
+    p_sync.add_argument("--input-file")
     for cmd in ["init", "validate"]:
         p = sub.add_parser(cmd)
         p.add_argument("--docs-root", required=True)
@@ -6018,6 +6282,7 @@ def main() -> int:
         p.add_argument("--git-url", default="")
         p.add_argument("--doc-language", choices=["en", "zh"], default="en")
         p.add_argument("--require-git", action="store_true")
+        p.add_argument("--require-git-sync", action="store_true")
     args = parser.parse_args()
     if args.cmd == "configure":
         result = configure(Path(args.docs_root), args.git_url)
@@ -6025,9 +6290,18 @@ def main() -> int:
         result = init(Path(args.docs_root), args.doc_id, args.git_url, args.title, args.doc_language)
     elif args.cmd == "sync":
         human_section = "design" if args.design_only else args.human_section
-        result = sync(Path(args.docs_root), args.doc_id, Path(args.artifact_dir), args.title, args.git_url, args.doc_language, human_section)
+        result = sync(
+            Path(args.docs_root),
+            args.doc_id,
+            Path(args.artifact_dir),
+            args.title,
+            args.git_url,
+            args.doc_language,
+            human_section,
+            Path(args.input_file) if args.input_file else None,
+        )
     else:
-        result = validate(Path(args.docs_root), args.doc_id, args.require_git)
+        result = validate(Path(args.docs_root), args.doc_id, args.require_git, args.require_git_sync)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("decision") != "block" else 1
 

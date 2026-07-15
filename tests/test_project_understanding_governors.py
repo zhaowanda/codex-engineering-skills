@@ -6,7 +6,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -335,6 +334,8 @@ def test_docs_governor_init_and_validate() -> None:
             assert (root / "human/tests/REQ-1.md").read_text(encoding="utf-8").strip()
             assert (root / "human/releases/REQ-1.md").read_text(encoding="utf-8").strip()
             assert json.loads((root / "machine/specs/REQ-1.spec.json").read_text(encoding="utf-8"))["doc_id"] == "REQ-1"
+            assert (root / "deliveries/REQ-1/delivery.json").exists()
+            assert all((root / "deliveries/REQ-1" / name).is_dir() for name in ["input", "artifacts", "evidence", "runtime"])
             validation = docs_governor.validate(root, "REQ-1")
             assert validation["decision"] == "pass"
             zh_manifest = docs_governor.init(root, "REQ-ZH", title="订单导出", doc_language="zh")

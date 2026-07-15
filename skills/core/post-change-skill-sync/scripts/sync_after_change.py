@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "codex-post-change-implementation-report-v1"
 IGNORE_DIRS = (".git/", ".idea/", ".vscode/", "node_modules/", "dist/", "build/", "target/", "__pycache__/")
 
@@ -24,6 +23,18 @@ def load_governance_contract() -> Any:
 
 
 GOVERNANCE_CONTRACT = load_governance_contract()
+
+
+def load_docs_governor() -> Any:
+    path = Path(__file__).resolve().parents[4] / "skills/core/docs-governor/scripts/docs_governor.py"
+    spec = importlib.util.spec_from_file_location("post_change_docs_governor", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+DOCS_GOVERNOR = load_docs_governor()
 
 
 def as_list(value: Any) -> list[Any]:
@@ -290,8 +301,25 @@ def docs_binding(artifact_dir: Path, docs_root: Path | None, doc_id: str, requir
         blockers.append({"source": "docs_manifest", "message": "docs manifest is missing"})
     if not doc_id:
         blockers.append({"source": "doc_id", "message": "doc id is required for final docs binding"})
+    validation: dict[str, Any] = {}
+    if doc_id and docs_root.exists() and manifest_path.exists():
+        validation = DOCS_GOVERNOR.validate(docs_root, doc_id, require_git=True)
+        blockers.extend(
+            {"source": "docs_validation", "message": str(item.get("message") or "docs validation failed")}
+            for item in validation.get("blockers", [])
+        )
+    manifest_data = load_json(manifest_path) if manifest_path.is_file() else {}
     status = "bound" if not blockers else "blocked" if require_docs else "incomplete"
-    return {"status": status, "required": require_docs, "docs_root": str(docs_root), "doc_id": doc_id, "manifest": manifest}, blockers if require_docs else []
+    return {
+        "status": status,
+        "required": require_docs,
+        "docs_root": str(docs_root),
+        "doc_id": doc_id,
+        "manifest": manifest,
+        "delivery_root": str(docs_root / "deliveries" / doc_id) if doc_id else "",
+        "artifact_digest": str(manifest_data.get("canonical_artifact_digest") or ""),
+        "validation_decision": validation.get("decision", ""),
+    }, blockers if require_docs else []
 
 
 def markdown(report: dict[str, Any]) -> str:

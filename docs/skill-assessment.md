@@ -31,7 +31,7 @@ The whole framework is `expert` only when its weighted score is at least 90 and 
 - Runtime assessment: all 57 workflow stages reject correct-schema artifacts whose required evidence is semantically vacuous, and all 7 synthetic blocked/happy paths pass.
 - Agent Runtime assessment: session/event hash-chain verification, redaction, destructive-command blocking, historical checkpoint lineage, post-implementation/pre-push advancement, provider subject/type/time/digest verification, structured waiver validation, post-release evidence, and closed-session behavior are covered by executable tests.
 - `benchmark`: pass, 84 skills, 92 scripts, 150 current or compatibility-retained schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated synthetic replay cases.
-- `pytest`: pass, 455 tests; measured branch-aware repository coverage is 73.46% against a 70% enforced baseline.
+- `pytest`: pass, 462 tests; measured branch-aware repository coverage is 73.83% against a 70% enforced baseline.
 - `compileall`: pass for `scripts`, `skills`, and `tests`.
 - `ruff`, `mypy`, and `bandit`: pass for the hardened workflow, replay, Runtime, and governance-contract modules included in CI.
 - `privacy_scan`: pass, no hits.

@@ -21,6 +21,7 @@
 - Added structured governance waivers with subject/gate binding, owner-approver separation, expiry, compensating controls, immutable audit retention, and conditional-release semantics.
 - Hardened provider attestations with supported type, subject, timestamp, verifier, immutable URI, and SHA-256 evidence-digest validation.
 - Added per-profile cost budgets, accurate cache reuse/invalidation metrics, and direct Runtime post-release close coverage.
+- Made `deliveries/<doc_id>` the canonical unified-docs record, with sanitized managed artifacts, deterministic digests, stale projection detection, cross-doc rejection, and target-doc Git synchronization gates.
 - Upgraded workflow profiles to `codex-workflow-profiles-v2` and the stage registry to `codex-workflow-stages-v3`, adding fail-closed artifact contracts, semantic dependencies, input lineage, cross-repo draft planning, and a mandatory pre-edit write snapshot.
 - Upgraded the workflow stage registry to `codex-workflow-stages-v2` with lifecycle phases, explicit dependencies, conditional stages, stale-input detection, and complete implementation/release readiness paths.
 - Bound requirement questions and aggregate design reviews to canonical input digests so changed requirements or specialty evidence invalidate stale approvals.

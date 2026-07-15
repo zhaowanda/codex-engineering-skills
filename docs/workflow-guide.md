@@ -108,6 +108,8 @@ The question stage may consume a blocked `spec.json` as a draft to break the cla
 
 Every applicable artifact records its direct input digests. Updating an input recursively invalidates downstream readiness. Cross-repo work uses a draft plan before test design and aggregate design review, so testability is reviewed against `cross_repo_readiness.json` before final test data and delivery artifacts are generated.
 
+The unified delivery docs repository uses `deliveries/<doc_id>` as its canonical record. Requirement input, generated artifacts, evidence, and Runtime records live below that directory; human documents, machine bundles, raw compatibility copies, and indexes are generated projections bound to the canonical artifact digest. Pre-push validation rejects stale projections, cross-document artifacts, uncommitted target-doc changes, or a docs branch that is not synchronized with its upstream.
+
 The shared artifact contract also declares `evidence_fields` and optional typed field constraints. Correct schema and an accepted decision are insufficient when evidence is empty, has the wrong type, violates cardinality, or conflicts with a readiness constant. Lineage v2 binds the semantic artifact digest, deterministic direct inputs, producer version, command digest, Git context, and permit when available.
 
 Profiles declare `governance_level` as `light`, `standard`, `heavy`, or `critical`, plus observable step/artifact/duration budgets. Auto-run summaries distinguish cache reuse, invalidation, forced regeneration, first-run misses, and non-applicable steps; budget breaches are warnings for calibration rather than fabricated pass evidence.

@@ -24,3 +24,4 @@ post_implementation:
 pre_push:
   require_project_skill_index_sync: true
   require_commit_bound_test_evidence: true
+  require_docs_repo_sync: true

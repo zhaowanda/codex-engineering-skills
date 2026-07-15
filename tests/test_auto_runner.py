@@ -290,6 +290,34 @@ def test_harness_pre_push_blocks_test_evidence_without_commit_binding() -> None:
         assert any(item["message"] == "test evidence does not declare git_head or git_sha" for item in result["blockers"])
 
 
+def test_harness_pre_push_blocks_uncommitted_delivery_docs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        subprocess.run(["git", "init", str(docs_root)], text=True, capture_output=True, check=True)
+        doc_id = "REQ-DOCS-PRE-PUSH"
+        docs_artifacts = root / "docs-artifacts"
+        (docs_artifacts / "spec.json").parent.mkdir(parents=True)
+        (docs_artifacts / "spec.json").write_text(json.dumps({"schema": "codex-spec-v1", "doc_id": doc_id}), encoding="utf-8")
+        harness_validation.DOCS_GOVERNOR.sync(docs_root, doc_id, docs_artifacts, "Docs pre-push")
+        prepare_runtime_checkpoint(root, "pre_push")
+        (root / "post_change_implementation_report.json").write_text(json.dumps({
+            "decision": "pass",
+            "project_skill_index_requirements": {"required": False, "status": "not_required"},
+            "docs_binding": {"docs_root": str(docs_root), "doc_id": doc_id, "status": "bound"},
+        }), encoding="utf-8")
+        (root / "post_implementation_traceability_matrix.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "test_evidence_gate.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "code_review_gate.json").write_text(json.dumps({"decision": "approve"}), encoding="utf-8")
+        (root / "harness/post_implementation.json").parent.mkdir(parents=True)
+        (root / "harness/post_implementation.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="pre_push")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "docs_sync" and "uncommitted" in item["message"] for item in result["blockers"])
+
+
 def test_auto_runner_accepts_ready_docs_repo() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

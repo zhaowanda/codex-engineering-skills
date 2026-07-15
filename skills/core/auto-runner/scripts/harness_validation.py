@@ -37,6 +37,18 @@ def load_agent_runtime_module() -> Any:
 
 
 AGENT_RUNTIME = load_agent_runtime_module()
+
+
+def load_docs_governor_module() -> Any:
+    path = Path(__file__).resolve().parents[2] / "docs-governor/scripts/docs_governor.py"
+    spec = importlib.util.spec_from_file_location("harness_docs_governor", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+DOCS_GOVERNOR = load_docs_governor_module()
 RUNTIME_CHECKPOINTS = {
     "source_location": "intake",
     "design": "design",
@@ -451,6 +463,21 @@ def pre_push_checkpoint(
         add_blocker(blockers, "git_binding", "test evidence does not declare git_head or git_sha")
     if repo and bound_head and current_head != bound_head:
         add_blocker(blockers, "git_binding", "test evidence is bound to a different commit", evidence_head=bound_head, current_head=current_head)
+    docs_binding = post_change.get("docs_binding") if isinstance(post_change.get("docs_binding"), dict) else {}
+    docs_validation: dict[str, Any] = {}
+    docs_root_value = str(docs_binding.get("docs_root") or "")
+    docs_doc_id = str(docs_binding.get("doc_id") or "")
+    if docs_root_value and docs_doc_id:
+        docs_validation = DOCS_GOVERNOR.validate(
+            Path(docs_root_value),
+            docs_doc_id,
+            require_git=True,
+            require_git_sync=policy.get("require_docs_repo_sync", True),
+        )
+        blockers.extend(
+            {"source": "docs_sync", "message": str(item.get("message") or "delivery docs validation failed")}
+            for item in docs_validation.get("blockers", [])
+        )
     return {
         "checkpoint": "pre_push",
         "applicable": True,
@@ -459,6 +486,7 @@ def pre_push_checkpoint(
         "metrics": {"required_evidence": 5, "accepted_evidence": 5 - sum(1 for item in blockers if item["source"] == "pre_push")},
         "current_head": current_head,
         "evidence_head": bound_head,
+        "docs_validation": docs_validation,
     }
 
 

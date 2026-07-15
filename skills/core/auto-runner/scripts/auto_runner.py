@@ -119,21 +119,15 @@ def docs_readiness(docs_root: Path | None, doc_id: str) -> dict[str, Any]:
             "next_command": f"python3 skills/core/docs-governor/scripts/docs_governor.py init --docs-root delivery-docs --doc-id {doc_id}",
         }
     manifest = docs_root / "indexes" / f"{doc_id}.manifest.json"
-    blockers: list[dict[str, str]] = []
-    if not docs_root.exists():
-        blockers.append({"source": "docs_root", "message": "delivery docs repository root does not exist"})
-    if not manifest.exists():
-        blockers.append({"source": "manifest", "message": "delivery docs manifest is missing"})
-    if docs_root.exists():
-        proc = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=docs_root, text=True, capture_output=True)
-        if proc.returncode != 0 or proc.stdout.strip() != "true":
-            blockers.append({"source": "docs_git", "message": "delivery docs root must be a git repository"})
+    validation = load_docs_governor_module().validate(docs_root, doc_id, require_git=True)
+    blockers = [dict(item) for item in validation.get("blockers", [])]
     return {
         "schema": "codex-docs-readiness-v1",
         "decision": "pass" if not blockers else "block",
         "required": True,
         "docs_root": str(docs_root),
         "manifest": str(manifest),
+        "canonical_delivery": str(docs_root / "deliveries" / doc_id),
         "blockers": blockers,
         "next_command": f"python3 skills/core/docs-governor/scripts/docs_governor.py init --docs-root {docs_root} --doc-id {doc_id}",
     }
@@ -175,12 +169,12 @@ def infer_artifact_doc_language(artifact_dir: Path, requested: str = "auto", cur
 
 def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifact_dir: Path, doc_language: str = "en", human_section: str = "all") -> dict[str, Any]:
     if not docs_root:
-        return {"decision": "skipped", "reason": "docs_root is not configured"}
+        return {"decision": "block", "reason": "docs_root is not configured", "blockers": [{"source": "docs_root", "message": "docs_root is not configured"}]}
     if not docs_root.exists():
-        return {"decision": "skipped", "reason": "docs_root does not exist"}
+        return {"decision": "block", "reason": "docs_root does not exist", "blockers": [{"source": "docs_root", "message": "docs_root does not exist"}]}
     proc = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=docs_root, text=True, capture_output=True)
     if proc.returncode != 0 or proc.stdout.strip() != "true":
-        return {"decision": "skipped", "reason": "docs_root is not a git repository"}
+        return {"decision": "block", "reason": "docs_root is not a git repository", "blockers": [{"source": "docs_git", "message": "docs_root is not a git repository"}]}
     try:
         return load_docs_governor_module().sync(docs_root, doc_id, artifact_dir, title, doc_language=doc_language, human_section=human_section)
     except Exception as exc:

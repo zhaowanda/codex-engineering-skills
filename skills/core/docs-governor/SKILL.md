@@ -24,10 +24,15 @@ delivery docs repository setup
 
 ## Rules
 
+- Treat `deliveries/<doc_id>` as the canonical delivery record, with `input/`, `artifacts/`, `evidence/`, `runtime/`, and `delivery.json`.
+- Generate `human/`, `machine/`, and `indexes/` as digest-bound projections from the canonical delivery record; never use a temporary artifact directory as the final projection source.
 - Separate human-readable documents from machine-readable gate artifacts.
 - Require stable doc ids for requirement-specific folders.
 - `init` must materialize non-empty requirement-scoped human docs and machine placeholders; empty `human/` or `machine/` directories are not sufficient.
 - `sync` must copy generated delivery artifacts into the docs repository by `doc_id` so docs follow the requirement, not just the workspace.
+- Reject artifacts whose embedded `doc_id` differs from the target delivery, sanitize local paths before canonical storage, and remove only stale files previously managed by docs-governor.
+- `validate` must reject missing canonical directories, missing managed files, changed canonical digests, stale human/machine projections, and cross-document manifests.
+- `validate --require-git-sync` must reject uncommitted changes for the target doc id, missing upstream configuration, and docs commits that are ahead of or behind upstream.
 - `sync` must inherit existing expert supplemental artifacts from `machine/raw/<doc_id>` before rendering human docs when the current artifact directory lacks them; source-backed runtime evidence must not be lost during `--force` reruns.
 - `sync --design-only` or `sync --human-section design` must refresh only `human/designs/<doc_id>.md`; it must not rewrite specs, tests, release docs, machine bundles, raw artifacts, or manifests.
 - `sync` must synthesize `runtime_sequence_evidence.json` when it is missing and source-backed evidence exists in `spec.json`, `technical_design.json`, `project_understanding/api_surface.json`, `project_understanding/code_index.json`, and indexed source files. If those inputs are insufficient, report the reason instead of fabricating actor/API/service interactions.
@@ -76,7 +81,8 @@ python3 scripts/docs_governor.py \
   --doc-id REQ-001 \
   --title "Order export" \
   --doc-language en \
-  --artifact-dir artifacts/REQ-001
+  --artifact-dir artifacts/REQ-001 \
+  --input-file requirement.md
 ```
 
 Refresh only the human-readable design document without rewriting specs, tests, release docs, machine bundles, raw artifacts, or manifests:
@@ -100,10 +106,16 @@ python3 scripts/docs_governor.py \
   --docs-root delivery-docs \
   --doc-id REQ-001 \
   --require-git
+
+python3 scripts/docs_governor.py \
+  validate \
+  --docs-root delivery-docs \
+  --doc-id REQ-001 \
+  --require-git-sync
 ```
 
 ## Output
 
 The output uses schema `codex-docs-governor-v1`.
 
-The artifact reports initialized, synced, or validated paths, missing structure, blockers, warnings, and next actions. A valid initialized doc id includes non-empty `human/specs`, `human/designs`, `human/releases`, `machine/specs`, `machine/designs`, `machine/reviews`, and `machine/releases` files.
+The artifact reports initialized, synced, or validated paths, canonical delivery digest, projection bindings, Git synchronization, blockers, warnings, and next actions. A valid initialized doc id includes `deliveries/<doc_id>/delivery.json`, its four canonical subdirectories, and non-empty human/machine placeholders. A synced doc additionally requires a non-empty managed inventory and matching canonical/projection digests.

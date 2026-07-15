@@ -5,7 +5,6 @@ import json
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -753,6 +752,107 @@ def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
         assert "<docs-root>" in combined or "<artifact-dir>" in combined or "<workspace>" in combined
         assert result["sanitized_artifacts"]
         assert str(repo_root) in (artifact_dir / "architecture_design.json").read_text(encoding="utf-8")
+
+
+def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-CANONICAL"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "acceptance_criteria": []})
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+        (artifact_dir / "requirement.normalized.txt").write_text("Canonical requirement\n", encoding="utf-8")
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Canonical")
+
+        digest = result["canonical_delivery"]["artifact_digest"]
+        delivery = json.loads((docs_root / "deliveries" / doc_id / "delivery.json").read_text(encoding="utf-8"))
+        manifest = json.loads((docs_root / "indexes" / f"{doc_id}.manifest.json").read_text(encoding="utf-8"))
+        machine = json.loads((docs_root / "machine/specs" / f"{doc_id}.spec.json").read_text(encoding="utf-8"))
+        human = (docs_root / "human/specs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert result["decision"] == "pass"
+        assert delivery["artifact_digest"] == digest
+        assert manifest["projection_source_digest"] == digest
+        assert machine["source_digest"] == digest
+        assert f"codex:projection-source-digest:{digest}" in human
+        assert (docs_root / "deliveries" / doc_id / "input/requirement.normalized.txt").exists()
+        assert docs_governor.validate(docs_root, doc_id)["decision"] == "pass"
+
+
+def test_validate_blocks_stale_canonical_delivery_projection() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-STALE-PROJECTION"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id})
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "Stale")
+        canonical_spec = docs_root / "deliveries" / doc_id / "artifacts/spec.json"
+        canonical_spec.write_text('{"schema":"tampered"}\n', encoding="utf-8")
+
+        result = docs_governor.validate(docs_root, doc_id)
+
+        assert result["decision"] == "block"
+        assert any("digest is stale" in item["message"] for item in result["blockers"])
+
+
+def test_sync_blocks_artifacts_bound_to_another_doc_id() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        artifact_dir = root / "artifacts"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": "REQ-OTHER"})
+
+        result = docs_governor.sync(root / "docs", "REQ-EXPECTED", artifact_dir, "Mismatch")
+
+        assert result["decision"] == "block"
+        assert any("does not match" in item["message"] for item in result["blockers"])
+
+
+def test_sync_blocks_active_canonical_artifacts_with_local_paths() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        docs_root = Path(tmp) / "docs"
+        doc_id = "REQ-CANONICAL-PRIVACY"
+        docs_governor.init(docs_root, doc_id)
+        canonical = docs_root / "deliveries" / doc_id / "artifacts"
+        write_json(canonical / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "repo_root": "/" + "Users/example/private-repo"})
+
+        result = docs_governor.sync(docs_root, doc_id, canonical, "Privacy")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "privacy" for item in result["blockers"])
+
+
+def test_validate_git_sync_blocks_uncommitted_and_unpushed_delivery_docs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        bare = root / "remote.git"
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        subprocess = __import__("subprocess")
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+        subprocess.run(["git", "init", str(docs_root)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(docs_root), "config", "user.email", "docs@example.com"], check=True)
+        subprocess.run(["git", "-C", str(docs_root), "config", "user.name", "Docs Test"], check=True)
+        subprocess.run(["git", "-C", str(docs_root), "remote", "add", "origin", str(bare)], check=True)
+        doc_id = "REQ-GIT-SYNC"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id})
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "Git sync")
+
+        dirty = docs_governor.validate(docs_root, doc_id, require_git_sync=True)
+        subprocess.run(["git", "-C", str(docs_root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(docs_root), "commit", "-m", "docs"], check=True, capture_output=True)
+        unpushed = docs_governor.validate(docs_root, doc_id, require_git_sync=True)
+        subprocess.run(["git", "-C", str(docs_root), "push", "-u", "origin", "HEAD"], check=True, capture_output=True)
+        synced = docs_governor.validate(docs_root, doc_id, require_git_sync=True)
+
+        assert dirty["decision"] == "block"
+        assert any("uncommitted" in item["message"] for item in dirty["blockers"])
+        assert unpushed["decision"] == "block"
+        assert synced["decision"] == "pass"
 
 
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
