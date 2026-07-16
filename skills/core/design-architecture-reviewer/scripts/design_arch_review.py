@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 PLACEHOLDERS = ("confirm later", "unknown", "tbd", "todo", "待确认", "后续确认")
 PLACEHOLDER_SAFE_KEYS = {"role", "source_evidence", "read_first", "evidence_refs"}
 GENERIC_PHRASES = (
@@ -155,6 +154,10 @@ def finding(area: str, severity: str, message: str, evidence: Any, suggestion: s
     return {"area": area, "severity": severity, "message": message, "evidence": evidence, "suggestion": suggestion}
 
 
+def normalized_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", meaningful_text(value)).strip().lower()
+
+
 def artifact_digest(data: dict[str, Any]) -> str:
     def strip_volatile(value: Any) -> Any:
         if isinstance(value, dict):
@@ -284,6 +287,86 @@ def review_process_flow(process_flow: list[Any], findings: list[dict[str, Any]])
                 step_missing = missing_required(step, ["step", "actor", "action", "input", "output", "exception"])
                 if step_missing:
                     findings.append(finding("technical_design_quality", "high", "process flow step lacks required fields", {"flow_index": idx, "step_index": step_idx, "missing": step_missing}, "Each step needs actor/action/input/output/exception."))
+
+
+def review_process_flow_diagram(process_flow: list[Any], diagram: Any, findings: list[dict[str, Any]]) -> None:
+    if not process_flow:
+        return
+    text = str(diagram or "").strip()
+    if not text:
+        findings.append(finding("technical_design_quality", "blocker", "process flow diagram is missing", "process_flow_diagram empty", "Render a Mermaid flowchart from the reviewed business flow."))
+        return
+    if "```mermaid" not in text.lower() or "flowchart" not in text.lower():
+        findings.append(finding("technical_design_quality", "high", "process flow diagram must be a Mermaid flowchart", diagram, "Use Mermaid flowchart syntax so downstream docs and review can reuse it."))
+        return
+    normalized_diagram = normalized_text(text)
+    for flow in process_flow:
+        if not isinstance(flow, dict):
+            continue
+        for step in as_list(flow.get("steps")):
+            if not isinstance(step, dict):
+                continue
+            action = normalized_text(step.get("action"))
+            actor = normalized_text(step.get("actor"))
+            if action and action not in normalized_diagram:
+                findings.append(finding("technical_design_quality", "high", "process flow diagram misses a structured step action", {"actor": step.get("actor"), "action": step.get("action")}, "Keep the Mermaid flowchart aligned with structured process_flow steps."))
+            if actor and actor not in normalized_diagram:
+                findings.append(finding("technical_design_quality", "medium", "process flow diagram misses a structured actor", {"actor": step.get("actor")}, "Show the actor for each major business step in the Mermaid flowchart."))
+
+
+def review_system_sequence_diagram(system_interaction_sequence: dict[str, Any], diagram: Any, findings: list[dict[str, Any]]) -> None:
+    if not is_applicable(system_interaction_sequence):
+        return
+    text = str(diagram or "").strip()
+    if not text:
+        findings.append(finding("cross_repo_contract_review", "blocker", "system sequence diagram is missing", "system_sequence_diagram empty", "Render a Mermaid sequence diagram from the reviewed system interaction sequence."))
+        return
+    if "```mermaid" not in text.lower() or "sequencediagram" not in text.lower():
+        findings.append(finding("cross_repo_contract_review", "high", "system sequence diagram must be Mermaid sequenceDiagram", diagram, "Use Mermaid sequenceDiagram syntax so review can compare it with structured sequence data."))
+        return
+    participants = [str(item) for item in as_list(system_interaction_sequence.get("participants")) if item]
+    steps = as_list(system_interaction_sequence.get("sequence"))
+    normalized_diagram = normalized_text(text)
+    if len(steps) < 2:
+        findings.append(finding("cross_repo_contract_review", "high", "system interaction sequence is too shallow", {"step_count": len(steps)}, "Model at least request, downstream interaction, and completion/error handling steps."))
+    for participant in participants:
+        if normalized_text(participant) not in normalized_diagram:
+            findings.append(finding("cross_repo_contract_review", "medium", "system sequence diagram misses a participant", participant, "Show every reviewed participant in the Mermaid sequence diagram."))
+    for idx, step in enumerate(steps):
+        if not isinstance(step, dict):
+            findings.append(finding("cross_repo_contract_review", "high", "system interaction sequence step must be structured", {"index": idx, "value": step}, "Represent sequence steps as objects with from/to/action/success/failure/state_transition/source_evidence."))
+            continue
+        missing = missing_required(step, ["step", "from", "to", "action", "success", "failure", "state_transition", "source_evidence"])
+        if missing:
+            findings.append(finding("cross_repo_contract_review", "high", "system interaction sequence step lacks required fields", {"index": idx, "missing": missing}, "Complete each sequence step before design approval."))
+            continue
+        for key in ["from", "to"]:
+            if str(step.get(key)) not in participants:
+                findings.append(finding("cross_repo_contract_review", "high", f"system interaction sequence step {key} is not listed as a participant", {"index": idx, key: step.get(key), "participants": participants}, "Keep participants and sequence edges consistent."))
+        if normalized_text(step.get("action")) not in normalized_diagram:
+            findings.append(finding("cross_repo_contract_review", "high", "system sequence diagram misses a reviewed action", {"index": idx, "action": step.get("action")}, "Keep the Mermaid sequence diagram aligned with structured interaction actions."))
+
+
+def review_integration_sequence_diagram(integration_sequence: list[Any], diagram: Any, findings: list[dict[str, Any]]) -> None:
+    if not integration_sequence:
+        return
+    text = str(diagram or "").strip()
+    if not text:
+        findings.append(finding("cross_repo_contract_review", "blocker", "integration sequence diagram is missing", "integration_sequence_diagram empty", "Render a Mermaid sequence diagram from the reviewed integration sequence."))
+        return
+    if "```mermaid" not in text.lower() or "sequencediagram" not in text.lower():
+        findings.append(finding("cross_repo_contract_review", "high", "integration sequence diagram must be Mermaid sequenceDiagram", diagram, "Use Mermaid sequenceDiagram syntax for architecture-level integration flow."))
+        return
+    normalized_diagram = normalized_text(text)
+    for idx, step in enumerate(integration_sequence):
+        if not isinstance(step, dict):
+            findings.append(finding("cross_repo_contract_review", "high", "integration sequence step must be an object", {"index": idx, "value": step}, "Represent architecture integration steps as structured objects."))
+            continue
+        missing = missing_required(step, ["step", "actor", "action", "failure_handling"])
+        if missing:
+            findings.append(finding("cross_repo_contract_review", "high", "integration sequence step lacks required fields", {"index": idx, "missing": missing}, "Complete actor/action/failure_handling for every integration step."))
+        if normalized_text(step.get("action")) not in normalized_diagram:
+            findings.append(finding("cross_repo_contract_review", "high", "integration sequence diagram misses a reviewed action", {"index": idx, "action": step.get("action")}, "Keep the Mermaid integration diagram aligned with structured integration actions."))
 
 
 def review_module_decomposition(modules: list[Any], findings: list[dict[str, Any]]) -> None:
@@ -526,6 +609,7 @@ def review(
     target_behavior = as_list(technical.get("target_behavior"))
     business_rules = as_list(technical.get("business_rule_mapping"))
     process_flow = as_list(technical.get("process_flow"))
+    process_flow_diagram = technical.get("process_flow_diagram")
     modules = as_list(technical.get("module_decomposition"))
     logical_data_flow = as_list(technical.get("logical_data_flow"))
     api_contracts = as_list(technical.get("api_contracts"))
@@ -533,6 +617,7 @@ def review(
     data_model_design = technical.get("data_model_design") if isinstance(technical.get("data_model_design"), dict) else {}
     table_schema_changes = as_list(technical.get("table_schema_changes"))
     system_interaction_sequence = technical.get("system_interaction_sequence") if isinstance(technical.get("system_interaction_sequence"), dict) else {}
+    system_sequence_diagram = technical.get("system_sequence_diagram")
     mq_interactions = as_list(technical.get("mq_interactions"))
     cache_strategy = technical.get("cache_strategy") if isinstance(technical.get("cache_strategy"), dict) else {}
     transaction_consistency = technical.get("transaction_consistency") if isinstance(technical.get("transaction_consistency"), dict) else {}
@@ -578,6 +663,7 @@ def review(
     data_flow = as_list(architecture.get("data_flow"))
     data_ownership = as_list(architecture.get("data_ownership"))
     integration_sequence = as_list(architecture.get("integration_sequence"))
+    integration_sequence_diagram = architecture.get("integration_sequence_diagram")
     failure_isolation = as_list(architecture.get("failure_isolation"))
     security_permission = as_list(architecture.get("security_and_permission"))
     observability = as_list(architecture.get("observability"))
@@ -699,6 +785,7 @@ def review(
         findings.append(finding("technical_design_quality", "high", "business rule mapping lacks enforcement or source of truth", business_rules, "Each rule needs technical_enforcement and source_of_truth."))
 
     review_process_flow(process_flow, findings)
+    review_process_flow_diagram(process_flow, process_flow_diagram, findings)
     process_step_count = sum(len(as_list(item.get("steps"))) for item in process_flow if isinstance(item, dict))
     if len(as_list(technical.get("acceptance_mapping"))) >= 2 and process_step_count < 2:
         findings.append(finding("technical_design_quality", "high", "business process flow is too shallow for the mapped acceptance scope", {"process_steps": process_step_count, "acceptance_mappings": len(as_list(technical.get("acceptance_mapping")))}, "Model the ordered trigger, business actions, downstream effects, success state, and failure branches before implementation."))
@@ -763,6 +850,7 @@ def review(
             missing = missing_required(system_interaction_sequence, ["participants", "sequence", "timeout_retry", "idempotency", "consistency"])
             if missing:
                 findings.append(finding("cross_repo_contract_review", "high", "system interaction sequence lacks required fields", {"missing": missing}, "Add participants, ordered sequence, timeout/retry, idempotency, and consistency handling."))
+            review_system_sequence_diagram(system_interaction_sequence, system_sequence_diagram, findings)
 
     if mq_signal:
         applicable_mq = [item for item in mq_interactions if isinstance(item, dict) and item.get("applicable") is True]
@@ -914,6 +1002,8 @@ def review(
 
     if not integration_sequence:
         findings.append(finding("cross_repo_contract_review", "high", "integration sequence is missing", "integration_sequence empty", "Describe actor/action/contract/failure handling in execution order."))
+    else:
+        review_integration_sequence_diagram(integration_sequence, integration_sequence_diagram, findings)
     if not failure_isolation:
         findings.append(finding("architecture_depth_review", "medium", "failure isolation design is missing", "failure_isolation empty", "Describe dependency failures, isolation behavior, and user impact."))
     if not rollback:

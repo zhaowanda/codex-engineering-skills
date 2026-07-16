@@ -398,6 +398,8 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     arch = architecture_design.render(spec, tech)
     assert tech["schema"] == "codex-technical-design-v1"
     assert tech["process_flow"]
+    assert "```mermaid" in tech["process_flow_diagram"]
+    assert "flowchart" in tech["process_flow_diagram"]
     assert len(tech["solution_options"]) >= 2
     assert all({"when_to_choose", "implementation_outline", "risk_controls", "test_evidence", "rollout_impact"}.issubset(item) for item in tech["solution_options"])
     assert all({"criterion", "weight", "scores", "winner", "reason"}.issubset(item) for item in tech["option_comparison_matrix"])
@@ -408,6 +410,8 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     assert tech["code_entrypoint_confidence"]["level"] in {"high", "medium", "low"}
     assert tech["field_api_permission_impact"]
     assert {"data_model_design", "table_schema_changes", "system_interaction_sequence", "mq_interactions", "cache_strategy", "transaction_consistency", "observability_design"}.issubset(tech)
+    assert "```mermaid" in tech["system_sequence_diagram"]
+    assert "sequenceDiagram" in tech["system_sequence_diagram"]
     assert tech["decision_confidence"]["level"] in {"high", "medium"}
     assert tech["selected_solution"]["rejected_alternative_reasoning"]
     assert arch["schema"] == "codex-architecture-design-v1"
@@ -422,6 +426,8 @@ def test_technical_and_architecture_design_render_core_sections() -> None:
     assert arch["architecture_decision_confidence"]["level"] in {"high", "medium"}
     assert arch["selected_architecture"]["rejected_alternative_reasoning"]
     assert arch["repo_responsibilities"][0]["role"] == "modify"
+    assert "```mermaid" in arch["integration_sequence_diagram"]
+    assert "sequenceDiagram" in arch["integration_sequence_diagram"]
 
 
 def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> None:
@@ -454,6 +460,7 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
     assert tech["api_contracts"][0]["contract"] == "/operate/api/dualCamera/playbackStreamControl"
     assert {item["to"] for item in tech["system_interaction_sequence"]["sequence"]} >= {"/operate/api/dualCamera/playbackStreamControl", "src/components/DualCameraLivePlayer.vue"}
     assert len(tech["process_flow"][0]["steps"]) >= 2
+    assert "playback" in tech["system_sequence_diagram"].lower()
 
 
 def test_contract_selection_uses_breakdown_action_semantics() -> None:
@@ -554,6 +561,7 @@ def test_technical_design_adds_expert_data_mq_cache_and_sequence_sections() -> N
     assert {"table", "field", "type", "nullable", "default", "migration", "rollback"}.issubset(tech["table_schema_changes"][0])
     assert tech["system_interaction_sequence"]["applicable"] is True
     assert {"participants", "sequence", "timeout_retry", "idempotency", "consistency"}.issubset(tech["system_interaction_sequence"])
+    assert "```mermaid" in tech["system_sequence_diagram"]
     assert tech["mq_interactions"][0]["applicable"] is True
     assert {"producer", "consumer", "topic_or_queue", "trigger", "payload_fields", "idempotency_key", "retry_policy", "dead_letter_or_compensation"}.issubset(tech["mq_interactions"][0])
     assert tech["cache_strategy"]["applicable"] is True

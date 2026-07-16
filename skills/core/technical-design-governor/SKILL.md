@@ -46,7 +46,9 @@ Then run `design-architecture-reviewer` after architecture design exists.
 - When source-location evidence exists, select owner modules only from `confirmed_anchors` and block when none are confirmed.
 - Never promote `rejected_candidates` or broad repository-index hints into implementation modules.
 - Build `process_flow` as one ordered business flow from confirmed triggers, system actions, and observable acceptance outcomes; do not turn document headings or correction notes into standalone flows.
+- Emit `process_flow_diagram` as a Mermaid `flowchart` derived from the reviewed `process_flow`; the diagram must stay semantically aligned with the structured steps.
 - Prefer `source_location_evidence.confirmed_contracts` for API contracts and system interaction sequence participants.
+- Emit `system_sequence_diagram` as a Mermaid `sequenceDiagram` derived from `system_interaction_sequence`; keep participants and actions consistent with the structured sequence rows.
 - Do not present fallback phrases such as `target module to be confirmed` as expert-ready facts; keep them as review-blocking uncertainty.
 - Preserve open questions; do not hide uncertainty.
 - Include at least two solution options and a selected option.
@@ -61,7 +63,7 @@ Then run `design-architecture-reviewer` after architecture design exists.
 
 The output uses schema `codex-technical-design-v1`.
 
-The artifact includes process flow, modules, logical data flow, API/UI behavior, data model/table schema, system sequence, MQ/cache/transaction/observability decisions, detailed options, selected approach, weighted comparison matrix, score summary, invariants, tests, risks, and traceability.
+The artifact includes process flow, `process_flow_diagram`, modules, logical data flow, API/UI behavior, data model/table schema, system sequence, `system_sequence_diagram`, MQ/cache/transaction/observability decisions, detailed options, selected approach, weighted comparison matrix, score summary, invariants, tests, risks, and traceability.
 
 It also emits top-level `decision` and `blockers`; downstream workflow contracts accept only `decision=pass`.
 

@@ -41,9 +41,11 @@ spec
 - Block rejected candidates that leak into modules, selected options, deployment, rollback, or implementation scope.
 - Also block rejected candidates in process flow, current-state analysis, logical data flow, API contracts, and system interaction sequences.
 - Require a multi-step business flow when multiple acceptance mappings describe an ordered user/system workflow.
+- Require `process_flow_diagram` as Mermaid `flowchart` whenever `process_flow` is present, and block when the diagram omits reviewed actors or actions.
 - Do not accept manually asserted high entrypoint confidence without direct source confirmation.
 - Require data model/table schema detail when data changes are signaled.
 - Require multi-system sequence, timeout/retry, idempotency, and consistency handling when API/cross-system interaction is signaled.
+- Require Mermaid `system_sequence_diagram` and `integration_sequence_diagram` whenever structured system or integration sequences apply; diagrams must stay aligned with the reviewed sequence participants and actions.
 - Require MQ producer, consumer, topic/queue, trigger timing, payload, idempotency key, retry policy, and dead-letter/compensation when asynchronous messaging is signaled.
 - Require cache key, value shape, TTL, invalidation, and consistency-risk decision when cache is chosen.
 - Require transaction boundary, idempotency, compensation, and rollback when consistency or multi-write risk is signaled.
