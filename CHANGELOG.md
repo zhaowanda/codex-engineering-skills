@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added fail-closed, one-question-at-a-time terminal clarification with per-answer persistence and provenance; auto-runner now feeds confirmed answers back into source-location and Spec inputs.
+- Repaired pre-push hook installation across source and local-skill layouts with dependency validation, linked-worktree support, selective repair, and backups for replaced hooks; Agent Runtime now rejects Git hook bypass via `commit` or `push --no-verify`.
+
 ### Changed
 
 - Added structured requirement scope roles, context-aware ambiguity handling, and non-blocking metric questions.

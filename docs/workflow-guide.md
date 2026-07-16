@@ -104,6 +104,8 @@ Profile `artifact_steps` declare profile-specific artifact generation or inspect
 
 `open_questions.json` is bound to the canonical current spec through `spec_digest`. Regeneration preserves answers only for unchanged stable question IDs, records answer provenance, and marks questions removed by the new spec as non-blocking `obsolete`. A digest mismatch blocks profile readiness even when every required question in the old artifact was answered.
 
+Use `python3 scripts/codex_eng.py clarify --artifact-dir <delivery-dir>` to answer open questions sequentially in a terminal. Required answers cannot be blank; every completed response is immediately persisted with actor and timestamp provenance to `open_questions.json` and `clarification_answers.md`. The command fails closed without a TTY. On the next same-directory auto run, confirmed answers are merged into `requirement.clarified.txt` and used for source-location and Spec regeneration.
+
 The question stage may consume a blocked `spec.json` as a draft to break the clarification cycle. That exception does not complete the Spec stage: requirement text or project evidence must be updated and Spec must be regenerated before any design stage can pass.
 
 Every applicable artifact records its direct input digests. Updating an input recursively invalidates downstream readiness. Cross-repo work uses a draft plan before test design and aggregate design review, so testability is reviewed against `cross_repo_readiness.json` before final test data and delivery artifacts are generated.
@@ -144,6 +146,7 @@ Traceability is intentionally two-pass. The initial pass (`traceability_matrix.j
 - Post-change evidence passes; when project skill sync candidates exist, `project_skill_index_sync.json` must prove the project-level skill index was updated or carry an explicit owner-reviewed waiver.
 - `harness/post_implementation.json` proves actual changed files stay within the reviewed delivery-plan scope.
 - `harness/pre_push.json` proves post-change, traceability, tests, review, skill-index sync, and commit binding are current.
+- A pre-commit or pre-push failure caused by a missing Codex script path is a hook installation defect, not grounds for `--no-verify`. Repair only the affected hook with `workspace-write-guard/scripts/install_pre_commit.py --repo <repo> --hook pre-push`, then rerun the same Git operation with hooks enabled.
 - `runtime/checkpoints/post_implementation.json`, `runtime/checkpoints/pre_push.json`, and `runtime/checkpoints/release.json` pass; release carries all four required provider attestations.
 - Write guard audit is clean.
 - Code review gate approves or has accepted residual risks.

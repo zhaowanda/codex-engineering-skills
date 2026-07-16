@@ -133,6 +133,14 @@ Configure the delivery docs repository once per workspace. Later requirements re
 
 The auto runner starts an append-only Agent Runtime session, ingests the requirement, verifies delivery docs readiness, selects a workflow profile, generates spec/domain/framing/specialty-design/technical-design/architecture-design/test/test-data/plan artifacts, runs the intake/design Harness checkpoints, inspects workflow status, and reports the next safe action. It does not edit business code, create Git branches, commit, deploy, or release.
 
+When requirement questions block the run, answer them one by one in a terminal, then rerun `auto` with the same output directory:
+
+```bash
+python3 scripts/codex_eng.py clarify --artifact-dir /tmp/codex-auto-demo
+```
+
+Each answer is saved immediately. Non-interactive execution fails closed rather than waiting for stdin, and the next auto run feeds the confirmed answers back into Spec through `requirement.clarified.txt`.
+
 Check the next safe action later:
 
 ```bash

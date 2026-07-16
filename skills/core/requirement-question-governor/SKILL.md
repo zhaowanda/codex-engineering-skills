@@ -31,6 +31,14 @@ python3 scripts/question_governor.py \
   --spec artifacts/REQ-001/spec.json
 ```
 
+Answer open questions interactively, one at a time:
+
+```bash
+python3 scripts/codex_eng.py clarify --artifact-dir artifacts/REQ-001
+```
+
+The command asks required open questions in artifact order and persists both `open_questions.json` and `clarification_answers.md` after every answer. Use `--include-optional` to include optional open questions. It fails closed outside an interactive TTY so CI cannot hang waiting for input. Re-run `auto` with the same artifact directory after answering; the runner creates `requirement.clarified.txt` and regenerates Spec from the original normalized requirement plus confirmed answers.
+
 ## Rules
 
 - Block design/implementation while required questions are open.
@@ -44,6 +52,8 @@ python3 scripts/question_governor.py \
 - Ask decision-level questions for missing business closure, state machine, retry/idempotency/timeout/compensation, dependency chain, and repository/service ownership.
 - Generate expert clarification questions from impact surface and implicit constraints, including permission, data/export, API, performance, security, and configuration questions.
 - Treat required questions as closed only when they include an answer.
+- Reject blank answers for required questions and preserve completed answers on EOF or interruption.
+- Record `source=interactive_cli`, actor, and answer timestamp as provenance for every terminal response.
 - Bind every generated artifact to the canonical current spec through `spec_digest` and `spec_schema`; validation with `--spec` blocks stale question sets.
 - Derive stable question IDs from the question source, category, and text so regeneration can carry answers forward without relying on list position.
 - Regenerate and merge instead of skipping an existing artifact. Preserve prior answers and append `answer_provenance` when the same stable question remains applicable.

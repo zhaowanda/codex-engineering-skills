@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-
+from typing import Any, Callable
 
 SCHEMA = "codex-open-questions-v1"
 
@@ -413,8 +414,174 @@ def validate_questions(data: dict[str, Any], spec: dict[str, Any] | None = None)
     return {"schema": "codex-open-questions-validation-v1", "decision": "block" if blockers else "pass", "blockers": blockers}
 
 
+def refresh_decision(data: dict[str, Any]) -> str:
+    blocked = any(
+        isinstance(question, dict)
+        and question.get("required")
+        and (
+            question.get("status") != "closed"
+            or not str(question.get("answer") or "").strip()
+        )
+        for question in as_list(data.get("questions"))
+    )
+    data["decision"] = "block" if blocked else "pass"
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return str(data["decision"])
+
+
+def clarification_label(question: dict[str, Any]) -> str:
+    category = str(question.get("category") or "").lower()
+    source = str(question.get("source") or "").lower()
+    if category in {"business_goal", "success_metric"} or "intent" in source:
+        return "Goal"
+    if category in {"business_flow", "ambiguous_flow", "business_closure"} or "flow" in source:
+        return "Flow"
+    if category == "actor_entrypoint" or "entrypoint" in source:
+        return "Entrypoint"
+    if category == "acceptance" or "acceptance" in source:
+        return "AC"
+    if category in {"state_transition", "ambiguous_state", "state_machine"}:
+        return "State transition"
+    if category in {"ambiguous_scope", "scope_boundary", "repo_impact"}:
+        return "Scope"
+    return "Requirement clarification"
+
+
+def render_clarification_answers(data: dict[str, Any]) -> str:
+    lines = [
+        "# Requirement Clarification Answers",
+        "",
+        f"- Doc ID: {data.get('doc_id') or ''}",
+        f"- Question schema: {data.get('schema') or ''}",
+        f"- Spec digest: {data.get('spec_digest') or ''}",
+        "",
+    ]
+    for question in as_list(data.get("questions")):
+        if not isinstance(question, dict) or question.get("status") != "closed":
+            continue
+        answer = str(question.get("answer") or "").strip()
+        if not answer:
+            continue
+        lines.extend([
+            f"## {question.get('id') or 'Question'}",
+            "",
+            f"- Category: {question.get('category') or 'general'}",
+            f"- Owner: {question.get('owner') or ''}",
+            f"- Answered question: {question.get('question') or ''}",
+            "",
+            f"{clarification_label(question)}: {answer}",
+            "",
+        ])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def answer_interactively(
+    data: dict[str, Any],
+    spec: dict[str, Any],
+    persist_fn: Callable[[dict[str, Any]], None],
+    *,
+    actor: str,
+    include_optional: bool = False,
+    input_fn: Callable[[str], str] = input,
+    output_fn: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    preflight_blockers: list[dict[str, Any]] = []
+    if data.get("schema") != SCHEMA:
+        preflight_blockers.append({"source": "schema", "message": f"schema must be {SCHEMA}"})
+    if data.get("spec_digest") != canonical_spec_digest(spec):
+        preflight_blockers.append({"source": "spec_digest", "message": "open questions were not generated from the current spec"})
+    if preflight_blockers:
+        return {"decision": "block", "blockers": preflight_blockers, "answered": 0, "remaining": 0}
+
+    pending = [
+        question
+        for question in as_list(data.get("questions"))
+        if isinstance(question, dict)
+        and question.get("status") == "open"
+        and (question.get("required") or include_optional)
+    ]
+    answered = 0
+    interrupted = False
+    output_fn(f"Requirement clarification: {len(pending)} question(s) to answer.")
+    for index, question in enumerate(pending, start=1):
+        output_fn("")
+        output_fn(f"[{index}/{len(pending)}] {question.get('id')} | {question.get('category', 'general')} | owner: {question.get('owner', '')}")
+        output_fn(str(question.get("question") or ""))
+        output_fn(f"Risk if unanswered: {question.get('risk_if_unanswered') or ''}")
+        while True:
+            try:
+                answer = input_fn("Answer: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                interrupted = True
+                output_fn("\nClarification interrupted; completed answers were preserved.")
+                break
+            if answer or not question.get("required"):
+                break
+            output_fn("A required question needs a non-empty answer. Please answer before continuing.")
+        if interrupted:
+            break
+        if not answer:
+            continue
+        answered_at = datetime.now(timezone.utc).isoformat()
+        question["answer"] = answer
+        question["status"] = "closed"
+        question["answered_at"] = answered_at
+        question["answered_by"] = actor
+        provenance = [item for item in as_list(question.get("answer_provenance")) if isinstance(item, dict)]
+        provenance.append({"source": "interactive_cli", "actor": actor, "answered_at": answered_at})
+        question["answer_provenance"] = provenance
+        answered += 1
+        refresh_decision(data)
+        persist_fn(data)
+        output_fn("Answer saved.")
+
+    refresh_decision(data)
+    persist_fn(data)
+    remaining = sum(
+        1
+        for question in as_list(data.get("questions"))
+        if isinstance(question, dict) and question.get("required") and question.get("status") != "closed"
+    )
+    return {
+        "decision": "block" if interrupted or remaining else "pass",
+        "blockers": ([{"source": "interactive_input", "message": "clarification was interrupted"}] if interrupted else []),
+        "answered": answered,
+        "remaining": remaining,
+        "interrupted": interrupted,
+    }
+
+
+def answer_file_interactively(
+    questions_path: Path,
+    spec_path: Path,
+    out_path: Path,
+    *,
+    actor: str,
+    include_optional: bool = False,
+    input_fn: Callable[[str], str] = input,
+    output_fn: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    data = load_json(questions_path)
+    spec = load_json(spec_path)
+
+    def persist(current: dict[str, Any]) -> None:
+        write_json(questions_path, current)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(render_clarification_answers(current), encoding="utf-8")
+
+    return answer_interactively(
+        data,
+        spec,
+        persist,
+        actor=actor,
+        include_optional=include_optional,
+        input_fn=input_fn,
+        output_fn=output_fn,
+    )
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate or validate open requirement questions")
+    parser = argparse.ArgumentParser(description="Generate, answer, or validate open requirement questions")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_gen = sub.add_parser("generate")
     p_gen.add_argument("--spec", required=True)
@@ -423,6 +590,12 @@ def main() -> int:
     p_val.add_argument("--file", required=True)
     p_val.add_argument("--spec")
     p_val.add_argument("--out")
+    p_answer = sub.add_parser("answer")
+    p_answer.add_argument("--file", required=True)
+    p_answer.add_argument("--spec", required=True)
+    p_answer.add_argument("--out")
+    p_answer.add_argument("--actor", default="")
+    p_answer.add_argument("--include-optional", action="store_true")
     args = parser.parse_args()
     if args.cmd == "generate":
         out_path = Path(args.out)
@@ -433,6 +606,21 @@ def main() -> int:
         # Generation records unresolved questions as an artifact; validation and workflow gates
         # decide whether they block approval or implementation.
         return 0
+    if args.cmd == "answer":
+        if not sys.stdin.isatty():
+            print("Interactive clarification requires a TTY; run this command in a terminal.", file=sys.stderr)
+            return 2
+        questions_path = Path(args.file)
+        out_path = Path(args.out) if args.out else questions_path.with_name("clarification_answers.md")
+        result = answer_file_interactively(
+            questions_path,
+            Path(args.spec),
+            out_path,
+            actor=args.actor.strip() or getpass.getuser() or "interactive_user",
+            include_optional=args.include_optional,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["decision"] == "pass" else 2
     result = validate_questions(load_json(Path(args.file)), load_json(Path(args.spec)) if args.spec else None)
     if args.out:
         write_json(Path(args.out), result)

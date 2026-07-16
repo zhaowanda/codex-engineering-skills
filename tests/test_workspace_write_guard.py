@@ -82,6 +82,40 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             self.assertIn("CODEX_EDIT_PERMIT", pre_commit.read_text(encoding="utf-8"))
             self.assertIn("CODEX_ARTIFACT_DIR", pre_push.read_text(encoding="utf-8"))
             self.assertIn("--checkpoint pre_push", pre_push.read_text(encoding="utf-8"))
+            self.assertIn("Agent Runtime script not found", pre_push.read_text(encoding="utf-8"))
+            self.assertTrue(all(Path(path).is_file() for path in [install_write_guard_hooks.HARNESS, install_write_guard_hooks.AGENT_RUNTIME]))
+
+    def test_hook_installer_repairs_legacy_missing_pre_push_path_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = init_repo(Path(tmp))
+            hooks = repo / ".git/hooks"
+            pre_push = hooks / "pre-push"
+            pre_push.write_text(
+                '#!/usr/bin/env bash\nexec "/missing/company/post-change-skill-sync/scripts/pre-push"\n',
+                encoding="utf-8",
+            )
+
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"})
+
+            self.assertEqual(result["status"], "repaired")
+            self.assertEqual(result["repaired"], [str(pre_push.resolve())])
+            self.assertEqual(len(result["backups"]), 1)
+            self.assertTrue(Path(result["backups"][0]).exists())
+            self.assertFalse((hooks / "pre-commit").exists())
+            content = pre_push.read_text(encoding="utf-8")
+            self.assertNotIn("post-change-skill-sync/scripts/pre-push", content)
+            self.assertIn(str(install_write_guard_hooks.HARNESS), content)
+
+    def test_hook_installer_preserves_existing_non_codex_hook_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = init_repo(Path(tmp))
+            pre_push = repo / ".git/hooks/pre-push"
+            pre_push.write_text("#!/bin/sh\necho custom\n", encoding="utf-8")
+
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"})
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(pre_push.read_text(encoding="utf-8"), "#!/bin/sh\necho custom\n")
 
     def test_allowed_change_passes_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
