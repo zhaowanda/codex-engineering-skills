@@ -30,6 +30,44 @@ def digest_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def overlay_reference_evidence(skill_dir: Path | None, requirement: str, max_files: int = 8, max_hits: int = 24) -> dict[str, Any]:
+    if not skill_dir or not skill_dir.is_dir():
+        return {"skill_dir": "", "references": [], "reference_digests": {}, "consumed_rules": [], "stale_references": []}
+    references_dir = skill_dir / "references"
+    terms = [term for term in query_terms(requirement) if term not in GENERIC_TERMS and len(term) >= 3]
+    rows: list[dict[str, Any]] = []
+    digests: dict[str, str] = {}
+    consumed: list[dict[str, Any]] = []
+    candidates = [skill_dir / "SKILL.md", *sorted(references_dir.glob("*"))] if references_dir.is_dir() else [skill_dir / "SKILL.md"]
+    for path in candidates:
+        if not path.is_file() or path.suffix.lower() not in {".md", ".json", ".yaml", ".yml"}:
+            continue
+        raw = path.read_bytes()
+        text = raw.decode("utf-8", errors="ignore")
+        hits: list[dict[str, Any]] = []
+        for number, line in enumerate(text.splitlines(), start=1):
+            matched = [term for term in terms if term in line.lower()]
+            if matched:
+                hits.append({"line": number, "terms": matched[:5], "excerpt": line.strip()[:300]})
+            if len(hits) >= 6:
+                break
+        if not hits:
+            continue
+        relative = path.relative_to(skill_dir).as_posix()
+        digests[relative] = digest_bytes(raw)
+        rows.append({"file": relative, "hits": hits, "digest": digests[relative]})
+        consumed.extend({"file": relative, **hit} for hit in hits)
+        if len(rows) >= max_files or len(consumed) >= max_hits:
+            break
+    return {
+        "skill_dir": str(skill_dir),
+        "references": rows,
+        "reference_digests": digests,
+        "consumed_rules": consumed[:max_hits],
+        "stale_references": [],
+    }
+
+
 def requirement_text(path: Path) -> str:
     if path.suffix.lower() == ".json":
         return json.dumps(load_json(path), ensure_ascii=False)
@@ -189,7 +227,7 @@ def build(repo: Path, index_path: Path, requirement_path: Path, limit: int = 30)
     }
 
 
-def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12, max_rejected: int = 12) -> dict[str, Any]:
+def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12, max_rejected: int = 12, overlay: dict[str, Any] | None = None) -> dict[str, Any]:
     anchors = [item for item in source_location.get("confirmed_anchors", []) if isinstance(item, dict)][:max_anchors]
     normalized: list[dict[str, Any]] = []
     for item in anchors:
@@ -211,6 +249,7 @@ def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12
         if isinstance(item, dict) and item.get("path")
     ][:max_rejected]
     modify = [item for item in normalized if item["role"] == "confirmed_modify"]
+    overlay = overlay or {}
     return {
         "schema": BUNDLE_SCHEMA,
         "project": source_location.get("project", ""),
@@ -223,6 +262,11 @@ def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12
         "anchors": normalized,
         "contracts": source_location.get("confirmed_contracts", [])[:12],
         "rejected_candidates": rejected,
+        "overlay_references": overlay.get("references", []),
+        "reference_digests": overlay.get("reference_digests", {}),
+        "consumed_rules": overlay.get("consumed_rules", []),
+        "stale_references": overlay.get("stale_references", []),
+        "provenance": {"project_skill_dir": overlay.get("skill_dir", "")},
         "budgets": {"max_anchors": max_anchors, "max_rejected": max_rejected},
         "blockers": [] if modify else [{"source": "evidence_bundle", "message": "no confirmed modify anchor"}],
     }
@@ -235,16 +279,20 @@ def main() -> int:
     parser.add_argument("--requirement", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--bundle-out")
+    parser.add_argument("--project-skill-dir")
     parser.add_argument("--limit", type=int, default=30)
     args = parser.parse_args()
     result = build(Path(args.repo), Path(args.index), Path(args.requirement), args.limit)
+    requirement = requirement_text(Path(args.requirement))
+    skill_dir = Path(args.project_skill_dir).expanduser() if args.project_skill_dir else None
+    overlay = overlay_reference_evidence(skill_dir, requirement)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.bundle_out:
         bundle_out = Path(args.bundle_out)
         bundle_out.parent.mkdir(parents=True, exist_ok=True)
-        bundle_out.write_text(json.dumps(build_evidence_bundle(result), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        bundle_out.write_text(json.dumps(build_evidence_bundle(result, overlay=overlay), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["decision"] == "pass" else 1
 

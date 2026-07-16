@@ -16,11 +16,65 @@ SECTION_KINDS = {
     "纠偏说明": "correction", "更正说明": "correction",
     "原始需求": "requirements", "需求": "requirements", "需要解决的问题": "requirements",
     "本次目标": "requirements", "目标": "requirements", "可执行需求": "requirements",
+    "goal": "requirements", "objective": "requirements",
     "验收标准": "acceptance", "验收": "acceptance", "acceptance criteria": "acceptance",
     "约束": "constraints", "限制": "constraints",
     "非目标": "out_of_scope", "不在范围": "out_of_scope",
     "只读链路验证范围": "reference", "参考资料": "reference", "参考": "reference",
+    "reference scope": "reference", "read-only scope": "reference",
 }
+
+PATH_TOKEN = re.compile(r"`([^`]+)`")
+
+
+def section_text(section: dict[str, Any]) -> list[str]:
+    values = [str(item.get("text") or "") for item in section.get("paragraphs", []) if isinstance(item, dict)]
+    for item in section.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        values.append(str(item.get("text") or ""))
+        values.extend(str(child.get("text") or "") for child in item.get("children", []) if isinstance(child, dict))
+    return [value for value in values if value]
+
+
+def declared_scope(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    roles: dict[str, str] = {}
+    evidence: dict[str, str] = {}
+    priority = {"unresolved": 0, "modify": 1, "reference_only": 2, "contract_confirm_only": 3, "forbidden": 4}
+    for section in sections:
+        kind = str(section.get("kind") or "")
+        title = str(section.get("title") or "")
+        records: list[tuple[int, str]] = []
+        records.extend((int(item.get("line") or 0), str(item.get("text") or "")) for item in section.get("paragraphs", []) if isinstance(item, dict))
+        for item in section.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            records.append((int(item.get("line") or 0), str(item.get("text") or "")))
+            records.extend((int(child.get("line") or 0), str(child.get("text") or "")) for child in item.get("children", []) if isinstance(child, dict))
+        forbidden_context = False
+        for _, value in sorted(records):
+            lower = value.lower()
+            role = "reference_only" if kind == "reference" else "modify"
+            if any(term in lower or term in value for term in ["禁止把以下", "以下页面作为", "forbidden entries", "following files are forbidden", "forbidden implementation targets"]):
+                forbidden_context = True
+            if forbidden_context or any(term in lower or term in value for term in ["不得", "不应修改", "forbidden", "must not"]):
+                role = "forbidden"
+            elif any(term in lower or term in value for term in ["前端主入口", "主业务入口", "共享播放器", "允许修改"]):
+                role = "modify"
+            elif any(term in lower or term in value for term in ["后端契约参考", "协议链路参考", "不改变", "contract reference", "confirm-only"]):
+                role = "contract_confirm_only"
+            elif any(term in lower or term in value for term in ["只读", "参考", "不作为", "read-only", "reference only", "诊断"]):
+                role = "reference_only"
+            for token in PATH_TOKEN.findall(value):
+                path = token.strip()
+                if path.startswith("<") or " " in path or not path.endswith((".vue", ".js", ".ts", ".py", ".java")) and not path.startswith(("src/", "public/")):
+                    continue
+                previous = roles.get(path)
+                if previous and priority[previous] > priority[role]:
+                    continue
+                roles[path] = role
+                evidence[path] = f"section:{title}"
+    return [{"path": path, "role": role, "source_evidence": evidence[path]} for path, role in sorted(roles.items())]
 
 
 def heading_kind(title: str) -> str:
@@ -92,6 +146,7 @@ def parse_markdown_ir(text: str, doc_id: str, source_file: Path) -> dict[str, An
         "source_file": str(source_file),
         "sections": sections,
         "executable_text": "\n".join(executable_lines),
+        "declared_scope": declared_scope(sections),
         "excluded_section_kinds": ["context", "correction", "reference", "out_of_scope"],
     }
 

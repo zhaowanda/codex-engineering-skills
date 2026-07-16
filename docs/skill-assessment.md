@@ -8,7 +8,7 @@ Current level: **advanced fail-closed framework with runtime-validated orchestra
 
 The health report separates skill contract quality, DAG integrity, gate semantics, synthetic path reality, and real-project calibration. Static skill quality no longer makes the whole framework `expert`; at least three privacy-reviewed anonymized real-project replays across three scenario families are required for that level.
 
-The repository has a coherent delivery framework rather than a loose prompt collection. Skills are grouped by lifecycle stage, most commands produce machine-readable artifacts, and the main gates expose `decision`, `blockers`, and readiness fields. The unified CLI, workflow profiles, scenario catalog, forward tests, privacy scan, and health checks make the system operable as a repeatable workflow.
+The repository has a coherent delivery framework rather than a loose prompt collection. Skills are grouped by lifecycle stage, most commands produce machine-readable artifacts, and the main gates expose `decision`, `blockers`, and readiness fields. The embedded Harness validates artifact semantics, while the Agent Runtime adds redacted append-only execution events, action authorization, lifecycle checkpoints, and external-provider attestations without adding another visible skill. The unified CLI, workflow profiles, scenario catalog, forward tests, privacy scan, and health checks make the system operable as a repeatable workflow.
 
 The main remaining risk is real-project calibration. The lifecycle now has a phase-ordered DAG, explicit dependencies, conditional specialty stages, stale-input detection, and executable implementation/release happy paths. Private overlays, project-specific skills, code indexes, baseline docs, and team release policies remain necessary before complex production changes.
 
@@ -26,12 +26,14 @@ The whole framework is `expert` only when its weighted score is at least 90 and 
 
 ## Verified Baseline
 
-- `skill_health`: pass, 84 skills, 22 `expert_contract`, 0 `expert_proven`, and 84 advanced-or-better contracts; framework score 80 (`advanced`).
+- `skill_health`: pass, 84 skills, 43 scored 100 and 41 scored 85, with no skill below advanced contract level; framework score 80 (`advanced`). The 85-point contracts lack approved real-project calibration, not positive/negative behavior tests.
 - Framework dimensions: skill contract quality 100, DAG integrity 100, gate semantics 100, happy/blocked path reality 100, real-project calibration 0.
-- Runtime assessment: all 45 workflow stages reject correct-schema artifacts whose required evidence is semantically vacuous, and all 7 synthetic blocked/happy paths pass.
-- `benchmark`: pass, 84 skills, 89 scripts, 134 schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated synthetic replay cases.
-- `pytest`: pass, 394 tests; measured branch-aware repository coverage is 73% with a 70% enforced baseline.
+- Runtime assessment: all 57 workflow stages reject correct-schema artifacts whose required evidence is semantically vacuous, and all 7 synthetic blocked/happy paths pass.
+- Agent Runtime assessment: session/event hash-chain verification, redaction, destructive-command blocking, historical checkpoint lineage, post-implementation/pre-push advancement, provider subject/type/time/digest verification, structured waiver validation, post-release evidence, and closed-session behavior are covered by executable tests.
+- `benchmark`: pass, 84 skills, 92 scripts, 150 current or compatibility-retained schemas, 6 prompts, 8 documented and forward-tested scenarios, and 7 validated synthetic replay cases.
+- `pytest`: pass, 462 tests; measured branch-aware repository coverage is 73.83% against a 70% enforced baseline.
 - `compileall`: pass for `scripts`, `skills`, and `tests`.
+- `ruff`, `mypy`, and `bandit`: pass for the hardened workflow, replay, Runtime, and governance-contract modules included in CI.
 - `privacy_scan`: pass, no hits.
 - `forward_test`: pass for all 8 scenarios and all 7 synthetic blocked/happy-path cases, including genuine implementation and release readiness.
 - Real-project replay count: 0; framework-level expert status remains intentionally unavailable.
@@ -45,6 +47,7 @@ The default orchestration is reasonable:
 - Auto summaries expose `workflow_strictness`, effective controls, light-tier gate overrides, strictness gate gaps, and elevation impacts; scenario docs now distinguish light bugfix effective gates from standard pre-edit gates.
 - Profile composition is useful for mixed-impact work, such as bugfix plus UI/API/data impact.
 - `delivery-runner` and `implement_dry_run.py` provide a practical stop point before edits.
+- Harness and Agent Runtime have distinct responsibilities: Harness checks delivery-artifact quality and cross-artifact consistency; Runtime records authorized execution and binds accepted evidence to lifecycle transitions.
 
 The orchestration can become heavy for very small fixes. That is acceptable for high-control environments, but teams should use the smallest matching profile and avoid forcing every skill into every task.
 
@@ -56,10 +59,10 @@ The orchestration can become heavy for very small fixes. That is acceptable for 
 | Project understanding | A | Generic analyzers now share `decision`, `blockers`, `warnings`, `confidence`, and `confidence_details`; real value still depends on private overlay quality. |
 | Design | A | Strong technical/architecture design and design review gates. |
 | Delivery planning | A | Good plan rendering, review, state, and next-action inspection. |
-| Git/edit readiness | A | Strong controls for branch readiness, edit permits, and write audits. |
-| Post-implementation review | A- | Good diff impact, design quality, risk, evidence, and review aggregation. |
+| Git/edit readiness | A | Strong controls for branch readiness, edit permits, Runtime edit authorization, write audits, and pre-push enforcement. |
+| Post-implementation review | A | Good diff impact, design quality, risk, evidence, review aggregation, plan-to-diff Harness validation, and Runtime checkpoint binding. |
 | Testing/frontend acceptance | A | Test design, test data planning, execution evidence, browser evidence, screenshot proof, console errors, network failures, route, and viewport/device evidence are linked; real project runs still need actual browser artifacts. |
-| Release | A | Broad release evidence coverage with environment policy, release window, approver, rollback owner, and post-release checks enforced by release evidence binding. |
+| Release | A | Broad release evidence coverage with environment policy, release window, structured waiver governance, separation of duties, rollback owner, post-release close, and verified CI/change/deployment/observability attestations enforced by release evidence binding. |
 | Documentation | A- | Good docs separation and quality checks; needs discipline in delivery docs repos. |
 | Meta/open-source governance | A | Strong health, privacy, replay validation, schema, compatibility, release, prompt, and roadmap checks. |
 
@@ -97,6 +100,8 @@ Recommended actions:
 6. Expand frontend acceptance examples with captured browser artifacts from real applications.
 7. Add team-specific release-policy overlays derived from `release-policy.regulated.example.yaml`.
 8. Calibrate requirement conflict and implicit-constraint rules with real PRDs from each business domain.
+9. Implement real private-overlay provider adapters and signature verification for CI, change management, deployment, and observability attestations; open core currently validates the generic attestation contract only.
+10. Capture runtime cost, event volume, checkpoint latency, and false-block rates from anonymized real-project replays before tuning policy budgets.
 
 ## Operating Guidance
 

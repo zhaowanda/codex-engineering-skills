@@ -1,6 +1,6 @@
 ---
 name: delivery-state-governor
-description: Maintain a compatibility navigation snapshot in delivery_state.json. Use to initialize, inspect, advance, block, unblock, and validate legacy delivery state while workflow-stages-v3 and delivery-runner remain the canonical readiness authority.
+description: Maintain a compatibility navigation snapshot in delivery_state.json. Use to initialize, inspect, advance, block, unblock, and validate legacy delivery state while workflow-stages-v4 and delivery-runner remain the canonical readiness authority.
 category: artifact-generator
 maturity: deterministic-helper
 stage: delivery-planning

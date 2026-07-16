@@ -7,7 +7,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "skills/core/auto-runner/scripts/auto_runner.py"
 spec = importlib.util.spec_from_file_location("auto_runner", SCRIPT)
@@ -20,6 +19,20 @@ harness_spec = importlib.util.spec_from_file_location("harness_validation", HARN
 harness_validation = importlib.util.module_from_spec(harness_spec)
 assert harness_spec.loader
 harness_spec.loader.exec_module(harness_validation)
+
+
+def prepare_runtime_checkpoint(root: Path, checkpoint: str) -> None:
+    runtime = harness_validation.AGENT_RUNTIME
+    runtime.start(root, "REQ-HARNESS")
+    actions = {
+        "source_location": ["requirement_ingested"],
+        "design": ["design_completed"],
+        "post_implementation": ["write_completed", "implementation_validated"],
+        "pre_push": ["test_completed", "review_completed", "push_authorized"],
+    }[checkpoint]
+    for action in actions:
+        runtime.append_event(root, action, "test")
+    runtime.checkpoint(root, harness_validation.RUNTIME_CHECKPOINTS[checkpoint], ["test-evidence"])
 
 
 def write_workspace_docs_config(docs_root: Path) -> str | None:
@@ -76,6 +89,8 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert result["workflow_metrics"]["governance_level"] in {"light", "standard", "heavy", "critical"}
         assert result["workflow_metrics"]["executed_step_count"] > 0
         assert result["workflow_metrics"]["total_command_duration_ms"] >= 0
+        assert result["workflow_metrics"]["cost_budget_decision"] in {"pass", "warn"}
+        assert "invalidated_artifact_count" in result["workflow_metrics"]
         assert "strictness_gate_gaps" in result
         assert result["docs_readiness"]["decision"] == "block"
         assert result["next_stage"]
@@ -107,6 +122,200 @@ def test_harness_validation_blocks_oversized_artifact() -> None:
         result = harness_validation.validate(root, {"spec.json": 100})
         assert result["decision"] == "block"
         assert result["artifact_sizes"][0]["within_budget"] is False
+
+
+def test_harness_source_location_blocks_stale_source_digest() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        source = repo / "src/main.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("def current(): pass\n", encoding="utf-8")
+        project = root / "project_understanding"
+        project.mkdir()
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "repo_root": str(repo),
+            "anchors": [{
+                "path": "src/main.py",
+                "role": "confirmed_modify",
+                "confidence": "high",
+                "source_digest": "stale",
+            }],
+        }), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="source_location", repo=repo)
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "source digest is missing or stale" for item in result["blockers"])
+
+
+def test_harness_source_location_rejects_parent_traversal() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project = root / "project_understanding"
+        project.mkdir()
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "anchors": [{
+                "path": "../outside.py",
+                "role": "confirmed_modify",
+                "confidence": "high",
+                "source_digest": "digest",
+            }],
+        }), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="source_location", repo=root)
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "confirmed modify anchor is not a safe relative path" for item in result["blockers"])
+
+
+def test_harness_design_requires_sequence_for_api_change() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "spec.json").write_text(json.dumps({
+            "impact_applicability": [{"area": "api", "status": "required"}],
+        }), encoding="utf-8")
+        (root / "technical_design.json").write_text(json.dumps({"process_flow": [{"steps": ["call API"]}]}), encoding="utf-8")
+        (root / "architecture_design.json").write_text(json.dumps({}), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="design")
+
+        assert result["decision"] == "block"
+        messages = {item["message"] for item in result["blockers"]}
+        assert "applicable cross-component change requires a populated system interaction sequence" in messages
+        assert "architecture design is missing integration_sequence" in messages
+
+
+def test_harness_blocks_single_repo_multi_repo_claim() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "spec.json").write_text(json.dumps({"repo_impact_map": {"repos": [{"name": "web"}], "multi_repo_required": True}}), encoding="utf-8")
+        (root / "technical_design.json").write_text(json.dumps({"process_flow": [{"steps": ["change"]}]}), encoding="utf-8")
+        (root / "architecture_design.json").write_text("{}", encoding="utf-8")
+        (root / "delivery_plan.json").write_text("{}", encoding="utf-8")
+        result = harness_validation.validate(root, checkpoint="design")
+        assert any(item["source"] == "repository_scope" for item in result["blockers"])
+
+
+def test_harness_blocks_protected_scope_change_without_design_change() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "spec.json").write_text(json.dumps({"scope_model": {"reference_only": ["src/reference.vue"]}}), encoding="utf-8")
+        (root / "implementation_completion_gate.json").write_text(json.dumps({"decision": "pass", "changed_files": ["src/reference.vue"]}), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({"repo_tasks": [{"role": "modify", "allowed_files": ["src/reference.vue"]}]}), encoding="utf-8")
+        result = harness_validation.validate(root, checkpoint="post_implementation")
+        assert any(item["source"] == "post_change_drift" for item in result["blockers"])
+
+
+def test_harness_design_allows_explicit_planned_new_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project = root / "project_understanding"
+        project.mkdir()
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "anchors": [{"path": "src/existing.py", "role": "confirmed_modify"}],
+        }), encoding="utf-8")
+        (root / "spec.json").write_text(json.dumps({}), encoding="utf-8")
+        (root / "technical_design.json").write_text(json.dumps({
+            "process_flow": [{"steps": ["create module"]}],
+            "implementation_files": [{"path": "src/new_module.py", "status": "planned_new"}],
+        }), encoding="utf-8")
+        (root / "architecture_design.json").write_text(json.dumps({}), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({}), encoding="utf-8")
+        prepare_runtime_checkpoint(root, "design")
+
+        result = harness_validation.validate(root, checkpoint="design")
+
+        assert result["decision"] == "pass"
+        assert result["evidence_summary"]["planned_new"] == ["src/new_module.py"]
+
+
+def test_harness_post_implementation_blocks_plan_to_diff_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "implementation_completion_gate.json").write_text(json.dumps({
+            "decision": "pass",
+            "changed_files": ["src/unplanned.py"],
+        }), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({
+            "repo_tasks": [{"role": "modify", "allowed_files": ["src/planned.py"]}],
+        }), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="post_implementation")
+
+        assert result["decision"] == "block"
+        assert any(item.get("files") == ["src/unplanned.py"] for item in result["blockers"])
+
+
+def test_harness_pre_push_blocks_missing_project_skill_index_sync() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "post_change_implementation_report.json").write_text(json.dumps({
+            "decision": "pass",
+            "project_skill_index_requirements": {"required": True, "status": "missing_evidence"},
+        }), encoding="utf-8")
+        (root / "post_implementation_traceability_matrix.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "test_evidence_gate.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "code_review_gate.json").write_text(json.dumps({"decision": "approve"}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="pre_push")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "project_skill_index_sync" for item in result["blockers"])
+
+
+def test_harness_pre_push_blocks_test_evidence_without_commit_binding() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "harness@example.com"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Harness Test"], cwd=repo, check=True)
+        (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, text=True, capture_output=True, check=True)
+        (root / "post_change_implementation_report.json").write_text(json.dumps({
+            "decision": "pass",
+            "project_skill_index_requirements": {"required": False, "status": "not_required"},
+        }), encoding="utf-8")
+        (root / "post_implementation_traceability_matrix.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "test_evidence_gate.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "code_review_gate.json").write_text(json.dumps({"decision": "approve"}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="pre_push", repo=repo)
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "test evidence does not declare git_head or git_sha" for item in result["blockers"])
+
+
+def test_harness_pre_push_blocks_uncommitted_delivery_docs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        subprocess.run(["git", "init", str(docs_root)], text=True, capture_output=True, check=True)
+        doc_id = "REQ-DOCS-PRE-PUSH"
+        docs_artifacts = root / "docs-artifacts"
+        (docs_artifacts / "spec.json").parent.mkdir(parents=True)
+        (docs_artifacts / "spec.json").write_text(json.dumps({"schema": "codex-spec-v1", "doc_id": doc_id}), encoding="utf-8")
+        harness_validation.DOCS_GOVERNOR.sync(docs_root, doc_id, docs_artifacts, "Docs pre-push")
+        prepare_runtime_checkpoint(root, "pre_push")
+        (root / "post_change_implementation_report.json").write_text(json.dumps({
+            "decision": "pass",
+            "project_skill_index_requirements": {"required": False, "status": "not_required"},
+            "docs_binding": {"docs_root": str(docs_root), "doc_id": doc_id, "status": "bound"},
+        }), encoding="utf-8")
+        (root / "post_implementation_traceability_matrix.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "test_evidence_gate.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+        (root / "code_review_gate.json").write_text(json.dumps({"decision": "approve"}), encoding="utf-8")
+        (root / "harness/post_implementation.json").parent.mkdir(parents=True)
+        (root / "harness/post_implementation.json").write_text(json.dumps({"decision": "pass"}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="pre_push")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "docs_sync" and "uncommitted" in item["message"] for item in result["blockers"])
 
 
 def test_auto_runner_accepts_ready_docs_repo() -> None:
@@ -369,6 +578,8 @@ def test_auto_runner_is_idempotent_without_force() -> None:
         second = auto_runner.run(ROOT / "examples/synthetic-e2e-case/requirement.md", doc_id="REQ-AUTO-2", out=out)
         assert "requirement_ingestion.json" in second["skipped_artifacts"]
         assert "spec.json" in second["skipped_artifacts"]
+        assert second["workflow_metrics"]["reused_artifact_count"] > 0
+        assert second["workflow_metrics"]["reused_artifact_count"] < second["workflow_metrics"]["skipped_step_count"]
 
 
 def test_auto_runner_regenerates_transitive_artifacts_when_requirement_changes() -> None:
@@ -385,6 +596,7 @@ def test_auto_runner_regenerates_transitive_artifacts_when_requirement_changes()
         after = json.loads((out / "technical_design.json").read_text(encoding="utf-8"))["input_digests"]["spec.json"]
         assert before != after
         assert {"requirement_ingestion.json", "spec.json", "technical_design.json", "architecture_design.json"}.issubset(set(second["generated_artifacts"]))
+        assert second["workflow_metrics"]["invalidated_artifact_count"] > 0
 
 
 def test_auto_runner_force_regenerates_existing_artifacts() -> None:

@@ -23,9 +23,12 @@ implementation changes
 ## Rules
 
 - Generate `post_change_implementation_report.json` and a human-readable `.md` report in the artifact directory.
-- Capture Git branch, HEAD, changed files, diff stat, file buckets, validation needs, baseline update candidates, and project-skill sync candidates.
+- Capture Git branch, HEAD, changed files, diff stat, file buckets, validation needs, baseline update candidates, project-skill sync candidates, and project skill index sync requirements.
 - Stay open-core: do not depend on private `company/projects.yaml`, private docs governors, or backup code.
 - Treat project-skill and baseline updates as owner-review candidates only; do not mutate project skills or baselines automatically.
+- When project-skill candidates exist, require `project_skill_index_sync.json` with either `decision=pass` and `updated_index_paths`, or `decision=waived` and an approved `codex-governance-waiver-v1` bound to the doc id and `project_skill_index_sync` gate.
+- Reject waiver reasons without structured owner, independent approver, risk, expiry, compensating controls, and immutable audit retention evidence.
+- When implementation changes an approved solution, acceptance criterion, repository role, or file scope, create and approve `design_change.json` with `scripts/design_change.py`. Re-run traceability and affected tests after approval.
 - If `--require-docs` is set, block when the docs repository, manifest, or doc id is missing.
 - This report is not a substitute for test evidence, code review, UAT, CI, or release approval.
 
@@ -42,4 +45,4 @@ python3 scripts/sync_after_change.py \
 
 The output uses schema `codex-post-change-implementation-report-v1`.
 
-The artifact reports decision, changed files, file summary, validation needs, baseline update candidates, project skill sync candidates, docs binding status, blockers, and warnings.
+The artifact reports decision, changed files, file summary, validation needs, baseline update candidates, project skill sync candidates, project skill index requirements, docs binding status, blockers, and warnings.

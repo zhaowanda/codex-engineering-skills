@@ -132,6 +132,54 @@ def test_question_governor_generates_expert_questions_from_impacts() -> None:
     assert any("sensitive fields" in item.lower() for item in questions)
 
 
+def test_question_governor_respects_excluded_applicability() -> None:
+    spec = {
+        "doc_id": "REQ-FRONTEND",
+        "acceptance_criteria": [{"id": "AC-1", "criteria": "seeking resumes playback smoothly", "source_evidence": "input"}],
+        "scope": {"in_scope": ["frontend playback"], "out_of_scope": ["API and database changes"]},
+        "impact_surface": [{"area": "ui"}, {"area": "api"}, {"area": "data"}, {"area": "performance"}],
+        "impact_applicability": [
+            {"area": "ui", "status": "required"},
+            {"area": "api", "status": "excluded", "reason": "existing playback command API is preserved"},
+            {"area": "data", "status": "excluded", "reason": "no persistence or migration change"},
+            {"area": "performance", "status": "required"},
+        ],
+        "implicit_constraints": [
+            {"area": "api", "question": "Which endpoint fields change?", "status": "requires_confirmation"},
+            {"area": "data", "question": "Which fields are migrated?", "status": "requires_confirmation"},
+            {"area": "performance", "question": "What playback latency threshold is required?", "status": "requires_confirmation"},
+        ],
+        "requirements_understanding": {
+            "weak_dimensions": ["entrypoint_score", "evidence_score", "closure_score"],
+        },
+        "data_fields": [],
+    }
+    result = question_governor.generate(spec)
+    questions = [item["question"] for item in result["questions"]]
+    joined = "\n".join(questions).lower()
+    assert "api" not in joined
+    assert "endpoint" not in joined
+    assert "data ownership" not in joined
+    assert "fields are migrated" not in joined
+    assert any("latency" in item.lower() for item in questions)
+    old = {
+        "schema": "codex-open-questions-v1",
+        "questions": [
+            {
+                "id": "Q-OLD",
+                "question": "Which current-state evidence proves the existing entrypoints, APIs, tasks, consumers, data ownership, and downstream dependencies?",
+                "required": True,
+                "status": "open",
+                "category": "understanding_score",
+            }
+        ],
+    }
+    merged = question_governor.generate(spec, old)
+    merged_text = "\n".join(str(item.get("question") or "").lower() for item in merged["questions"])
+    assert "apis" not in merged_text
+    assert "data ownership" not in merged_text
+
+
 def test_question_governor_blocks_closed_required_question_without_answer() -> None:
     data = {
         "schema": "codex-open-questions-v1",

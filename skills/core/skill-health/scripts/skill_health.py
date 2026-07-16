@@ -11,7 +11,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-
 VALID_CATEGORIES = {
     "workflow-gate",
     "artifact-generator",
@@ -36,14 +35,18 @@ VALID_STAGES = {
     "meta",
 }
 GATE_MATURITY = {"expert-gate", "advisory-review"}
-PROFILE_SCHEMA = "codex-workflow-profiles-v2"
-STAGE_SCHEMA = "codex-workflow-stages-v3"
+PROFILE_SCHEMA = "codex-workflow-profiles-v3"
+STAGE_SCHEMA = "codex-workflow-stages-v4"
 DEFAULT_ARTIFACT_VALIDATOR = "builtin:artifact-contract-v2"
 DEFAULT_LINEAGE_SCHEMA = "codex-workflow-artifact-lineage-v2"
-DEPRECATED_PROFILE_SCHEMAS = {"codex-workflow-profiles-v1"}
-# Retained in the public schema inventory so v1 consumers receive an explicit
+DEPRECATED_PROFILE_SCHEMAS = {"codex-workflow-profiles-v1", "codex-workflow-profiles-v2"}
+# Retained in the public schema inventory so older consumers receive an explicit
 # migration contract instead of an unannounced schema removal.
-DEPRECATED_STAGE_SCHEMAS = {"codex-workflow-stages-v1", "codex-workflow-stages-v2"}
+DEPRECATED_STAGE_SCHEMAS = {
+    "codex-workflow-stages-v1",
+    "codex-workflow-stages-v2",
+    "codex-workflow-stages-v3",
+}
 REQUIRED_SEMANTIC_DEPENDENCIES = {
     "architecture_framing": {"domain_model_design"},
     "technical_design": {"requirement_questions", "architecture_framing"},
@@ -146,8 +149,8 @@ def real_project_calibration(root: Path) -> dict[str, Any]:
         return {"count": 0, "families": [], "agreement_rate": 0, "validation_decision": "missing"}
     try:
         spec = importlib.util.spec_from_file_location("health_replay_validator", validator_path)
-        module = importlib.util.module_from_spec(spec)
         assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         validation = module.validate_replay_dir(replay_dir)
     except Exception as exc:
@@ -173,8 +176,8 @@ def workflow_runtime_assessment(root: Path, stage_entries: list[dict[str, Any]])
     try:
         contract_path = root / "skills/core/delivery-runner/scripts/workflow_contract.py"
         contract_spec = importlib.util.spec_from_file_location("health_workflow_contract", contract_path)
-        contract = importlib.util.module_from_spec(contract_spec)
         assert contract_spec and contract_spec.loader
+        contract = importlib.util.module_from_spec(contract_spec)
         contract_spec.loader.exec_module(contract)
         fail_closed_results = []
         for stage in stage_entries:
@@ -201,8 +204,8 @@ def workflow_runtime_assessment(root: Path, stage_entries: list[dict[str, Any]])
 
         synthetic_path = root / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py"
         synthetic_spec = importlib.util.spec_from_file_location("health_synthetic_e2e", synthetic_path)
-        synthetic = importlib.util.module_from_spec(synthetic_spec)
         assert synthetic_spec and synthetic_spec.loader
+        synthetic = importlib.util.module_from_spec(synthetic_spec)
         synthetic_spec.loader.exec_module(synthetic)
         with tempfile.TemporaryDirectory() as tmp:
             synthetic_result = synthetic.run(Path(tmp))
@@ -330,8 +333,52 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def assigned_names(node: ast.Assign | ast.AnnAssign) -> set[str]:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return {
+        child.id
+        for target in targets
+        for child in ast.walk(target)
+        if isinstance(child, ast.Name)
+    }
+
+
+def skill_test_aliases(source: str, tree: ast.Module, identifiers: set[str]) -> set[str]:
+    assignments: list[tuple[set[str], str, set[str]]] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = node.value
+        if value is None:
+            continue
+        assignments.append(
+            (
+                assigned_names(node),
+                ast.get_source_segment(source, value) or "",
+                {child.id for child in ast.walk(value) if isinstance(child, ast.Name)},
+            )
+        )
+
+    aliases: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for targets, segment, dependencies in assignments:
+            if any(identifier in segment for identifier in identifiers) or dependencies & aliases:
+                additions = targets - aliases
+                if additions:
+                    aliases.update(additions)
+                    changed = True
+    return aliases
+
+
 def behavior_test_signals(root: Path, skill_name: str) -> tuple[int, int]:
-    identifiers = {skill_name, skill_name.replace("-", "_")}
+    identifiers = {
+        skill_name,
+        skill_name.replace("-", "_"),
+        f"skills/core/{skill_name}/",
+        f"skills/templates/{skill_name}/",
+    }
     positive = 0
     negative = 0
     negative_terms = {"block", "reject", "invalid", "missing", "stale", "tamper", "empty", "fail", "deny"}
@@ -341,11 +388,13 @@ def behavior_test_signals(root: Path, skill_name: str) -> tuple[int, int]:
             tree = ast.parse(source)
         except SyntaxError:
             continue
+        aliases = skill_test_aliases(source, tree, identifiers)
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
                 continue
             segment = ast.get_source_segment(source, node) or ""
-            if not any(identifier and identifier in segment for identifier in identifiers):
+            referenced_names = {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
+            if not any(identifier and identifier in segment for identifier in identifiers) and not referenced_names & aliases:
                 continue
             positive += 1
             if any(term in node.name.lower() for term in negative_terms):

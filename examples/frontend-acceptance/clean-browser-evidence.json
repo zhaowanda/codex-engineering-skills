@@ -2,6 +2,7 @@
   "schema": "codex-frontend-acceptance-v1",
   "target_url": "http://localhost:3000/orders",
   "page_type": "list",
+  "acceptance_refs": ["AC-1"],
   "pass": true,
   "environment": "local-example",
   "browser": "chromium",

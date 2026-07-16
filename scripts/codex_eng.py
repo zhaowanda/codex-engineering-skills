@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -93,8 +92,10 @@ def human_bool(value: bool) -> str:
 
 
 def render_auto_human(result: dict[str, Any]) -> str:
-    profile = result.get("workflow_profile") if isinstance(result.get("workflow_profile"), dict) else {}
-    reason = result.get("profile_selection_reason") if isinstance(result.get("profile_selection_reason"), dict) else {}
+    profile_value = result.get("workflow_profile")
+    profile: dict[str, Any] = dict(profile_value) if isinstance(profile_value, dict) else {}
+    reason_value = result.get("profile_selection_reason")
+    reason: dict[str, Any] = dict(reason_value) if isinstance(reason_value, dict) else {}
     blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
     readiness_blockers = result.get("readiness_blockers") if isinstance(result.get("readiness_blockers"), list) else []
     gate_gaps = result.get("profile_gate_gaps") if isinstance(result.get("profile_gate_gaps"), list) else []
@@ -119,7 +120,8 @@ def render_auto_human(result: dict[str, Any]) -> str:
         for item in readiness_blockers[:5]:
             if isinstance(item, dict):
                 lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
-    docs = result.get("docs_readiness") if isinstance(result.get("docs_readiness"), dict) else {}
+    docs_value = result.get("docs_readiness")
+    docs: dict[str, Any] = dict(docs_value) if isinstance(docs_value, dict) else {}
     if docs:
         lines.append(f"- docs_readiness: {docs.get('decision', '')}")
         if docs.get("next_command"):
@@ -133,8 +135,10 @@ def render_auto_human(result: dict[str, Any]) -> str:
 
 
 def render_status_human(result: dict[str, Any]) -> str:
-    profile = result.get("workflow_profile") if isinstance(result.get("workflow_profile"), dict) else {}
-    primary = result.get("primary_next_action") if isinstance(result.get("primary_next_action"), dict) else {}
+    profile_value = result.get("workflow_profile")
+    profile: dict[str, Any] = dict(profile_value) if isinstance(profile_value, dict) else {}
+    primary_value = result.get("primary_next_action")
+    primary: dict[str, Any] = dict(primary_value) if isinstance(primary_value, dict) else {}
     blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
     lines = [
         "Codex delivery status",
@@ -156,7 +160,8 @@ def render_status_human(result: dict[str, Any]) -> str:
 
 
 def render_doctor_human(result: dict[str, Any]) -> str:
-    checks = result.get("checks") if isinstance(result.get("checks"), list) else []
+    checks_value = result.get("checks")
+    checks: list[Any] = list(checks_value) if isinstance(checks_value, list) else []
     lines = [
         "Codex doctor",
         f"- decision: {result.get('decision', '')}",
@@ -296,6 +301,12 @@ def main() -> int:
     p_e2e.add_argument("--out-dir", required=True)
     p_scenarios = sub.add_parser("scenarios")
     p_scenarios.add_argument("--format", choices=["json", "markdown"], default="json")
+    p_runtime = sub.add_parser("runtime")
+    p_runtime.add_argument(
+        "mode",
+        choices=["start", "import-event", "verify", "authorize", "exec", "checkpoint", "advance", "verify-provider", "close"],
+    )
+    p_runtime.add_argument("args", nargs=argparse.REMAINDER)
     p_doctor = sub.add_parser("doctor")
     p_doctor.add_argument("--format", choices=["json", "human"], default="json")
     p_passthrough = sub.add_parser("run")
@@ -412,6 +423,13 @@ def main() -> int:
         return run_command(["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", args.out_dir])
     if args.cmd == "scenarios":
         return run_command(["python3", "scripts/scenario_catalog.py", "--format", args.format])
+    if args.cmd == "runtime":
+        return run_command([
+            "python3",
+            "skills/core/auto-runner/scripts/agent_runtime.py",
+            args.mode,
+            *args.args,
+        ])
     if args.cmd == "doctor":
         result = doctor()
         if args.format == "json":

@@ -5,7 +5,6 @@ import json
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -755,6 +754,107 @@ def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
         assert str(repo_root) in (artifact_dir / "architecture_design.json").read_text(encoding="utf-8")
 
 
+def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-CANONICAL"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "acceptance_criteria": []})
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+        (artifact_dir / "requirement.normalized.txt").write_text("Canonical requirement\n", encoding="utf-8")
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Canonical")
+
+        digest = result["canonical_delivery"]["artifact_digest"]
+        delivery = json.loads((docs_root / "deliveries" / doc_id / "delivery.json").read_text(encoding="utf-8"))
+        manifest = json.loads((docs_root / "indexes" / f"{doc_id}.manifest.json").read_text(encoding="utf-8"))
+        machine = json.loads((docs_root / "machine/specs" / f"{doc_id}.spec.json").read_text(encoding="utf-8"))
+        human = (docs_root / "human/specs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert result["decision"] == "pass"
+        assert delivery["artifact_digest"] == digest
+        assert manifest["projection_source_digest"] == digest
+        assert machine["source_digest"] == digest
+        assert f"codex:projection-source-digest:{digest}" in human
+        assert (docs_root / "deliveries" / doc_id / "input/requirement.normalized.txt").exists()
+        assert docs_governor.validate(docs_root, doc_id)["decision"] == "pass"
+
+
+def test_validate_blocks_stale_canonical_delivery_projection() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-STALE-PROJECTION"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id})
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "Stale")
+        canonical_spec = docs_root / "deliveries" / doc_id / "artifacts/spec.json"
+        canonical_spec.write_text('{"schema":"tampered"}\n', encoding="utf-8")
+
+        result = docs_governor.validate(docs_root, doc_id)
+
+        assert result["decision"] == "block"
+        assert any("digest is stale" in item["message"] for item in result["blockers"])
+
+
+def test_sync_blocks_artifacts_bound_to_another_doc_id() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        artifact_dir = root / "artifacts"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": "REQ-OTHER"})
+
+        result = docs_governor.sync(root / "docs", "REQ-EXPECTED", artifact_dir, "Mismatch")
+
+        assert result["decision"] == "block"
+        assert any("does not match" in item["message"] for item in result["blockers"])
+
+
+def test_sync_blocks_active_canonical_artifacts_with_local_paths() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        docs_root = Path(tmp) / "docs"
+        doc_id = "REQ-CANONICAL-PRIVACY"
+        docs_governor.init(docs_root, doc_id)
+        canonical = docs_root / "deliveries" / doc_id / "artifacts"
+        write_json(canonical / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "repo_root": "/" + "Users/example/private-repo"})
+
+        result = docs_governor.sync(docs_root, doc_id, canonical, "Privacy")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "privacy" for item in result["blockers"])
+
+
+def test_validate_git_sync_blocks_uncommitted_and_unpushed_delivery_docs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        bare = root / "remote.git"
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        subprocess = __import__("subprocess")
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+        subprocess.run(["git", "init", str(docs_root)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(docs_root), "config", "user.email", "docs@example.com"], check=True)
+        subprocess.run(["git", "-C", str(docs_root), "config", "user.name", "Docs Test"], check=True)
+        subprocess.run(["git", "-C", str(docs_root), "remote", "add", "origin", str(bare)], check=True)
+        doc_id = "REQ-GIT-SYNC"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id})
+        docs_governor.sync(docs_root, doc_id, artifact_dir, "Git sync")
+
+        dirty = docs_governor.validate(docs_root, doc_id, require_git_sync=True)
+        subprocess.run(["git", "-C", str(docs_root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(docs_root), "commit", "-m", "docs"], check=True, capture_output=True)
+        unpushed = docs_governor.validate(docs_root, doc_id, require_git_sync=True)
+        subprocess.run(["git", "-C", str(docs_root), "push", "-u", "origin", "HEAD"], check=True, capture_output=True)
+        synced = docs_governor.validate(docs_root, doc_id, require_git_sync=True)
+
+        assert dirty["decision"] == "block"
+        assert any("uncommitted" in item["message"] for item in dirty["blockers"])
+        assert unpushed["decision"] == "block"
+        assert synced["decision"] == "pass"
+
+
 def test_zh_text_preserves_unquoted_command_tokens() -> None:
     rendered = docs_governor.zh_text("npm run build:test evidence; mvn -pl operate-provider -DskipTests compile evidence")
     readable = docs_governor.render_readable_value(["npm run build:test evidence"], "zh")
@@ -1247,7 +1347,7 @@ def test_runtime_data_access_and_permission_replace_template_rules() -> None:
     assert "结构影响：复用既有字段" in data_rendered
     assert "### 权限与可见性" in permission_rendered
     assert "页面边界：设备置换结算 / /device/replacementSettlement 沿用现有菜单/按钮权限" in permission_rendered
-    assert "原因必填、续期池状态和租户范围仍需后端校验" in permission_rendered
+    assert "既有鉴权、租户和数据范围校验必须保持" in permission_rendered
     assert "preserve existing permission boundary" not in permission_rendered
     assert "unauthorized user cannot access changed behavior" not in permission_rendered
 
@@ -1390,6 +1490,26 @@ def test_runtime_acceptance_mapping_supports_dynamic_brk_count() -> None:
     assert "BRK-5" not in rendered
 
 
+def test_runtime_acceptance_mapping_prefers_semantics_over_numeric_position() -> None:
+    grouped = {
+        "BRK-1": [{"scenario": "BRK-1 开始回放"}],
+        "BRK-2": [{"scenario": "BRK-2 当前播放链路背景"}],
+        "BRK-4": [{"scenario": "BRK-4 快进后恢复播放", "api": "/playback/control"}],
+        "BRK-5": [{"scenario": "BRK-5 快退后恢复播放", "api": "/playback/control"}],
+        "BRK-6": [{"scenario": "BRK-6 拖拽定位只以最终位置生效", "api": "/playback/control"}],
+    }
+    spec = {
+        "acceptance_criteria": [
+            {"id": "AC-2", "criteria": "快进 2x 后播放器恢复稳定播放"},
+            {"id": "AC-3", "criteria": "关键帧快退 2x 后播放器恢复稳定播放"},
+            {"id": "AC-4", "criteria": "拖拽定位松手后仅最终位置生效"},
+        ]
+    }
+    brk_to_acs, ac_to_brk = docs_governor.infer_runtime_acceptance_maps(spec, grouped, "zh")
+    assert ac_to_brk == {"AC-2": "BRK-4", "AC-3": "BRK-5", "AC-4": "BRK-6"}
+    assert brk_to_acs["BRK-2"] == []
+
+
 def test_runtime_review_context_prefers_runtime_counts() -> None:
     rendered = docs_governor.render_design_review_context(
         {"module_decomposition": [], "api_contracts": []},
@@ -1449,7 +1569,8 @@ def test_runtime_decision_summary_expands_candidate_options_before_decision() ->
     assert "### 候选方案详述" in rendered
     assert "#### 方案 `R1`" in rendered
     assert "#### 方案 `R2`" in rendered
-    assert "#### 方案 `R3`" in rendered
+    assert "方案数量：2 个" in rendered
+    assert "备选方案只有在当前责任入口、契约或范围证据被推翻时才能升级" in rendered
     assert "### 方案对比与选择" in rendered
     assert "### 决策结论" in rendered
     assert rendered.index("#### 方案 `R1`") < rendered.index("### 决策结论")
@@ -1480,6 +1601,57 @@ def test_runtime_sequence_diagram_includes_database_when_models_exist() -> None:
     assert "participant DB as 数据库表" in rendered
     assert "obd_device_renew_pool" in rendered
     assert "C->>DB: 读取 obd_device_renew_pool.pool_status" in rendered
+
+
+def test_frontend_only_runtime_evidence_uses_applicability_without_backend_or_data_placeholders() -> None:
+    evidence = {
+        "impact_applicability": [
+            {"area": "api", "status": "excluded", "reason": "existing contract is preserved"},
+            {"area": "data", "status": "excluded", "reason": "no persistence change"},
+            {"area": "ui", "status": "required", "reason": "player interaction changes"},
+        ],
+        "actor": "运营人员",
+        "frontend": {
+            "repo": "operate-platform-fe",
+            "page": "事故分析",
+            "route": "/accidentAnalysis",
+            "source_file": "src/views/plugIn/accidentAnalysis.vue",
+        },
+        "backend": {},
+        "api_contracts": [{"path": "/operate/api/dualCamera/playbackStreamControl"}],
+        "interactions": [
+            {
+                "scenario": "BRK-1 快进后重建播放订阅",
+                "entrypoint": {"kind": "frontend_action", "name": "视频回放"},
+                "trigger": "点击快进 2x",
+                "api": "/operate/api/dualCamera/playbackStreamControl",
+                "request": "playbackMode=3, playbackSpeed=2",
+                "response": "重建当前 FLV 订阅",
+                "frontend_functions": ["handlePlaybackControl"],
+            }
+        ],
+    }
+    spec = {"acceptance_criteria": [{"id": "AC-1", "criteria": "快进成功后重建当前 FLV 订阅。"}]}
+
+    sequence = docs_governor.render_runtime_sequence_evidence(evidence, "zh")
+    subrequirements = docs_governor.render_runtime_subrequirement_design(spec, evidence, "zh")
+    modules = docs_governor.render_runtime_module_design(evidence, "zh")
+    process = docs_governor.render_runtime_process_flows(evidence, "zh")
+    process_diagram = docs_governor.render_runtime_process_mermaid(evidence, "zh")
+    data_access = docs_governor.render_runtime_data_access(evidence, "zh")
+    decision = docs_governor.render_runtime_decision_record(evidence, "zh")
+
+    combined = "\n".join([sequence, subrequirements, modules, process, process_diagram, data_access, decision])
+    assert "participant C as 既有 API<br/>契约保持不变" in sequence
+    assert "契约边界：现有接口" in subrequirements
+    assert "不涉及数据库表、迁移或持久化字段变更" in subrequirements
+    assert "服务端边界：不在修改范围" in modules
+    assert "前端更新播放器状态并清理资源" in process_diagram
+    assert "后端处理" not in process_diagram
+    assert "无数据库读写、表结构、迁移或历史数据处理变更" in data_access
+    assert "仅修改 scope_model.modify" in decision
+    assert "未同步后端" not in combined
+    assert "未同步表结构" not in combined
 
 
 def test_runtime_sequence_diagram_renders_all_runtime_entrypoints() -> None:
@@ -1591,7 +1763,7 @@ def test_runtime_module_and_ui_design_replace_template_placeholders() -> None:
     assert "### 模块职责划分" in module_rendered
     assert "前端模块：operate-platform-fe / 设备置换结算 / /device/replacementSettlement" in module_rendered
     assert "后端模块：sigreal-operate-platform / ReplacementSettlementService" in module_rendered
-    assert "ReplacementSettlementQueryDto" in module_rendered
+    assert "以 API 契约和 runtime interaction 中记录的请求、响应为准" in module_rendered
     assert "输入：请求数据" not in module_rendered
     assert "输出：更新后的行为" not in module_rendered
     assert "### 页面与交互影响" in ui_rendered
@@ -1655,7 +1827,7 @@ def test_current_architecture_context_prefers_runtime_evidence_over_stale_archit
         },
         "zh",
     )
-    assert "不是纯前端模板变更" in rendered
+    assert "运行时链路从已确认入口触发" in rendered
     assert "operate-platform-fe / 设备置换结算 / /device/replacementSettlement" in rendered
     assert "sigreal-operate-platform / ReplacementSettlementController / ReplacementSettlementService" in rendered
     assert "POST /operate/api/device/replacementSettlement/renew/paging" in rendered

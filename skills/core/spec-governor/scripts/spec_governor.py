@@ -181,6 +181,23 @@ def ir_sections(requirement_ir: dict[str, Any] | None, kind: str) -> list[dict[s
     return [item for item in as_list(requirement_ir.get("sections")) if isinstance(item, dict) and item.get("kind") == kind]
 
 
+def ir_section_values(requirement_ir: dict[str, Any] | None, kind: str, titles: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    values: list[tuple[str, str]] = []
+    for section in ir_sections(requirement_ir, kind):
+        title = str(section.get("title") or "")
+        if titles and title.lower() not in {item.lower() for item in titles}:
+            continue
+        for paragraph in as_list(section.get("paragraphs")):
+            if isinstance(paragraph, dict) and paragraph.get("text"):
+                values.append((str(paragraph["text"]), f"input line {paragraph.get('line', '')}"))
+        for item in as_list(section.get("items")):
+            if not isinstance(item, dict) or not item.get("text"):
+                continue
+            children = [str(child.get("text") or "").strip() for child in as_list(item.get("children")) if isinstance(child, dict) and child.get("text")]
+            values.append(("；".join([str(item["text"]), *children]), f"input lines {item.get('line', '')}"))
+    return values
+
+
 def ir_acceptance_items(requirement_ir: dict[str, Any] | None) -> list[tuple[str, str]]:
     result: list[tuple[str, str]] = []
     for section in ir_sections(requirement_ir, "acceptance"):
@@ -593,12 +610,15 @@ def business_goal_quality(intent: dict[str, Any], success_metrics: list[dict[str
     }
     score = sum(weight for key, weight in weights.items() if checks[key])
     missing = [key for key, passed in checks.items() if not passed]
+    blocking_missing = [key for key in missing if key not in {"measurable_metric"}]
     return {
         "score": score,
         "threshold": 80,
         "checks": checks,
         "missing": missing,
-        "ready": score >= 80,
+        "blocking_missing": blocking_missing,
+        "ready": not blocking_missing,
+        "advisories": ([{"source": "measurable_metric", "message": "Quantitative success threshold is not specified."}] if "measurable_metric" in missing else []),
     }
 
 
@@ -621,12 +641,46 @@ def extract_repo_impact_map(lines: list[str], text: str, project_items: list[dic
             "source_evidence": str(item.get("source_evidence") or "project_evidence"),
         })
     lower = text.lower()
-    multi_repo_required = bool(repos) or any(term in lower or term in text for term in ["跨仓", "多仓", "cross-repo", "multiple repos", "多系统", "上下游"])
+    distinct_repos = {str(item.get("name") or "").strip() for item in repos if str(item.get("name") or "").strip()}
+    multi_repo_required = len(distinct_repos) > 1 or any(term in lower or term in text for term in ["跨仓", "多仓", "cross-repo", "multiple repos"])
     return {
         "repos": repos,
         "multi_repo_required": multi_repo_required,
         "owner_repo": repos[0]["name"] if repos else "",
         "missing_repo_evidence": multi_repo_required and not repos,
+    }
+
+
+def build_scope_model(declared: list[Any], source_location: dict[str, Any]) -> dict[str, Any]:
+    priority = {"unresolved": 0, "modify": 1, "reference_only": 2, "contract_confirm_only": 3, "forbidden": 4}
+    entries: dict[str, dict[str, Any]] = {}
+
+    def add(path: str, role: str, evidence: str, confidence: str = "high") -> None:
+        path = path.strip()
+        if not path:
+            return
+        normalized_role = {"confirmed_modify": "modify", "modify_candidate": "modify", "confirmed_reference": "reference_only"}.get(role, role)
+        if normalized_role not in priority:
+            normalized_role = "unresolved"
+        previous = entries.get(path)
+        if previous and priority[str(previous["role"])] > priority[normalized_role]:
+            return
+        entries[path] = {"path": path, "role": normalized_role, "source_evidence": evidence, "confidence": confidence}
+
+    for item in as_list(source_location.get("anchors")):
+        if isinstance(item, dict):
+            add(str(item.get("path") or ""), str(item.get("role") or "unresolved"), "evidence_bundle.json", str(item.get("confidence") or "medium"))
+    for item in declared:
+        if isinstance(item, dict):
+            add(str(item.get("path") or ""), str(item.get("role") or "unresolved"), str(item.get("source_evidence") or "requirement_ir.json"))
+    rows = sorted(entries.values(), key=lambda item: item["path"])
+    return {
+        "schema": "codex-scope-model-v1",
+        "roles": rows,
+        "modify": [item["path"] for item in rows if item["role"] == "modify"],
+        "reference_only": [item["path"] for item in rows if item["role"] == "reference_only"],
+        "contract_confirm_only": [item["path"] for item in rows if item["role"] == "contract_confirm_only"],
+        "forbidden": [item["path"] for item in rows if item["role"] == "forbidden"],
     }
 
 
@@ -758,7 +812,7 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
         entries.append({"type": kind, "trigger": trigger, "source_evidence": evidence, "confidence": confidence})
 
     for line in lines:
-        match = re.match(r"^(entrypoint|trigger|入口|触发|entry)(?:[:：\s-]+)(.+)$", line, flags=re.I)
+        match = re.match(r"^(entrypoint|main entry|primary entry|trigger|入口|主入口|触发|entry)(?:[:：\s-]+)(.+)$", line, flags=re.I)
         if match:
             add("explicit", match.group(2).strip(), "input", "high")
         scenario = re.match(r"^(scenario|场景)[:：\s-]*(.+)$", line, flags=re.I)
@@ -815,6 +869,9 @@ def extract_business_flow(lines: list[str], actors: list[str], entrypoints: list
     if entrypoints and acceptance:
         actor = actors[0] if actors else "actor to confirm"
         trigger = entrypoints[0].get("trigger", "actor performs requested operation")
+        source_backed = any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict)) and all(
+            str(item.get("source_evidence") or "").startswith("input") for item in acceptance if isinstance(item, dict)
+        )
         return [{
             "step": 1,
             "actor": actor,
@@ -823,8 +880,8 @@ def extract_business_flow(lines: list[str], actors: list[str], entrypoints: list
             "expected_outcome": str(acceptance[0].get("criteria") or summary),
             "structured_step": structured_flow_step(f"{trigger} {summary} {acceptance[0].get('criteria') or summary}", actor, trigger, 1),
             "branches": detect_flow_branches(str(acceptance[0].get("criteria") or "")),
-            "source_evidence": "inferred from entrypoint and acceptance",
-            "confidence": "medium",
+            "source_evidence": "derived from confirmed entrypoint and explicit acceptance" if source_backed else "inferred from entrypoint and acceptance",
+            "confidence": "high" if source_backed else "medium",
         }]
     return []
 
@@ -1093,7 +1150,13 @@ def weak_acceptance_reason(criteria: str) -> str:
     compact = re.sub(r"\s+", "", criteria.lower())
     if not criteria.strip():
         return "empty acceptance"
-    if any(term in criteria or term in criteria.lower() or term in compact for term in WEAK_ACCEPTANCE_TERMS):
+    weak = False
+    for term in WEAK_ACCEPTANCE_TERMS:
+        if term.isascii():
+            weak = weak or bool(re.search(rf"\b{re.escape(term)}\b", criteria, re.I))
+        else:
+            weak = weak or term in criteria or term in compact
+    if weak:
         return "acceptance is too generic to execute"
     if len(criteria.strip()) <= 4:
         return "acceptance is too short to execute"
@@ -1158,7 +1221,8 @@ def detect_ambiguities(
         })
 
     for term, category in AMBIGUOUS_TERMS.items():
-        if term.lower() in lower or term in text:
+        present = bool(re.search(rf"\b{re.escape(term)}\b", text, re.I)) if term.isascii() else term in text
+        if present:
             required = not ambiguous_term_context_resolved(term, category, acceptance, intent, business_flow, entrypoints)
             add("ambiguous_term", category, f"Requirement uses ambiguous term '{term}' and needs concrete business meaning.", required)
     if not str(intent.get("intent") or "").strip():
@@ -1196,7 +1260,7 @@ def detect_ambiguities(
         add("repo_impact_map", "repo_impact", "Multi-repo or multi-system requirement is mentioned but concrete repositories/services are not identified.")
     goal_quality = goal_quality or {}
     if goal_quality and not goal_quality.get("ready", True):
-        add("business_goal_quality", "business_goal", f"Business goal quality is below expert threshold; missing: {', '.join(as_list(goal_quality.get('missing')))}.")
+        add("business_goal_quality", "business_goal", f"Business goal quality is below expert threshold; missing: {', '.join(as_list(goal_quality.get('blocking_missing') or goal_quality.get('missing')))}.")
     runtime_graph = runtime_graph or {}
     if runtime_graph and not runtime_graph.get("ready", True):
         add("runtime_dependency_graph", "dependency_chain", "Runtime dependency graph is missing nodes, edges, degree, or source evidence.")
@@ -1363,7 +1427,10 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     rules = extract_rules(lines)
     questions = extract_open_questions(lines)
     requirements = extract_requirements(lines, text, requirement_ir)
+    declared_scope = as_list(requirement_ir.get("declared_scope")) if isinstance(requirement_ir, dict) else []
     out_of_scope = extract_prefixed(lines, ("out of scope", "非目标", "不包含"))
+    out_of_scope.extend(str(item.get("path")) for item in declared_scope if isinstance(item, dict) and item.get("role") == "forbidden" and item.get("path"))
+    out_of_scope = list(dict.fromkeys(out_of_scope))
     assumptions = extract_prefixed(lines, ("assumption", "假设"))
     risks = [{"id": f"RISK-{idx + 1}", "risk": item, "source_evidence": "input"} for idx, item in enumerate(extract_prefixed(lines, ("risk", "风险")))]
     non_goals = extract_prefixed(lines, ("non-goal", "non goal", "非目标"))
@@ -1383,6 +1450,11 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     state_transitions = extract_state_transitions(lines)
     personas = extract_personas(sorted(set(actors)))
     objectives = extract_business_objectives(lines)
+    if not objectives:
+        objectives = [
+            {"id": f"BO-{idx + 1}", "objective": value, "source_evidence": evidence}
+            for idx, (value, evidence) in enumerate(ir_section_values(requirement_ir, "requirements", ("本次目标", "目标", "Goal", "Objective")))
+        ]
     success_metrics = extract_success_metrics(lines)
     current_state_evidence = extract_current_state_evidence(lines, project_items)
     repo_impact = extract_repo_impact_map(lines, text, project_items)
@@ -1409,6 +1481,7 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     requirements_understanding = understanding_decision(ambiguities, acceptance, intent, business_flow, entrypoints, current_business_state, success_metrics, closure_model, state_model, dependency_chain, goal_quality, runtime_graph)
     project_artifacts = (project_evidence.get("artifacts") or {}) if isinstance(project_evidence, dict) else {}
     source_location_evidence = (project_artifacts.get("evidence_bundle") or project_artifacts.get("source_location_evidence") or {}) if isinstance(project_artifacts, dict) else {}
+    scope_model = build_scope_model(declared_scope, source_location_evidence if isinstance(source_location_evidence, dict) else {})
     if isinstance(source_location_evidence, dict) and source_location_evidence and source_location_evidence.get("decision") != "pass":
         location_blocker = {"source": "source_location_evidence", "message": "no requirement-specific source location is confirmed"}
         requirements_understanding["blockers"] = [*as_list(requirements_understanding.get("blockers")), location_blocker]
@@ -1467,7 +1540,9 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
             "out_of_scope": out_of_scope,
             "assumptions": assumptions,
             "non_goals": non_goals,
+            "declared_roles": declared_scope,
         },
+        "scope_model": scope_model,
         "requirements": requirements,
         "personas": personas,
         "user_scenarios": scenarios,

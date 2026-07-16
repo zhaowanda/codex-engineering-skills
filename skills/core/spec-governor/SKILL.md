@@ -9,6 +9,14 @@ gate: true
 
 # Spec Governor
 
+## Semantic Rules
+
+- Consume structured Requirement IR sections before keyword inference.
+- Treat explicit goals, nested acceptance criteria, entrypoints, constraints, and forbidden/reference paths as source-backed facts.
+- Missing quantitative metrics are advisory unless the requirement explicitly makes a threshold release-critical.
+- Emit one `scope_model` with `modify`, `reference_only`, `contract_confirm_only`, `forbidden`, and `unresolved` roles.
+- Do not set `multi_repo_required=true` without at least two concrete repositories or an explicit cross-repo statement.
+
 Use this skill before technical design, architecture design, delivery planning, or implementation.
 
 ## Command

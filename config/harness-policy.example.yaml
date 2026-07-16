@@ -1,0 +1,27 @@
+schema: codex-harness-policy-v1
+artifact_budgets:
+  project_understanding/evidence_bundle.json: 100000
+  spec.json: 300000
+  technical_design.json: 300000
+  architecture_design.json: 300000
+  test_design.json: 300000
+  delivery_plan.json: 300000
+  design_architecture_review.json: 500000
+  delivery_plan_review.json: 500000
+source_location:
+  minimum_confidence: medium
+  require_source_digest: true
+  require_fresh_index: true
+design:
+  require_process_flow: true
+  require_scope_consistency: true
+  require_sequence_semantics: true
+  sequence_impacts: [api, cross_repo, integration, business_flow]
+  state_impacts: [state, status, workflow, business_flow]
+post_implementation:
+  require_plan_diff_alignment: true
+  require_design_change_for_scope_drift: true
+pre_push:
+  require_project_skill_index_sync: true
+  require_commit_bound_test_evidence: true
+  require_docs_repo_sync: true

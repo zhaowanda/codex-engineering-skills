@@ -2,15 +2,51 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "codex-post-change-implementation-report-v1"
 IGNORE_DIRS = (".git/", ".idea/", ".vscode/", "node_modules/", "dist/", "build/", "target/", "__pycache__/")
+
+
+def load_governance_contract() -> Any:
+    path = Path(__file__).resolve().parents[4] / "skills/core/delivery-runner/scripts/governance_contract.py"
+    spec = importlib.util.spec_from_file_location("post_change_governance_contract", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GOVERNANCE_CONTRACT = load_governance_contract()
+
+
+def load_docs_governor() -> Any:
+    path = Path(__file__).resolve().parents[4] / "skills/core/docs-governor/scripts/docs_governor.py"
+    spec = importlib.util.spec_from_file_location("post_change_docs_governor", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+DOCS_GOVERNOR = load_docs_governor()
+
+
+def as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
@@ -198,12 +234,55 @@ def infer_project_skill_candidates(files: list[str], baseline_candidates: list[d
     return candidates
 
 
+def project_skill_index_requirements(artifact_dir: Path, candidates: list[dict[str, Any]], doc_id: str = "") -> tuple[dict[str, Any], list[dict[str, str]]]:
+    evidence_path = artifact_dir / "project_skill_index_sync.json"
+    evidence = load_json(evidence_path)
+    blockers: list[dict[str, str]] = []
+    required = bool(candidates)
+    status = "not_required"
+    updated_paths = [str(item) for item in as_list(evidence.get("updated_index_paths")) if str(item).strip()]
+    waiver = as_dict(evidence.get("waiver"))
+    waiver_validation = GOVERNANCE_CONTRACT.validate_waiver(
+        waiver,
+        expected_subject=doc_id,
+        expected_gate="project_skill_index_sync",
+    ) if waiver else {}
+    evidence_decision = str(evidence.get("decision") or "").strip()
+
+    if required:
+        if evidence_decision == "pass" and updated_paths:
+            status = "satisfied"
+        elif evidence_decision == "waived" and waiver_validation.get("decision") == "pass":
+            status = "waived"
+        else:
+            status = "missing_evidence"
+            blockers.append({
+                "source": "project_skill_index_sync",
+                "message": "project skill sync candidates require updated_index_paths or an approved, unexpired structured waiver",
+            })
+            blockers.extend(
+                {"source": "project_skill_index_sync", "message": item.get("message", "invalid waiver")}
+                for item in waiver_validation.get("blockers", [])
+            )
+
+    return {
+        "required": required,
+        "status": status,
+        "evidence_file": str(evidence_path),
+        "candidate_count": len(candidates),
+        "updated_index_paths": updated_paths,
+        "waiver": waiver,
+        "waiver_validation": waiver_validation,
+        "evidence_decision": evidence_decision,
+    }, blockers
+
+
 def docs_binding(artifact_dir: Path, docs_root: Path | None, doc_id: str, require_docs: bool) -> tuple[dict[str, Any], list[dict[str, str]]]:
     auto_summary = load_json(artifact_dir / "auto_run_summary.json")
     if not doc_id:
         doc_id = str(auto_summary.get("doc_id") or "")
     if docs_root is None:
-        docs_status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
+        docs_status = as_dict(auto_summary.get("docs_readiness"))
         if docs_status.get("docs_root"):
             docs_root = Path(str(docs_status["docs_root"]))
     blockers: list[dict[str, str]] = []
@@ -222,8 +301,25 @@ def docs_binding(artifact_dir: Path, docs_root: Path | None, doc_id: str, requir
         blockers.append({"source": "docs_manifest", "message": "docs manifest is missing"})
     if not doc_id:
         blockers.append({"source": "doc_id", "message": "doc id is required for final docs binding"})
+    validation: dict[str, Any] = {}
+    if doc_id and docs_root.exists() and manifest_path.exists():
+        validation = DOCS_GOVERNOR.validate(docs_root, doc_id, require_git=True)
+        blockers.extend(
+            {"source": "docs_validation", "message": str(item.get("message") or "docs validation failed")}
+            for item in validation.get("blockers", [])
+        )
+    manifest_data = load_json(manifest_path) if manifest_path.is_file() else {}
     status = "bound" if not blockers else "blocked" if require_docs else "incomplete"
-    return {"status": status, "required": require_docs, "docs_root": str(docs_root), "doc_id": doc_id, "manifest": manifest}, blockers if require_docs else []
+    return {
+        "status": status,
+        "required": require_docs,
+        "docs_root": str(docs_root),
+        "doc_id": doc_id,
+        "manifest": manifest,
+        "delivery_root": str(docs_root / "deliveries" / doc_id) if doc_id else "",
+        "artifact_digest": str(manifest_data.get("canonical_artifact_digest") or ""),
+        "validation_decision": validation.get("decision", ""),
+    }, blockers if require_docs else []
 
 
 def markdown(report: dict[str, Any]) -> str:
@@ -253,6 +349,21 @@ def markdown(report: dict[str, Any]) -> str:
     lines.extend(f"- `{item['changed_file']}` -> {', '.join(item['baseline_sections'])}: {item['reason']}" for item in report["baseline_update_candidates"]) if report["baseline_update_candidates"] else lines.append("- none")
     lines.extend(["", "## Project Skill Sync Candidates", ""])
     lines.extend(f"- `{item['candidate_id']}` -> `{item['target']}`: {item['reason']}" for item in report["project_skill_sync_candidates"]) if report["project_skill_sync_candidates"] else lines.append("- none")
+    index_requirements = report.get("project_skill_index_requirements", {})
+    if isinstance(index_requirements, dict):
+        lines.extend([
+            "",
+            "## Project Skill Index Requirements",
+            "",
+            f"- Required: `{index_requirements.get('required')}`",
+            f"- Status: `{index_requirements.get('status')}`",
+            f"- Evidence file: `{index_requirements.get('evidence_file')}`",
+        ])
+        for path in as_list(index_requirements.get("updated_index_paths")):
+            lines.append(f"- Updated index: `{path}`")
+        waiver = as_dict(index_requirements.get("waiver"))
+        if waiver.get("reason"):
+            lines.append(f"- Waiver `{waiver.get('waiver_id', '')}`: {waiver['reason']}")
     if report.get("diff_stat"):
         lines.extend(["", "## Diff Stat", "", "```text", report["diff_stat"], "```"])
     if report["blockers"]:
@@ -272,6 +383,9 @@ def generate(repo: Path, artifact_dir: Path, doc_id: str = "", docs_root: Path |
     if not changed:
         warnings.append({"source": "changed_files", "message": "no changed files detected"})
     baseline = infer_baseline_candidates(changed)
+    project_skill_candidates = infer_project_skill_candidates(changed, baseline)
+    project_skill_index, project_skill_index_blockers = project_skill_index_requirements(artifact_dir, project_skill_candidates, doc_id)
+    blockers.extend(project_skill_index_blockers)
     docs, docs_blockers = docs_binding(artifact_dir, docs_root, doc_id, require_docs)
     blockers.extend(docs_blockers)
     report = {
@@ -287,7 +401,8 @@ def generate(repo: Path, artifact_dir: Path, doc_id: str = "", docs_root: Path |
         "diff_stat": git_diff_stat(repo, base_ref),
         "validation_needs": infer_validation_needs(changed),
         "baseline_update_candidates": baseline,
-        "project_skill_sync_candidates": infer_project_skill_candidates(changed, baseline),
+        "project_skill_sync_candidates": project_skill_candidates,
+        "project_skill_index_requirements": project_skill_index,
         "docs_binding": docs,
         "blockers": blockers,
         "warnings": warnings,
@@ -303,11 +418,14 @@ def validate(data: dict[str, Any]) -> dict[str, Any]:
         blockers.append({"source": "schema", "message": f"schema must be {SCHEMA}"})
     if data.get("decision") not in {"pass", "warn", "block"}:
         blockers.append({"source": "decision", "message": "decision must be pass/warn/block"})
-    for key in ["changed_files", "file_summary", "validation_needs", "baseline_update_candidates", "project_skill_sync_candidates", "docs_binding", "blockers", "warnings"]:
+    for key in ["changed_files", "file_summary", "validation_needs", "baseline_update_candidates", "project_skill_sync_candidates", "project_skill_index_requirements", "docs_binding", "blockers", "warnings"]:
         if key not in data:
             blockers.append({"source": key, "message": f"{key} is required"})
     if data.get("decision") == "pass" and data.get("blockers"):
         blockers.append({"source": "decision", "message": "pass is not allowed with blockers"})
+    index_requirements = as_dict(data.get("project_skill_index_requirements"))
+    if index_requirements.get("required") and index_requirements.get("status") not in {"satisfied", "waived"}:
+        blockers.append({"source": "project_skill_index_requirements", "message": "required project skill index sync must be satisfied or waived"})
     return {"schema": "codex-post-change-implementation-report-validation-v1", "decision": "block" if blockers else "pass", "blockers": blockers}
 
 

@@ -217,6 +217,11 @@ def build_architecture_options(
     summary: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     impacts = {str(value) for item in breakdown for value in as_list(item.get("impact_areas"))}
+    impacts.update(
+        str(item.get("area"))
+        for item in as_list(technical.get("impact_applicability"))
+        if isinstance(item, dict) and item.get("area") and item.get("status") == "required"
+    )
     technical_selected = (technical.get("selected_solution") or {}).get("selected_option_id")
     selected_technical_option = next(
         (option for option in as_list(technical.get("solution_options")) if isinstance(option, dict) and option.get("option_id") == technical_selected),
@@ -299,7 +304,7 @@ def build_architecture_options(
             "rollback_strategy": "rollback UI visibility and authorization changes together",
         })
     technical_has_subdomain = any("子域" in str(option.get("name") or "") for option in as_list(technical.get("solution_options")) if isinstance(option, dict))
-    if len(breakdown) >= 5 or technical_has_subdomain:
+    if (len(breakdown) >= 5 and len(impacts & {"ui", "api", "data", "permission", "权限测试", "business_flow"}) >= 3) or technical_has_subdomain:
         options.append({
             "option_id": next_arch_option_id(options),
             "name": "按业务子域分阶段发布架构",
@@ -437,7 +442,8 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
     if technical_contracts:
         route_contract = str(technical_contracts[0].get("contract") or "")
         producer = owner_repo
-    impact_areas = {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
+    applicability = {str(item.get("area")): str(item.get("status")) for item in as_list(spec.get("impact_applicability")) if isinstance(item, dict)}
+    impact_areas = {area for area, status in applicability.items() if status == "required"} if applicability else {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
     readiness_gaps = [item for item in as_list(spec.get("expert_readiness_gaps")) if isinstance(item, dict)]
     technical_understanding_gate = technical.get("requirements_understanding_gate") if isinstance(technical.get("requirements_understanding_gate"), dict) else {}
     spec_understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
@@ -560,7 +566,13 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             if isinstance(item, dict)
         ] or result["component_boundaries"]
         result["cross_repo_dependency_graph"] = as_list((architecture_framing.get("dependency_graph") or {}).get("edges")) or result["cross_repo_dependency_graph"]
-        result["data_ownership"] = as_list(architecture_framing.get("data_ownership")) or result["data_ownership"]
+        framed_ownership = as_list(architecture_framing.get("data_ownership"))
+        if framed_ownership:
+            result["data_ownership"] = [
+                {**item, "consistency_rule": item.get("consistency_rule") or "preserve existing owner consistency; no data ownership change"}
+                for item in framed_ownership
+                if isinstance(item, dict)
+            ]
         result["expert_review_checklist"].append({
             "item": "Architecture design refines pre-technical architecture framing.",
             "status": "ready" if architecture_framing.get("decision") == "pass" else "blocked",

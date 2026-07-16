@@ -9,6 +9,8 @@ gate: true
 
 # Frontend Acceptance Runner
 
+Bind every evidence record to `acceptance_refs` and the primary requirement entrypoint. Evidence captured on a reference/regression route cannot satisfy primary acceptance unless it is explicitly marked regression-only.
+
 Use this skill after frontend implementation and before test evidence or release evidence binding.
 
 ## Position

@@ -19,6 +19,10 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -42,6 +46,9 @@ def template(page_type: str, target_url: str) -> dict[str, Any]:
         "schema": SCHEMA,
         "target_url": target_url,
         "page_type": page_type,
+        "primary_entrypoint": target_url,
+        "scenario_id": "",
+        "acceptance_refs": [],
         "pass": False,
         "environment": "",
         "browser": "",
@@ -65,6 +72,7 @@ def template(page_type: str, target_url: str) -> dict[str, Any]:
         "screenshot_evidence": [],
         "screenshot_required": False,
         "network_requests": [],
+        "network_evidence": [],
         "failed_requests": [],
         "console_errors": [],
         "permission_checks": [],
@@ -145,6 +153,12 @@ def validate_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         blockers.append({"source": "page_type", "message": "page_type is missing or unsupported"})
     if not evidence.get("target_url"):
         blockers.append({"source": "target_url", "message": "target_url is required"})
+    if not as_list(evidence.get("acceptance_refs")):
+        blockers.append({"source": "acceptance_binding", "message": "at least one acceptance_refs entry is required"})
+    primary_entrypoint = str(evidence.get("primary_entrypoint") or "")
+    tested_route = str(as_dict(evidence.get("browser_evidence")).get("tested_route") or "") if isinstance(evidence.get("browser_evidence"), dict) else ""
+    if primary_entrypoint and tested_route and primary_entrypoint != tested_route and not boolish(evidence.get("regression_only")):
+        blockers.append({"source": "entrypoint_binding", "message": "tested route does not match the primary requirement entrypoint", "primary_entrypoint": primary_entrypoint, "tested_route": tested_route})
 
     page_load = evidence.get("page_load") if isinstance(evidence.get("page_load"), dict) else {}
     if not boolish(page_load.get("loaded")):
@@ -223,6 +237,8 @@ def validate_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         "evidence_summary": {
             "page_type": page_type,
             "target_url": evidence.get("target_url"),
+            "acceptance_refs": as_list(evidence.get("acceptance_refs")),
+            "primary_entrypoint": primary_entrypoint,
             "dom_evidence_count": len(as_list(evidence.get("dom_evidence"))),
             "interaction_evidence_count": len(as_list(evidence.get("interaction_evidence"))),
             "screenshot_evidence_count": len(as_list(evidence.get("screenshot_evidence"))),

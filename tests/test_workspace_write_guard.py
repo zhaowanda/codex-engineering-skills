@@ -10,13 +10,18 @@ from argparse import Namespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "skills/core/workspace-write-guard/scripts/write_guard.py"
 spec = importlib.util.spec_from_file_location("write_guard", SCRIPT)
 write_guard = importlib.util.module_from_spec(spec)
 assert spec.loader
 spec.loader.exec_module(write_guard)
+
+INSTALL_SCRIPT = ROOT / "skills/core/workspace-write-guard/scripts/install_pre_commit.py"
+install_spec = importlib.util.spec_from_file_location("install_write_guard_hooks", INSTALL_SCRIPT)
+install_write_guard_hooks = importlib.util.module_from_spec(install_spec)
+assert install_spec.loader
+install_spec.loader.exec_module(install_write_guard_hooks)
 
 
 def iso(value: datetime) -> str:
@@ -63,6 +68,21 @@ def permit(repo: Path, allowed: list[str], issued_offset_seconds: int = -60) -> 
 
 
 class WorkspaceWriteGuardTests(unittest.TestCase):
+    def test_hook_installer_adds_pre_commit_and_pre_push(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = init_repo(Path(tmp))
+
+            result = install_write_guard_hooks.install(repo)
+
+            self.assertEqual(result["status"], "installed")
+            pre_commit = repo / ".git/hooks/pre-commit"
+            pre_push = repo / ".git/hooks/pre-push"
+            self.assertTrue(pre_commit.exists())
+            self.assertTrue(pre_push.exists())
+            self.assertIn("CODEX_EDIT_PERMIT", pre_commit.read_text(encoding="utf-8"))
+            self.assertIn("CODEX_ARTIFACT_DIR", pre_push.read_text(encoding="utf-8"))
+            self.assertIn("--checkpoint pre_push", pre_push.read_text(encoding="utf-8"))
+
     def test_allowed_change_passes_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = init_repo(Path(tmp))

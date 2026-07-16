@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
-from datetime import datetime, timedelta, timezone
 import json
+import re
 import subprocess
 import sys
-import re
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -106,6 +105,43 @@ def test_skill_health_counts_only_validated_real_project_replays() -> None:
     assert calibration["agreement_rate"] == 0
 
 
+def test_behavior_test_signals_resolves_module_level_skill_aliases() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tests = root / "tests"
+        tests.mkdir()
+        (tests / "test_example.py").write_text(
+            "from pathlib import Path\n\n"
+            "ROOT = Path(__file__).parent\n"
+            "SCRIPT = ROOT / 'skills/core/example-governor/scripts/check.py'\n"
+            "spec = make_spec(SCRIPT)\n"
+            "example = load_from_spec(spec)\n"
+            "other = load_module('unrelated')\n\n"
+            "def test_example_allows_valid_input():\n"
+            "    assert example.check({'valid': True})\n\n"
+            "def test_example_rejects_missing_input():\n"
+            "    assert not example.check({})\n\n"
+            "def test_unrelated_behavior():\n"
+            "    assert other.check()\n",
+            encoding="utf-8",
+        )
+        assert skill_health.behavior_test_signals(root, "example-governor") == (2, 1)
+
+
+def test_behavior_test_signals_does_not_count_unused_skill_import() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tests = root / "tests"
+        tests.mkdir()
+        (tests / "test_example.py").write_text(
+            "example = load_module('skills/core/example-governor/scripts/check.py')\n\n"
+            "def test_unrelated_rejects_missing_input():\n"
+            "    assert unrelated.check({})\n",
+            encoding="utf-8",
+        )
+        assert skill_health.behavior_test_signals(root, "example-governor") == (0, 0)
+
+
 def test_all_skill_docs_declare_output_section() -> None:
     offenders = []
     for path in sorted((ROOT / "skills").glob("*/*/SKILL.md")):
@@ -159,7 +195,7 @@ def test_skill_health_blocks_invalid_expert_gate_metadata() -> None:
 
 def test_workflow_profiles_reference_existing_skills() -> None:
     profiles = skill_health.load_restricted_yaml(ROOT / "config/workflow-profiles.example.yaml")
-    assert profiles["schema"] == "codex-workflow-profiles-v2"
+    assert profiles["schema"] == "codex-workflow-profiles-v3"
     skill_names = {
         skill_health.parse_frontmatter(path.read_text(encoding="utf-8"))["name"]
         for path in (ROOT / "skills").glob("*/*/SKILL.md")
@@ -169,6 +205,12 @@ def test_workflow_profiles_reference_existing_skills() -> None:
     for profile in profiles["profiles"]:
         required = profile.get("required_skills", [])
         assert required
+        assert set(profile.get("cost_budget", {})) == {
+            "max_executed_steps",
+            "max_generated_artifacts",
+            "max_command_duration_ms",
+        }
+        assert all(value > 0 for value in profile["cost_budget"].values())
         assert all(item in skill_names for item in required)
         assert profile.get("required_gate_artifacts")
         gate_artifacts = {item["artifact"] for item in profile["required_gate_artifacts"]}
@@ -184,7 +226,7 @@ def test_workflow_profiles_reference_existing_skills() -> None:
     release = next(item for item in profiles["profiles"] if item["name"] == "release_readiness")
     assert "release-evidence-binder" in release["required_skills"]
     stages = skill_health.load_restricted_yaml(ROOT / "config/workflow-stages.example.yaml")
-    assert stages["schema"] == "codex-workflow-stages-v3"
+    assert stages["schema"] == "codex-workflow-stages-v4"
     assert {"spec", "delivery_plan_review", "edit_permit", "release"}.issubset({item["name"] for item in stages["stages"]})
 
 
@@ -591,6 +633,27 @@ def test_human_doc_review_blocks_design_decision_before_options() -> None:
         assert any(item["source"] == "decision_order" for item in result["blockers"])
 
 
+def test_human_doc_review_accepts_brks_bound_to_unchanged_referenced_api() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/designs/REQ-FE.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# Frontend Design\n\n"
+            "## Candidate Options\n\n"
+            "#### Option `R1`: frontend-only implementation\n\n"
+            "## Decision\n\nSelect R1.\n\n"
+            "## Sub-Requirement Design\n\n"
+            "#### BRK-1 rebuild player subscription\n"
+            "- API applicability: excluded; existing API paths, fields, and response shapes remain unchanged.\n"
+            "- Referenced API: `/operate/api/dualCamera/playbackStreamControl`\n\n"
+            "#### BRK-2 clean player resources\n"
+            "- Uses the same unchanged contract above.\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert not any(item["source"] == "brk_api_binding" for item in result["blockers"])
+
+
 def test_human_doc_review_strict_is_doc_type_aware_for_tests() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         doc = Path(tmp) / "human/tests/REQ-1.md"
@@ -987,16 +1050,30 @@ def write_ready_design_gates(root: Path) -> None:
         '{ "decision": "pass", "readiness_gate": { "implementation_allowed": true } }',
         encoding="utf-8",
     )
+    runtime = implement_dry_run.AGENT_RUNTIME
+    runtime.start(root, "REQ-1", "small_feature")
+    runtime.append_event(root, "requirement_ingested", "test-fixture")
+    runtime.checkpoint(root, "intake", ["spec.json"])
+    runtime.append_event(root, "design_completed", "test-fixture")
+    runtime.checkpoint(root, "design", ["technical_design.json", "architecture_design.json"])
+    verification = runtime.verify(root)
+    (root / "harness_validation.json").write_text(json.dumps({
+        "schema": "codex-harness-checkpoint-v2",
+        "checkpoint": "design",
+        "decision": "pass",
+        "blockers": [],
+        "checkpoints": [{"checkpoint": "design", "decision": "pass"}],
+        "session_id": verification["session_id"],
+        "runtime_root_digest": verification["event_root_digest"],
+        "event_refs": ["technical_design.json", "architecture_design.json"],
+    }), encoding="utf-8")
 
 
 def test_implement_dry_run_allows_scoped_ready_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
-        manifest = docs_root / "indexes/REQ-1.manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}", encoding="utf-8")
-        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
         write_ready_design_gates(root)
         (root / "delivery_plan.json").write_text(
             '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "repo": "app", "repo_path": ".", "allowed_files": ["src/app.py"], "test_commands": ["pytest"] }] }',
@@ -1016,10 +1093,7 @@ def test_implement_dry_run_blocks_without_design_chain_even_if_git_ready() -> No
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
-        manifest = docs_root / "indexes/REQ-1.manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}", encoding="utf-8")
-        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
         (root / "delivery_plan.json").write_text(
             '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "allowed_files": ["src/app.py"] }] }',
             encoding="utf-8",
@@ -1121,10 +1195,7 @@ def test_implement_dry_run_accepts_git_plan_summary() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
-        manifest = docs_root / "indexes/REQ-1.manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}", encoding="utf-8")
-        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
         write_ready_design_gates(root)
         (root / "delivery_plan.json").write_text(
             '{ "doc_id": "REQ-1", "repo_tasks": [{ "role": "modify", "repo": "api", "allowed_files": ["api/app.py"] }, { "role": "modify", "repo": "web", "allowed_files": ["web/app.ts"] }] }',
@@ -1153,10 +1224,7 @@ def test_implement_dry_run_uses_configured_docs_root_by_default() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             docs_root = root / "delivery-docs"
-            manifest = docs_root / "indexes/REQ-1.manifest.json"
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text("{}", encoding="utf-8")
-            subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+            implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
             config_file.write_text(json.dumps({"schema": "codex-docs-workspace-config-v1", "docs_root": str(docs_root)}), encoding="utf-8")
             write_ready_design_gates(root)
             (root / "delivery_plan.json").write_text(
