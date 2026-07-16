@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/core/design-architecture-reviewer/scripts/design_arch_review.py"
 spec = importlib.util.spec_from_file_location("design_arch_review", SCRIPT)
 design_arch_review = importlib.util.module_from_spec(spec)
@@ -78,7 +77,8 @@ def complete_design() -> tuple[dict, dict]:
         "current_state_analysis": {"existing_behavior": "checkout summary already renders subtotal and total from the pricing API response", "code_entrypoints": ["src/checkout/CheckoutSummary.tsx"], "known_constraints": ["pricing remains server-owned"], "reuse_points": ["summary row renderer"]},
         "requirement_trace": [{"requirement_id": "REQ-1", "summary": "show discount breakdown on checkout page"}],
         "business_rule_mapping": [{"requirement_id": "REQ-1", "technical_enforcement": "frontend renders server discount fields", "source_of_truth": "pricing API response"}],
-        "process_flow": [{"flow_name": "checkout review", "actors": ["buyer"], "steps": [{"step": 1, "actor": "buyer", "action": "open checkout", "input": "cart", "output": "discount breakdown", "exception": "API error shows fallback"}], "success_end_state": "discount is visible before submit", "failure_end_states": ["pricing unavailable"]}],
+        "process_flow": [{"flow_name": "checkout review", "actors": ["buyer"], "steps": [{"step": 1, "actor": "buyer", "action": "open checkout", "input": "cart", "output": "pricing request starts", "exception": "API error shows fallback"}, {"step": 2, "actor": "web-app", "action": "render discount rows", "input": "pricing response", "output": "discount breakdown", "exception": "missing discounts keep subtotal only"}], "success_end_state": "discount is visible before submit", "failure_end_states": ["pricing unavailable"]}],
+        "process_flow_diagram": "```mermaid\nflowchart TD\n    S1[\"1. buyer: open checkout\"]\n    S2[\"2. web-app: render discount rows\"]\n    S1 --> S2\n    S2 --> OK[\"Success: discount is visible before submit\"]\n    S1 -.-> F1[\"Failure: pricing unavailable\"]\n```",
         "module_decomposition": [{"module": "src/checkout/CheckoutSummary.tsx", "responsibility": "render discount rows", "input": "pricing response", "output": "summary UI", "dependencies": ["pricing API"], "cohesion_reason": "presentation only", "coupling_control": "no pricing calculation in UI"}],
         "logical_data_flow": [{"source": "pricing API", "transform": "format discount rows", "destination": "checkout summary", "owner": "pricing-service", "data_security": "no sensitive personal data"}],
         "target_behavior": [{"requirement_id": "REQ-1", "behavior": "buyer sees discount breakdown"}],
@@ -100,11 +100,16 @@ def complete_design() -> tuple[dict, dict]:
         "system_interaction_sequence": {
             "applicable": True,
             "participants": ["buyer", "web-app", "pricing-service"],
-            "sequence": ["buyer opens checkout", "web-app requests pricing", "pricing-service returns discounts", "web-app renders rows"],
+            "sequence": [
+                {"step": 1, "from": "buyer", "to": "web-app", "action": "open checkout", "success": "checkout page loads", "failure": "page remains unavailable", "state_transition": "idle -> loading", "source_evidence": "spec.entrypoints"},
+                {"step": 2, "from": "web-app", "to": "pricing-service", "action": "request pricing", "success": "discount payload returns", "failure": "existing pricing error path is shown", "state_transition": "loading -> priced|failed", "source_evidence": "evidence_bundle.contracts"},
+                {"step": 3, "from": "pricing-service", "to": "web-app", "action": "return discounts", "success": "discount rows can render", "failure": "web keeps subtotal only", "state_transition": "priced -> rendered|fallback", "source_evidence": "pricing contract"},
+            ],
             "timeout_retry": "reuse existing pricing API timeout and retry behavior",
             "idempotency": "read-only pricing request is naturally idempotent",
             "consistency": "pricing-service response is display source of truth",
         },
+        "system_sequence_diagram": "```mermaid\nsequenceDiagram\n    autonumber\n    participant buyer\n    participant web-app\n    participant pricing-service\n    buyer->>web-app: open checkout\n    web-app->>pricing-service: request pricing\n    pricing-service->>web-app: return discounts\n```",
         "mq_interactions": [{"applicable": False, "not_applicable_reason": "checkout discount display does not publish or consume asynchronous messages"}],
         "cache_strategy": {"applicable": False, "decision": "no_cache", "reason": "reuse existing pricing request; no new high-frequency aggregate"},
         "transaction_consistency": {"applicable": True, "boundary": "read-only UI render after pricing API response", "idempotency": "GET pricing request", "compensation": "not required for read-only render", "rollback": "revert UI rendering"},
@@ -154,7 +159,8 @@ def complete_design() -> tuple[dict, dict]:
         "cross_repo_dependency_graph": [{"from": "pricing-service", "to": "web-app", "contract": "discounts[]", "change": "confirm only"}],
         "data_flow": [{"source": "pricing-service", "target": "web-app", "rule": "display only"}],
         "data_ownership": [{"business_object": "discount", "owner_repo": "pricing-service", "write_authority": "pricing-service", "consistency_rule": "web read only"}],
-        "integration_sequence": [{"step": 1, "actor": "web-app", "action": "load pricing", "failure_handling": "show existing error"}],
+        "integration_sequence": [{"step": 1, "actor": "web-app", "target": "pricing-service", "action": "load pricing", "failure_handling": "show existing error"}],
+        "integration_sequence_diagram": "```mermaid\nsequenceDiagram\n    autonumber\n    participant web-app\n    participant pricing-service\n    web-app->>pricing-service: load pricing\n```",
         "failure_isolation": [{"failure": "discounts omitted", "isolation": "render subtotal only", "user_impact": "checkout continues"}],
         "security_and_permission": [{"control": "cart ownership enforced by API", "impact": "no new permission"}],
         "observability": [{"signal": "frontend error log", "owner": "web team"}],
@@ -245,6 +251,21 @@ def test_complete_design_passes() -> None:
     assert result["readiness_gate"]["implementation_allowed"]
     valid, issues = design_arch_review.validate(result)
     assert valid, issues
+
+
+def test_missing_design_diagrams_block_review() -> None:
+    technical, architecture = complete_design()
+    technical["process_flow_diagram"] = ""
+    technical["system_sequence_diagram"] = ""
+    architecture["integration_sequence_diagram"] = ""
+
+    result = design_arch_review.review(technical, architecture)
+    messages = json_dumps(result)
+
+    assert result["decision"] == "block"
+    assert "process flow diagram is missing" in messages
+    assert "system sequence diagram is missing" in messages
+    assert "integration sequence diagram is missing" in messages
 
 
 def test_specialty_blocker_is_aggregated_and_blocks_implementation() -> None:

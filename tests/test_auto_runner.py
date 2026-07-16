@@ -582,6 +582,31 @@ def test_auto_runner_is_idempotent_without_force() -> None:
         assert second["workflow_metrics"]["reused_artifact_count"] < second["workflow_metrics"]["skipped_step_count"]
 
 
+def test_auto_runner_reuses_clarification_answers_as_spec_input() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        requirement = root / "requirement.md"
+        requirement.write_text("优化设备视频回放。", encoding="utf-8")
+        out = root / "artifacts"
+        first = auto_runner.run(requirement, doc_id="REQ-CLARIFIED", out=out)
+        assert first["next_command"] == f"python3 scripts/codex_eng.py clarify --artifact-dir {out.resolve()}"
+        (out / "clarification_answers.md").write_text(
+            "# Requirement Clarification Answers\n\n"
+            "Goal: Reduce playback recovery failures.\n"
+            "Flow: Operator seeks a playing device video; the system sends one control request, rebuilds the player after success, and shows an error after failure.\n"
+            "Entrypoint: Device playback dialog seek action.\n"
+            "AC: Playback resumes within two seconds after a successful seek.\n",
+            encoding="utf-8",
+        )
+        second = auto_runner.run(requirement, doc_id="REQ-CLARIFIED", out=out)
+        clarified = out / "requirement.clarified.txt"
+        assert clarified.exists()
+        assert "Reduce playback recovery failures" in clarified.read_text(encoding="utf-8")
+        spec_step = next(step for step in second["steps"] if step["name"] == "spec")
+        assert str(clarified.resolve()) in spec_step["command"]
+        assert "requirement.clarified.txt" in second["generated_artifacts"]
+
+
 def test_auto_runner_regenerates_transitive_artifacts_when_requirement_changes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -1002,6 +1027,25 @@ def test_codex_eng_auto_human_output_runs() -> None:
         assert "decision: block" in proc.stdout
         assert "next_command" in proc.stdout
         assert (out / "auto_run_summary.json").exists()
+
+
+def test_codex_eng_clarify_help_and_non_tty_fail_closed() -> None:
+    help_proc = subprocess.run(
+        [sys.executable, "scripts/codex_eng.py", "clarify", "--help"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert help_proc.returncode == 0
+    assert "--artifact-dir" in help_proc.stdout
+    proc = subprocess.run(
+        [sys.executable, "scripts/codex_eng.py", "clarify", "--artifact-dir", "/tmp/missing-clarification"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 2
+    assert "requires a TTY" in proc.stderr
 
 
 def run_all() -> None:

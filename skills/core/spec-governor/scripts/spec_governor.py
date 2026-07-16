@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "codex-spec-v1"
 IMPACT_AREAS = {
     "api": ("api", "endpoint", "route", "接口", "端点"),
@@ -252,7 +251,7 @@ def extract_acceptance(lines: list[str], raw_text: str = "", requirement_ir: dic
 
 def extract_requirements(lines: list[str], raw_text: str = "", requirement_ir: dict[str, Any] | None = None) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
-    req_pattern = re.compile(r"^(requirement|需求|功能|req)(?:[:：\s-]+)(.+)$", re.I)
+    req_pattern = re.compile(r"^(requirement clarification|requirement|需求澄清|需求|功能|req)(?:[:：\s-]+)(.+)$", re.I)
     skip_pattern = re.compile(r"^(acceptance criteria|acceptance|验收标准|标准|验收|ac|rule|规则|out of scope|非目标|assumption|假设|risk|风险)(?:[:：\s-]+)", re.I)
     for idx, line in enumerate(lines, start=1):
         match = req_pattern.match(line)
@@ -293,6 +292,8 @@ def extract_rules(lines: list[str]) -> list[dict[str, str]]:
 def extract_open_questions(lines: list[str]) -> list[dict[str, str]]:
     questions: list[dict[str, str]] = []
     for line in lines:
+        if re.match(r"^(answered question|已回答问题)(?:[:：\s-]+)", line, re.I):
+            continue
         if "?" in line or "？" in line or any(term in line.lower() for term in ["tbd", "todo", "待确认", "不确定"]):
             questions.append({"id": f"Q-{len(questions) + 1}", "question": line, "owner": "product/engineering", "status": "open"})
     return questions

@@ -103,7 +103,20 @@ def test_runtime_blocks_destructive_command_authorization() -> None:
         result = agent_runtime.authorize(root, "execute", "git reset --hard HEAD~1")
 
         assert result["decision"] == "block"
-        assert result["blockers"]
+
+
+def test_runtime_blocks_git_hook_bypass() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        agent_runtime.start(root, "REQ-RUNTIME")
+
+        push = agent_runtime.authorize(root, "execute", "git push origin feature/test --no-verify")
+        commit = agent_runtime.authorize(root, "execute", "git commit --no-verify -m bypass")
+
+        assert push["decision"] == "block"
+        assert commit["decision"] == "block"
+        assert all(item["source"] == "policy" for result in [push, commit] for item in result["blockers"])
+        assert all(result["blockers"] for result in [push, commit])
 
 
 def test_runtime_checkpoint_requires_expected_actions() -> None:

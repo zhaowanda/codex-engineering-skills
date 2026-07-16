@@ -210,6 +210,107 @@ def test_sync_synthesizes_runtime_evidence_when_missing() -> None:
         assert "/device/replacementSettlement" in design_doc
 
 
+def test_sync_design_doc_prefers_reviewed_design_mermaid_diagrams() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-DIAGRAM-DOC"
+        write_json(
+            artifact_dir / "spec.json",
+            {
+                "schema": "codex-spec-v1",
+                "doc_id": doc_id,
+                "title": "播放器回放优化",
+                "requirements": [{"id": "REQ-1", "summary": "快进回放后刷新播放器"}],
+                "acceptance_criteria": [{"id": "AC-1", "criteria": "快进后播放器恢复画面", "type": "positive"}],
+            },
+        )
+        process_diagram = "\n".join([
+            "```mermaid",
+            "flowchart TD",
+            '    S1["1. 用户: 点击快进"]',
+            '    S2["2. 页面: 重建播放器"]',
+            "    S1 --> S2",
+            '    S2 --> OK["Success: 播放器恢复画面"]',
+            "```",
+        ])
+        system_diagram = "\n".join([
+            "```mermaid",
+            "sequenceDiagram",
+            "    autonumber",
+            "    participant P1 as 用户",
+            "    participant P2 as accidentAnalysis.vue",
+            "    participant P3 as /operate/api/dualCamera/playbackStreamControl",
+            "    P1->>P2: 点击快进",
+            "    P2->>P3: 发送控制请求",
+            "    P3-->>P2: 返回成功",
+            "```",
+        ])
+        integration_diagram = "\n".join([
+            "```mermaid",
+            "sequenceDiagram",
+            "    autonumber",
+            "    participant P1 as operate-platform-fe",
+            "    participant P2 as sigreal-operate-platform",
+            "    P1->>P2: 调用播放控制接口",
+            "```",
+        ])
+        write_json(
+            artifact_dir / "technical_design.json",
+            {
+                "doc_id": doc_id,
+                "process_flow": [{
+                    "flow_name": "回放快进",
+                    "actors": ["用户"],
+                    "steps": [{"step": 1, "actor": "用户", "action": "点击快进", "input": "回放页面", "output": "发送控制请求", "exception": "提示错误"}],
+                    "success_end_state": "播放器恢复画面",
+                    "failure_end_states": ["控制失败"],
+                }],
+                "process_flow_diagram": process_diagram,
+                "system_interaction_sequence": {
+                    "applicable": True,
+                    "participants": ["用户", "accidentAnalysis.vue", "/operate/api/dualCamera/playbackStreamControl"],
+                    "sequence": [{
+                        "step": 1,
+                        "from": "用户",
+                        "to": "accidentAnalysis.vue",
+                        "action": "点击快进",
+                        "success": "页面发送控制请求",
+                        "failure": "提示错误",
+                        "state_transition": "播放中 -> 控制中",
+                        "source_evidence": "spec.entrypoints",
+                    }],
+                    "timeout_retry": "复用既有超时策略",
+                    "idempotency": "控制请求按会话防重",
+                    "consistency": "播放器状态以最新控制结果为准",
+                },
+                "system_sequence_diagram": system_diagram,
+                "module_decomposition": [{"module": "src/views/plugIn/accidentAnalysis.vue", "responsibility": "处理快进回放", "input": "用户操作", "output": "播放器重建", "coupling_control": "复用既有播放器组件"}],
+                "api_contracts": [{"contract": "/operate/api/dualCamera/playbackStreamControl", "compatibility": "兼容既有调用方", "old_consumer_impact": "无"}],
+            },
+        )
+        write_json(
+            artifact_dir / "architecture_design.json",
+            {
+                "doc_id": doc_id,
+                "integration_sequence": [{"step": 1, "actor": "operate-platform-fe", "target": "sigreal-operate-platform", "action": "调用播放控制接口", "failure_handling": "保持旧画面并提示错误"}],
+                "integration_sequence_diagram": integration_diagram,
+                "cross_repo_dependency_graph": [{"from": "operate-platform-fe", "to": "sigreal-operate-platform", "contract": "/operate/api/dualCamera/playbackStreamControl"}],
+            },
+        )
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id, "test_cases": []})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id, "status": "ready", "tasks": []})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "播放器回放优化", doc_language="zh")
+
+        assert result["decision"] == "pass"
+        design_doc = (docs_root / "human/designs" / f"{doc_id}.md").read_text(encoding="utf-8")
+        assert process_diagram in design_doc
+        assert system_diagram in design_doc
+        assert integration_diagram in design_doc
+
+
 def test_sync_synthesizes_backend_runtime_evidence_without_fake_frontend() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

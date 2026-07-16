@@ -25,6 +25,7 @@ DESTRUCTIVE_COMMANDS = [
     re.compile(r"git\s+reset\s+--hard"),
     re.compile(r"git\s+checkout\s+--"),
     re.compile(r"(?:^|\s)(?:drop|truncate)\s+(?:table|database)\b", re.I),
+    re.compile(r"(?:^|\s)git\s+(?:commit|push)\b[^\n]*\s--no-verify(?:\s|$)"),
 ]
 CHECKPOINT_ACTIONS = {
     "intake": {"session_started", "requirement_ingested"},

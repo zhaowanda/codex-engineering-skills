@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import shutil
+import subprocess  # nosec B404
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -48,51 +52,141 @@ if [[ -z "$ARTIFACT_DIR" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$RUNTIME" ]]; then
+  echo "workflow-harness: Agent Runtime script not found: $RUNTIME" >&2
+  echo "workflow-harness: reinstall skills and repair this hook with workspace-write-guard/scripts/install_pre_commit.py --hook pre-push --force" >&2
+  exit 1
+fi
+
+if [[ ! -f "$HARNESS" ]]; then
+  echo "workflow-harness: Harness script not found: $HARNESS" >&2
+  echo "workflow-harness: reinstall skills and repair this hook with workspace-write-guard/scripts/install_pre_commit.py --hook pre-push --force" >&2
+  exit 1
+fi
+
 python3 "$RUNTIME" advance \
   --artifact-dir "$ARTIFACT_DIR" \
   --name pre_push
 
-python3 "$HARNESS" \
-  --artifact-dir "$ARTIFACT_DIR" \
-  --checkpoint pre_push \
-  --policy "$POLICY" \
-  --repo "$REPO" \
+HARNESS_ARGS=(
+  --artifact-dir "$ARTIFACT_DIR"
+  --checkpoint pre_push
+  --repo "$REPO"
   --out "$ARTIFACT_DIR/harness/pre_push.json"
+)
+if [[ -n "$POLICY" && -f "$POLICY" ]]; then
+  HARNESS_ARGS+=(--policy "$POLICY")
+fi
+python3 "$HARNESS" "${HARNESS_ARGS[@]}"
 """
 
 
-def install(repo: Path, force: bool = False) -> dict[str, Any]:
+def git_dir_for(repo: Path) -> Path | None:
+    git = shutil.which("git")
+    if not git:
+        return None
+    proc = subprocess.run(
+        [git, "rev-parse", "--absolute-git-dir"],  # nosec B603
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return Path(proc.stdout.strip()).resolve()
+
+
+def dependency_blockers(hook_names: set[str]) -> list[dict[str, str]]:
+    required = {"pre-commit": [WRITE_GUARD], "pre-push": [HARNESS, AGENT_RUNTIME]}
+    return [
+        {"source": name, "message": f"required hook dependency does not exist: {path}"}
+        for name in sorted(hook_names)
+        for path in required[name]
+        if not path.is_file()
+    ]
+
+
+def managed_broken_hook(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    if not any(marker in content for marker in ["post-change-skill-sync/scripts/pre-push", "workflow-harness:", "workspace-write-guard:"]):
+        return False
+    references = re.findall(r"(?:exec\s+|HARNESS=|RUNTIME=|GUARD=)[\"']?([^\"'\s]+)", content)
+    absolute_references = [Path(reference) for reference in references if reference.startswith("/")]
+    return any(not reference.exists() for reference in absolute_references)
+
+
+def backup_hook(path: Path) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = path.with_name(f"{path.name}.codex-backup.{stamp}")
+    counter = 1
+    while backup.exists():
+        backup = path.with_name(f"{path.name}.codex-backup.{stamp}.{counter}")
+        counter += 1
+    path.replace(backup)
+    return backup
+
+
+def install(repo: Path, force: bool = False, hook_names: set[str] | None = None) -> dict[str, Any]:
     repo = repo.resolve()
-    git_dir = repo / ".git"
-    if not git_dir.exists():
+    selected = hook_names or {"pre-commit", "pre-push"}
+    invalid = selected - {"pre-commit", "pre-push"}
+    if invalid:
+        return {"repo": str(repo), "status": "blocked", "blockers": [{"source": "hook", "message": f"unsupported hooks: {sorted(invalid)}"}]}
+    git_dir = git_dir_for(repo)
+    if git_dir is None:
         return {"repo": str(repo), "status": "skipped", "reason": "not a git repo"}
+    blockers = dependency_blockers(selected)
+    if blockers:
+        return {"repo": str(repo), "status": "blocked", "blockers": blockers}
     targets = {
         "pre-commit": HOOK_TEMPLATE.replace("__WRITE_GUARD__", str(WRITE_GUARD)),
         "pre-push": PRE_PUSH_TEMPLATE.replace("__HARNESS__", str(HARNESS)).replace("__AGENT_RUNTIME__", str(AGENT_RUNTIME)).replace("__HARNESS_POLICY__", str(HARNESS_POLICY)),
     }
     installed: list[str] = []
     skipped: list[str] = []
-    for name, content in targets.items():
+    repaired: list[str] = []
+    backups: list[str] = []
+    for name in sorted(selected):
+        content = targets[name]
         target = git_dir / "hooks" / name
-        if target.exists() and not force:
+        broken = managed_broken_hook(target)
+        if target.exists() and not force and not broken:
             skipped.append(str(target))
             continue
+        if target.exists():
+            backups.append(str(backup_hook(target)))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         target.chmod(0o755)
         installed.append(str(target))
-    status = "installed" if installed else "skipped"
-    return {"repo": str(repo), "status": status, "installed": installed, "skipped": skipped}
+        if broken:
+            repaired.append(str(target))
+    status = "repaired" if repaired else "installed" if installed else "skipped"
+    return {
+        "repo": str(repo),
+        "git_dir": str(git_dir),
+        "status": status,
+        "installed": installed,
+        "repaired": repaired,
+        "backups": backups,
+        "skipped": skipped,
+        "blockers": [],
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install workspace write guard pre-commit and Harness pre-push hooks")
     parser.add_argument("--repo", action="append", required=True)
+    parser.add_argument("--hook", action="append", choices=["pre-commit", "pre-push"])
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
-    results = [install(Path(repo), args.force) for repo in args.repo]
-    print(json.dumps({"schema": "codex-write-guard-hook-install-v1", "results": results}, ensure_ascii=False, indent=2))
-    return 0
+    hook_names = set(args.hook) if args.hook else None
+    results = [install(Path(repo), args.force, hook_names) for repo in args.repo]
+    decision = "block" if any(item.get("status") == "blocked" for item in results) else "pass"
+    print(json.dumps({"schema": "codex-write-guard-hook-install-v1", "decision": decision, "results": results}, ensure_ascii=False, indent=2))
+    return 1 if decision == "block" else 0
 
 
 if __name__ == "__main__":

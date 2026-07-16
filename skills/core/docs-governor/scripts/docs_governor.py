@@ -657,7 +657,6 @@ ZH_DEFAULT_PHRASES = {
     "data_correctness": "数据正确性",
     "testability": "测试可证明性",
     "rollback_control": "回滚可控性",
-    "ownership_clarity": "责任清晰度",
     "data_safety": "数据安全性",
     "bind allowed_files to selected entrypoints": "将允许修改文件限制在已选责任入口内",
     "map every acceptance criterion to evidence": "每条验收标准都绑定到证据",
@@ -708,7 +707,6 @@ ZH_DEFAULT_PHRASES = {
     "review payload/query/latency impact across the boundary": "评估跨边界报文、查询和延迟影响",
     "rollback consumers before provider if compatibility fails": "兼容失败时先回滚消费方再回滚生产方",
     "migration strategy": "迁移策略",
-    "data compatibility and regression evidence": "数据兼容性和回归证据",
     "role fixture review": "角色测试数据评审",
     "server authorization confirmation": "服务端鉴权确认",
     "permission positive/negative and regression evidence": "权限正反向和回归证据",
@@ -729,7 +727,6 @@ ZH_DEFAULT_PHRASES = {
     "no field change confirmed": "未确认字段变更",
     "confirm existing route or contract for this slice": "确认该切片对应的既有路由或契约",
     "no API change confirmed": "未确认 API 变更",
-    "preserve existing permission boundary": "保持现有权限边界",
     "preserve existing permission; add negative case if role/data scope changes": "保持现有权限边界；如角色或数据范围变化则补充反向用例",
     "preserve existing 权限测试; add negative case if role/data scope changes": "保持现有权限边界；如角色或数据范围变化则补充反向用例",
     "Business objective is missing; design may optimize the wrong outcome.": "缺少业务目标，设计可能优化到错误结果。",
@@ -1156,15 +1153,26 @@ def mermaid_flow_label(value: Any, language: str = "en", limit: int = 90) -> str
     return cleaned[: max(limit - 3, 1)] + "..." if len(cleaned) > limit else cleaned
 
 
+def existing_mermaid_diagram(value: Any, diagram_type: str = "") -> str:
+    text_value = value if isinstance(value, str) else ""
+    stripped = text_value.strip()
+    if not stripped or "```mermaid" not in stripped.lower():
+        return ""
+    if diagram_type and diagram_type.lower() not in stripped.lower():
+        return ""
+    return stripped
+
+
 def render_process_mermaid(technical: dict[str, Any], language: str = "en") -> str:
+    existing = existing_mermaid_diagram(technical.get("process_flow_diagram"), "flowchart")
+    if existing:
+        return existing
     flows = [item for item in as_list(technical.get("process_flow")) if isinstance(item, dict)]
     if not flows:
         return "缺少业务流程，无法生成流程图。" if language == "zh" else "Process flow data is missing, so the flow diagram cannot be generated."
     start_label = "开始" if language == "zh" else "Start"
     success_label = "成功" if language == "zh" else "Success"
     failure_label = "异常/失败" if language == "zh" else "Exception/Failure"
-    success_state_label = "成功状态" if language == "zh" else "success state"
-    failure_state_label = "失败状态" if language == "zh" else "failure state"
     lines = [
         "```mermaid",
         "flowchart TD",
@@ -1697,7 +1705,7 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
         if entry_note:
             lines.append(f"  Note over {entry_alias}: {mermaid_flow_label(entry_note, language, 120)}")
         if backend_action:
-            lines.append(f"  activate C")
+            lines.append("  activate C")
             lines.append(f"  Note over C: {mermaid_flow_label(backend_action, language, 140)}")
         if calls:
             for call in calls[:8]:
@@ -1730,7 +1738,7 @@ def render_runtime_sequence_evidence(runtime_evidence: dict[str, Any], language:
             lines.append(f"  DB-->>C: {mermaid_flow_label('返回查询/写入结果' if language == 'zh' else 'return query/write result', language, 40)}")
         lines.append(f"  C-->>{response_target}: {mermaid_flow_label(response_label, language, 64)}")
         if backend_action:
-            lines.append(f"  deactivate C")
+            lines.append("  deactivate C")
         if user_feedback:
             lines.append(f"  {response_target}-->>A: {mermaid_flow_label(success_note, language, 46)}")
         if failure:
@@ -1872,6 +1880,9 @@ def render_system_sequence_mermaid(
     architecture: dict[str, Any] | None = None,
     runtime_evidence: dict[str, Any] | None = None,
 ) -> str:
+    existing = existing_mermaid_diagram(technical.get("system_sequence_diagram"), "sequencediagram")
+    if existing:
+        return existing
     evidence_diagram = render_runtime_sequence_evidence(runtime_evidence or {}, language)
     if evidence_diagram:
         return evidence_diagram
@@ -2097,6 +2108,39 @@ def render_system_sequence_mermaid(
             lines.append(f"  opt {consistency_label}")
             lines.append(f"    Note over {note_span(list(aliases.values()))}: {consistency_note}")
             lines.append("  end")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def render_integration_sequence_mermaid(architecture: dict[str, Any], language: str = "en") -> str:
+    existing = existing_mermaid_diagram(architecture.get("integration_sequence_diagram"), "sequencediagram")
+    if existing:
+        return existing
+    steps = [item for item in as_list(architecture.get("integration_sequence")) if isinstance(item, dict)]
+    if not steps:
+        return "缺少集成顺序，无法生成时序图。" if language == "zh" else "Integration sequence is missing, so the sequence diagram cannot be generated."
+    participants: list[str] = []
+    for step in steps:
+        for key in ["actor", "target"]:
+            participant = human_value(step.get(key), language, "")
+            if participant and participant not in participants:
+                participants.append(participant)
+    if not participants:
+        participants = [human_value(steps[0].get("actor"), language, "System" if language != "zh" else "系统")]
+    aliases = {participant: f"P{index}" for index, participant in enumerate(participants, start=1)}
+    lines = ["```mermaid", "sequenceDiagram", "  autonumber"]
+    for participant, alias in aliases.items():
+        lines.append(f"  participant {alias} as {mermaid_flow_label(participant, language, 48)}")
+    for step in steps[:10]:
+        actor = human_value(step.get("actor"), language, "")
+        target = human_value(step.get("target"), language, "") or actor
+        actor_alias = aliases.get(actor, "P1")
+        target_alias = aliases.get(target, actor_alias)
+        action = mermaid_flow_label(step.get("action"), language, 72)
+        failure = mermaid_flow_label(step.get("failure_handling"), language, 72)
+        lines.append(f"  {actor_alias}->>{target_alias}: {action or ('执行集成步骤' if language == 'zh' else 'execute integration step')}")
+        if failure:
+            lines.append(f"  Note over {target_alias}: {failure}")
     lines.append("```")
     return "\n".join(lines)
 
@@ -4109,7 +4153,6 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         ]
         if part
     )
-    table_names = [human_value(item.get("table"), language, "") for item in models if human_value(item.get("table"), language, "")]
     contract_map = runtime_contract_by_api(runtime_evidence, language)
     api_excluded = runtime_area_excluded(runtime_evidence, "api")
     data_excluded = runtime_area_excluded(runtime_evidence, "data")
@@ -4453,7 +4496,6 @@ def render_runtime_entrypoint_confidence(runtime_evidence: dict[str, Any], langu
         if item
     )
     api_excluded = runtime_area_excluded(runtime_evidence, "api")
-    data_excluded = runtime_area_excluded(runtime_evidence, "data")
     if language == "zh":
         lines = [
             "- 置信度：`高`",
@@ -4812,24 +4854,6 @@ def apply_runtime_evidence_overrides(value: Any, runtime_evidence: dict[str, Any
         return value
     frontend = runtime_evidence.get("frontend") if isinstance(runtime_evidence.get("frontend"), dict) else {}
     backend = runtime_evidence.get("backend") if isinstance(runtime_evidence.get("backend"), dict) else {}
-    frontend_entry = " / ".join(
-        item
-        for item in [
-            human_value(frontend.get("repo"), language, ""),
-            human_value(frontend.get("page"), language, ""),
-            human_value(frontend.get("route"), language, ""),
-        ]
-        if item
-    )
-    backend_entry = " / ".join(
-        item
-        for item in [
-            human_value(backend.get("repo"), language, ""),
-            human_value(backend.get("controller"), language, ""),
-            human_value(backend.get("service"), language, ""),
-        ]
-        if item
-    )
     frontend_owner = " / ".join(
         item
         for item in [
@@ -5577,6 +5601,8 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             "### 模块/仓库关系图\n\n"
             f"{render_architecture_mermaid(architecture, 'zh', runtime_evidence)}\n\n"
             f"{render_runtime_architecture_operations(runtime_evidence, 'zh') or render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], '未同步到集成顺序。', 'zh')}\n\n"
+            "### 集成顺序图\n\n"
+            f"{render_integration_sequence_mermaid(architecture, 'zh')}\n\n"
             f"{'' if runtime_evidence.get('interactions') else render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], '未同步到发布影响矩阵。', 'zh')}\n\n"
             f"{'' if runtime_evidence.get('interactions') else render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], '未同步到回滚策略。', 'zh')}\n\n"
             "## 十、交付执行计划\n\n"
@@ -5786,6 +5812,8 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             "### Module / Repository Diagram\n\n"
             f"{render_architecture_mermaid(architecture, 'en', runtime_evidence)}\n\n"
             f"{render_runtime_architecture_operations(runtime_evidence, 'en') or render_named_items(as_list(architecture.get('integration_sequence')), ['step', 'actor', 'action', 'failure_handling'], 'No integration sequence was synced.')}\n\n"
+            "### Integration Sequence Diagram\n\n"
+            f"{render_integration_sequence_mermaid(architecture, 'en')}\n\n"
             f"{'' if runtime_evidence.get('interactions') else render_named_items(as_list(architecture.get('deployment_impact_matrix')), ['repo', 'artifact', 'order', 'config_change', 'restart_required'], 'No deployment impact matrix was synced.')}\n\n"
             f"{'' if runtime_evidence.get('interactions') else render_named_items(as_list(architecture.get('rollback_strategy')), ['repo', 'steps', 'data_risk'], 'No rollback strategy was synced.')}\n\n"
             "## Delivery Plan\n\n"
@@ -6064,7 +6092,7 @@ def configure(docs_root: Path, git_url: str = "") -> dict[str, Any]:
             remote_configured = add.returncode == 0
         else:
             remote_configured = True
-    config_data = load_docs_config_module().save(ROOT, docs_root, git_url)
+    load_docs_config_module().save(ROOT, docs_root, git_url)
     return {
         "schema": "codex-docs-workspace-config-v1",
         "decision": "pass" if not remote_warning else "block",

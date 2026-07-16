@@ -113,6 +113,41 @@ def selected_from_scores(score_summary: dict[str, Any]) -> str:
     return max(numeric, key=numeric.get) if numeric else ""
 
 
+def mermaid_label(value: str) -> str:
+    return value.replace('"', "'").replace("\n", " ").strip()
+
+
+def render_integration_sequence_diagram(integration_sequence: list[dict[str, Any]]) -> str:
+    steps = [item for item in integration_sequence if isinstance(item, dict)]
+    if not steps:
+        return ""
+    participants: list[str] = []
+    for step in steps:
+        actor = str(step.get("actor") or "").strip()
+        target = str(step.get("target") or "").strip()
+        if actor and actor not in participants:
+            participants.append(actor)
+        if target and target not in participants:
+            participants.append(target)
+    if not participants:
+        participants = sorted({str(step.get("actor") or "System") for step in steps})
+    lines = ["```mermaid", "sequenceDiagram", "    autonumber"]
+    aliases = {participant: f"P{index}" for index, participant in enumerate(participants, start=1)}
+    for participant, alias in aliases.items():
+        lines.append(f"    participant {alias} as {mermaid_label(participant)}")
+    for step in steps:
+        actor_name = str(step.get("actor") or "System")
+        target_name = str(step.get("target") or step.get("actor") or "System")
+        actor = aliases.get(actor_name, "PX")
+        target = aliases.get(target_name, "PY")
+        action = mermaid_label(str(step.get("action") or "action"))
+        failure = mermaid_label(str(step.get("failure_handling") or "failure handling"))
+        lines.append(f"    {actor}->>{target}: {action}")
+        lines.append(f"    Note over {target}: Failure: {failure}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
 def architecture_option_name(option_id: str, owner_repo: str) -> str:
     if option_id == "A1":
         return f"以 `{owner_repo}` 为单一责任边界推进"
@@ -543,7 +578,30 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "cross_repo_dependency_graph": [{"from": producer, "to": owner_repo, "contract": route_contract or f"{owner_repo} internal contract", "change": "confirm only unless implementation proves contract change is required"}],
         "data_flow": [{"source": route_contract or "existing source", "target": owner_repo, "rule": f"{item.get('id')}: read/write only through owner boundary", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "data_ownership": [{"business_object": str(item.get("summary") or summary or title or doc_id), "owner_repo": owner_repo, "write_authority": owner_module, "consistency_rule": "preserve existing consistency unless data design says otherwise", "requirement_breakdown_id": item.get("id")} for item in breakdown],
-        "integration_sequence": [{"step": idx, "actor": owner_repo, "action": str(item.get("summary") or summary), "failure_handling": "preserve existing failure behavior", "requirement_breakdown_id": item.get("id")} for idx, item in enumerate(breakdown, start=1)],
+        "integration_sequence": [
+            {
+                "step": idx,
+                "actor": owner_repo,
+                "target": route_contract or owner_module,
+                "action": str(item.get("summary") or summary),
+                "failure_handling": "preserve existing failure behavior",
+                "requirement_breakdown_id": item.get("id"),
+            }
+            for idx, item in enumerate(breakdown, start=1)
+        ],
+        "integration_sequence_diagram": render_integration_sequence_diagram(
+            [
+                {
+                    "step": idx,
+                    "actor": owner_repo,
+                    "target": route_contract or owner_module,
+                    "action": str(item.get("summary") or summary),
+                    "failure_handling": "preserve existing failure behavior",
+                    "requirement_breakdown_id": item.get("id"),
+                }
+                for idx, item in enumerate(breakdown, start=1)
+            ]
+        ),
         "failure_isolation": [{"failure": "upstream dependency unavailable or returns old shape", "isolation": "preserve existing fallback/error behavior", "user_impact": "no broader repository failure"}],
         "security_and_permission": [{"control": "preserve existing auth/data-scope checks", "impact": "review before implementation"}],
         "observability": [{"signal": "error logs and business success metric", "owner": owner_repo}],

@@ -32,6 +32,7 @@ edit-readiness-governor permit
 - Files modified before the permit was issued are suspicious and block the audit.
 - If `decision=blocked`, do not commit, push, or count the change as delivery evidence.
 - Treat built-in editor and MCP writes as imported Runtime events, then use the write audit as the authoritative filesystem backstop.
+- Treat a missing hook script or stale absolute hook path as an installation defect. Repair the hook and rerun the original Git command; never accept `git commit --no-verify` or `git push --no-verify` as delivery evidence or a successful governed path.
 
 ## Commands
 
@@ -72,6 +73,16 @@ Install the pre-commit write guard and pre-push Harness hooks:
 python3 scripts/install_pre_commit.py \
   --repo /path/to/repo
 ```
+
+Repair only a missing or stale pre-push hook without installing pre-commit:
+
+```bash
+python3 scripts/install_pre_commit.py \
+  --repo /path/to/repo \
+  --hook pre-push
+```
+
+The installer resolves the actual Git directory, including linked worktrees, verifies the Harness and Agent Runtime scripts before writing a hook, and automatically repairs known Codex hooks whose absolute script target no longer exists. Replaced hooks are retained beside the active hook as timestamped `*.codex-backup.*` files. Existing non-Codex hooks are preserved unless `--force` is explicit.
 
 The pre-push hook requires `CODEX_ARTIFACT_DIR`. It advances the Runtime `pre_push` checkpoint, then runs the `pre_push` Harness against the current repository and blocks missing post-implementation Harness evidence, project-skill-index synchronization, incomplete review/test evidence, or test evidence bound to another commit.
 

@@ -362,7 +362,8 @@ def workflow_metrics(steps: list[dict[str, Any]], generated: list[str], skipped:
     reused = sum(1 for step in steps if step.get("cache_status") == "reused")
     invalidated = sum(1 for step in steps if step.get("cache_status") == "invalidated")
     duration = round(sum(float(step.get("duration_ms") or 0) for step in steps), 2)
-    budget = profile.get("cost_budget") if isinstance(profile.get("cost_budget"), dict) else {}
+    budget_value = profile.get("cost_budget")
+    budget: dict[str, Any] = budget_value if isinstance(budget_value, dict) else {}
     observed = {
         "executed_steps": executed,
         "generated_artifacts": len(set(generated)),
@@ -1484,6 +1485,20 @@ def run(
         AGENT_RUNTIME.checkpoint(out, "intake", ["requirement_ingestion.json", "requirement_ir.json"])
         generated.append("runtime/checkpoints/intake.json")
 
+    spec_input = normalized
+    clarification_answers = out / "clarification_answers.md"
+    if clarification_answers.exists() and clarification_answers.read_text(encoding="utf-8").strip():
+        clarified = out / "requirement.clarified.txt"
+        clarified.write_text(
+            normalized.read_text(encoding="utf-8").rstrip()
+            + "\n\n# Confirmed requirement clarifications\n\n"
+            + clarification_answers.read_text(encoding="utf-8").strip()
+            + "\n",
+            encoding="utf-8",
+        )
+        spec_input = clarified
+        generated.append(clarified.name)
+
     if repo and project:
         project_out = out / "project_understanding"
         marker = project_out / "baseline_quality.json"
@@ -1518,7 +1533,7 @@ def run(
             "--index",
             str(project_out / "code_index.json"),
             "--requirement",
-            str(normalized),
+            str(spec_input),
             "--out",
             str(project_out / "source_location_evidence.json"),
             "--bundle-out",
@@ -1571,7 +1586,7 @@ def run(
         "--title",
         title,
         "--input",
-        str(normalized),
+        str(spec_input),
         "--out",
         str(spec),
     ]
@@ -1591,7 +1606,7 @@ def run(
     spec_data = read_json(spec)
     selected_profile, profile_selection_reason = select_workflow_profile_with_reason(spec_data, bool(repo and project), profile)
 
-    questions = run_requirement_questions(selected_profile, out, spec, force, generated, skipped, steps)
+    run_requirement_questions(selected_profile, out, spec, force, generated, skipped, steps)
 
     if spec_data.get("decision") == "blocked" or spec_data.get("design_allowed") is False:
         strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
@@ -1632,7 +1647,7 @@ def run(
             "doc_language": effective_doc_language,
             "blockers": blockers,
             "next_stage": "requirements_clarification",
-            "next_command": f"Resolve required questions in {questions}",
+            "next_command": f"python3 scripts/codex_eng.py clarify --artifact-dir {out}",
             "can_implement": False,
             "can_release": False,
             "safety_boundary": "requirements_and_questions_only",

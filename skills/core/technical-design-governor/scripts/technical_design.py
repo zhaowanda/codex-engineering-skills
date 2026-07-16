@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 GENERIC_ENTRYPOINT_NAMES = {
     "application.java",
     "main.java",
@@ -955,6 +954,59 @@ def render_system_interaction_sequence(signals: dict[str, bool], route_refs: lis
     }
 
 
+def mermaid_label(value: str) -> str:
+    return value.replace('"', "'").replace("\n", " ").strip()
+
+
+def render_process_flow_diagram(process_flow: list[dict[str, Any]]) -> str:
+    if not process_flow:
+        return ""
+    flow = process_flow[0] if isinstance(process_flow[0], dict) else {}
+    steps = [item for item in as_list(flow.get("steps")) if isinstance(item, dict)]
+    if not steps:
+        return ""
+    lines = ["```mermaid", "flowchart TD"]
+    for index, step in enumerate(steps, start=1):
+        action = mermaid_label(str(step.get("action") or f"step {index}"))
+        actor = mermaid_label(str(step.get("actor") or "actor"))
+        node_id = f"S{index}"
+        lines.append(f'    {node_id}["{index}. {actor}: {action}"]')
+        if index > 1:
+            lines.append(f"    S{index - 1} --> {node_id}")
+    lines.append(f'    S{len(steps)} --> OK["Success: {mermaid_label(str(flow.get("success_end_state") or "acceptance complete"))}"]')
+    for failure_index, failure_state in enumerate(as_list(flow.get("failure_end_states")), start=1):
+        if failure_state:
+            lines.append(f'    S{min(failure_index, len(steps))} -.-> F{failure_index}["Failure: {mermaid_label(str(failure_state))}"]')
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def render_system_sequence_diagram(system_sequence: dict[str, Any]) -> str:
+    if not isinstance(system_sequence, dict) or system_sequence.get("applicable") is not True:
+        return ""
+    participants = [str(item) for item in as_list(system_sequence.get("participants")) if item]
+    sequence = [item for item in as_list(system_sequence.get("sequence")) if isinstance(item, dict)]
+    if not participants or not sequence:
+        return ""
+    lines = ["```mermaid", "sequenceDiagram", "    autonumber"]
+    aliases = {participant: f"P{index}" for index, participant in enumerate(participants, start=1)}
+    for participant, alias in aliases.items():
+        lines.append(f"    participant {alias} as {mermaid_label(participant)}")
+    for step in sequence:
+        sender_name = str(step.get("from") or "UnknownFrom")
+        receiver_name = str(step.get("to") or "UnknownTo")
+        sender = aliases.get(sender_name, "PX")
+        receiver = aliases.get(receiver_name, "PY")
+        action = mermaid_label(str(step.get("action") or "action"))
+        success = mermaid_label(str(step.get("success") or "success"))
+        failure = mermaid_label(str(step.get("failure") or "failure"))
+        lines.append(f"    {sender}->>{receiver}: {action}")
+        lines.append(f"    Note over {receiver}: Success: {success}")
+        lines.append(f"    Note over {receiver}: Failure: {failure}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
 def render_process_flow(spec: dict[str, Any], breakdown: list[dict[str, Any]], actors: list[str], summary: str) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -1160,6 +1212,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     signals = impact_signals(spec, breakdown, route_refs)
     data_model_design = render_data_model_design(signals, spec, breakdown, owner_file)
     process_flow = render_process_flow(spec, breakdown, actors, summary)
+    system_interaction_sequence = render_system_interaction_sequence(signals, route_refs, owner_file, summary, [str(item) for item in as_list(entrypoint_confidence.get("confirmed_anchors"))])
     module_decomposition = [{
         "module": owner_file,
         "responsibility": str(item.get("summary") or summary),
@@ -1223,6 +1276,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             for rule in as_list(spec.get("business_rules")) if isinstance(rule, dict)
         ] or [{"requirement_id": req_id, "technical_enforcement": "Implement behavior described by normalized spec.", "source_of_truth": "spec.requirements"}],
         "process_flow": process_flow,
+        "process_flow_diagram": render_process_flow_diagram(process_flow),
         "module_decomposition": module_decomposition,
         "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": str(item.get("summary") or summary), "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
@@ -1233,7 +1287,8 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "data_design": [] if applicability.get("data") in {"excluded", "not_applicable"} else [{"read_rule": f"{item.get('id')}: read through {owner_file}", "write_rule": f"{item.get('id')}: write through {owner_file} only if this slice changes state", "migration": "none unless this slice changes schema/data backfill", "field_impact": item.get("field_impact"), "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "data_model_design": data_model_design,
         "table_schema_changes": render_table_schema_changes(data_model_design),
-        "system_interaction_sequence": render_system_interaction_sequence(signals, route_refs, owner_file, summary, [str(item) for item in as_list(entrypoint_confidence.get("confirmed_anchors"))]),
+        "system_interaction_sequence": system_interaction_sequence,
+        "system_sequence_diagram": render_system_sequence_diagram(system_interaction_sequence),
         "mq_interactions": render_mq_interactions(signals, owner_file, summary),
         "cache_strategy": render_cache_strategy(signals, spec),
         "transaction_consistency": render_transaction_consistency(signals, summary),

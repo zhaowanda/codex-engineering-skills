@@ -284,6 +284,10 @@ def main() -> int:
     p_next.add_argument("--artifact-dir", required=True)
     p_next.add_argument("--profile")
     p_next.add_argument("--format", choices=["json", "human"], default="human")
+    p_clarify = sub.add_parser("clarify")
+    p_clarify.add_argument("--artifact-dir", required=True)
+    p_clarify.add_argument("--actor", default="")
+    p_clarify.add_argument("--include-optional", action="store_true")
     p_docs = sub.add_parser("docs")
     p_docs.add_argument("mode", choices=["configure", "init", "validate"])
     p_docs.add_argument("--docs-root", required=True)
@@ -388,6 +392,24 @@ def main() -> int:
         if not result:
             return code
         return 0 if result.get("decision") == "pass" else 2
+    if args.cmd == "clarify":
+        artifact_dir = Path(args.artifact_dir).resolve()
+        command = [
+            "python3",
+            "skills/core/requirement-question-governor/scripts/question_governor.py",
+            "answer",
+            "--file",
+            str(artifact_dir / "open_questions.json"),
+            "--spec",
+            str(artifact_dir / "spec.json"),
+            "--out",
+            str(artifact_dir / "clarification_answers.md"),
+        ]
+        if args.actor:
+            command.extend(["--actor", args.actor])
+        if args.include_optional:
+            command.append("--include-optional")
+        return run_command(command)
     if args.cmd == "docs":
         command = COMMANDS["docs-governor"] + [args.mode, "--docs-root", args.docs_root]
         if args.mode in {"init", "validate"}:

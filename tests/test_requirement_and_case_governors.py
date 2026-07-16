@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import tempfile
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -217,6 +217,152 @@ def test_question_governor_binds_answers_to_current_spec_and_merges_stable_quest
     assert any(item["source"] == "carried_forward" for item in carried["answer_provenance"])
     assert question_governor.validate_questions(first, changed)["decision"] == "block"
     assert question_governor.validate_questions(merged, changed)["decision"] == "pass"
+
+
+def clarification_fixture() -> tuple[dict, dict]:
+    spec = {"schema": "codex-spec-v1", "doc_id": "REQ-CLARIFY"}
+    data = {
+        "schema": "codex-open-questions-v1",
+        "doc_id": "REQ-CLARIFY",
+        "spec_digest": question_governor.canonical_spec_digest(spec),
+        "questions": [
+            {
+                "id": "Q-GOAL",
+                "question": "What is the business goal?",
+                "category": "business_goal",
+                "owner": "product",
+                "required": True,
+                "answer": "",
+                "status": "open",
+                "risk_if_unanswered": "Wrong outcome.",
+            },
+            {
+                "id": "Q-AC",
+                "question": "What proves success?",
+                "category": "acceptance",
+                "owner": "product",
+                "required": True,
+                "answer": "",
+                "status": "open",
+                "risk_if_unanswered": "Untestable delivery.",
+            },
+            {
+                "id": "Q-OPTIONAL",
+                "question": "What metric is preferred?",
+                "category": "success_metric",
+                "owner": "product",
+                "required": False,
+                "answer": "",
+                "status": "open",
+                "risk_if_unanswered": "No quantitative target.",
+            },
+        ],
+        "decision": "block",
+    }
+    return data, spec
+
+
+def test_question_governor_answers_required_questions_one_at_a_time_and_persists() -> None:
+    data, spec = clarification_fixture()
+    answers = iter(["", "Reduce failed playback", "Playback resumes after seeking"])
+    output: list[str] = []
+    snapshots: list[dict] = []
+    result = question_governor.answer_interactively(
+        data,
+        spec,
+        lambda current: snapshots.append(copy.deepcopy(current)),
+        actor="product-owner",
+        input_fn=lambda _prompt: next(answers),
+        output_fn=output.append,
+    )
+    assert result == {"decision": "pass", "blockers": [], "answered": 2, "remaining": 0, "interrupted": False}
+    assert len(snapshots) == 3
+    assert data["questions"][2]["status"] == "open"
+    assert any("non-empty answer" in line for line in output)
+    provenance = data["questions"][0]["answer_provenance"][-1]
+    assert provenance["source"] == "interactive_cli"
+    assert provenance["actor"] == "product-owner"
+    assert provenance["answered_at"]
+    markdown = question_governor.render_clarification_answers(data)
+    assert "Goal: Reduce failed playback" in markdown
+    assert "AC: Playback resumes after seeking" in markdown
+    assert "Answered question: What is the business goal?" in markdown
+    assert "Q-OPTIONAL" not in markdown
+    parsed_lines = spec_governor.split_lines(markdown)
+    assert spec_governor.extract_open_questions(parsed_lines) == []
+
+
+def test_spec_parses_generic_clarification_as_confirmed_requirement() -> None:
+    text = "Requirement clarification: Existing API and persistence behavior remain unchanged."
+    requirements = spec_governor.extract_requirements(spec_governor.split_lines(text), text)
+    assert requirements[0]["summary"] == "Existing API and persistence behavior remain unchanged."
+
+
+def test_question_governor_can_include_optional_questions() -> None:
+    data, spec = clarification_fixture()
+    answers = iter(["Goal", "Acceptance", "Resume within two seconds"])
+    result = question_governor.answer_interactively(
+        data,
+        spec,
+        lambda _current: None,
+        actor="product-owner",
+        include_optional=True,
+        input_fn=lambda _prompt: next(answers),
+        output_fn=lambda _line: None,
+    )
+    assert result["decision"] == "pass"
+    assert data["questions"][2]["status"] == "closed"
+    assert "Goal: Resume within two seconds" in question_governor.render_clarification_answers(data)
+
+
+def test_question_governor_blocks_stale_spec_before_prompting() -> None:
+    data, spec = clarification_fixture()
+    data["spec_digest"] = "stale"
+    prompted = False
+
+    def unexpected_prompt(_prompt: str) -> str:
+        nonlocal prompted
+        prompted = True
+        return "answer"
+
+    result = question_governor.answer_interactively(
+        data,
+        spec,
+        lambda _current: None,
+        actor="owner",
+        input_fn=unexpected_prompt,
+        output_fn=lambda _line: None,
+    )
+    assert result["decision"] == "block"
+    assert result["blockers"][0]["source"] == "spec_digest"
+    assert prompted is False
+
+
+def test_question_governor_preserves_partial_answers_on_eof() -> None:
+    data, spec = clarification_fixture()
+    calls = iter(["Confirmed goal", EOFError()])
+    snapshots: list[dict] = []
+
+    def answer(_prompt: str) -> str:
+        value = next(calls)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    result = question_governor.answer_interactively(
+        data,
+        spec,
+        lambda current: snapshots.append(copy.deepcopy(current)),
+        actor="owner",
+        input_fn=answer,
+        output_fn=lambda _line: None,
+    )
+    assert result["decision"] == "block"
+    assert result["interrupted"] is True
+    assert result["answered"] == 1
+    assert data["questions"][0]["status"] == "closed"
+    assert data["questions"][1]["status"] == "open"
+    assert snapshots[-1]["questions"][0]["answer"] == "Confirmed goal"
 
 
 def test_spec_blocks_ambiguous_requirement_without_real_goal_or_flow() -> None:
