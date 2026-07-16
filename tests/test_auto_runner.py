@@ -149,6 +149,39 @@ def test_harness_source_location_blocks_stale_source_digest() -> None:
         assert any(item["message"] == "source digest is missing or stale" for item in result["blockers"])
 
 
+def test_harness_source_location_blocks_requirement_irrelevant_anchor() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        source = repo / "src/views/plugIn/accidentAnalysis.vue"
+        source.parent.mkdir(parents=True)
+        source.write_text("openPlaybackDialog playbackStreamControl DualCameraLivePlayer\n", encoding="utf-8")
+        project = root / "project_understanding"
+        project.mkdir()
+        digest = harness_validation.sha256(source)
+        (root / "requirement.normalized.txt").write_text(
+            "物联网卡到期监控：前端入口为 src/views/device/iotCardMonitor.vue，后端生成 IoT 续费结算单并发送飞书通知。",
+            encoding="utf-8",
+        )
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "repo_root": str(repo),
+            "anchors": [{
+                "path": "src/views/plugIn/accidentAnalysis.vue",
+                "role": "confirmed_modify",
+                "confidence": "high",
+                "source_digest": digest,
+                "matched_symbols": ["openPlaybackDialog", "DualCameraLivePlayer"],
+                "matched_contract_terms": ["/operate/api/dualCamera/playbackStreamControl"],
+                "evidence_chain": [{"term": "playbackStreamControl", "line": 1}],
+            }],
+        }), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="source_location", repo=repo)
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "confirmed modify anchor is not supported by requirement text" for item in result["blockers"])
+
+
 def test_harness_source_location_rejects_parent_traversal() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -219,6 +252,7 @@ def test_harness_design_allows_explicit_planned_new_file() -> None:
         (root / "spec.json").write_text(json.dumps({}), encoding="utf-8")
         (root / "technical_design.json").write_text(json.dumps({
             "process_flow": [{"steps": ["create module"]}],
+            "process_flow_diagram": "```mermaid\nflowchart TD\n  A[create module] --> B[done]\n```",
             "implementation_files": [{"path": "src/new_module.py", "status": "planned_new"}],
         }), encoding="utf-8")
         (root / "architecture_design.json").write_text(json.dumps({}), encoding="utf-8")

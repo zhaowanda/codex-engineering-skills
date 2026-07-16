@@ -543,6 +543,30 @@ def test_question_governor_generates_categorized_clarification_for_ambiguous_spe
     assert all(item.get("risk_if_unanswered") for item in result["questions"] if item.get("required"))
 
 
+def test_question_governor_filters_placeholder_and_localizes_chinese_questions() -> None:
+    spec = {
+        "doc_id": "REQ-IOT",
+        "title": "物联网卡到期监控",
+        "summary": "物联网卡到期监控、续费结算单、飞书通知",
+        "open_questions": [{"question": "待确认问题", "category": "general"}],
+        "ambiguities": [
+            {"category": "business_flow", "message": "流程不完整", "source": "business_flow", "required": True},
+            {"category": "dependency_chain", "message": "上下游不完整", "source": "dependency_chain", "required": True},
+        ],
+        "requirements_understanding": {},
+    }
+
+    result = question_governor.generate(spec)
+    questions = [item["question"] for item in result["questions"]]
+
+    assert "待确认问题" not in questions
+    assert questions
+    assert all(any("\u4e00" <= char <= "\u9fff" for char in question) for question in questions)
+    validation = question_governor.validate_questions(result, spec)
+    assert validation["decision"] == "block"
+    assert not any(item["message"] == "Chinese requirement generated an English template question" for item in validation["blockers"])
+
+
 def test_question_governor_asks_from_weak_understanding_dimensions() -> None:
     spec = spec_governor.normalize("REQ-WEAK-SCORE", "订单导出", "Goal: reduce support work.\nReq: Admin exports orders.\nAC: exported file works.")
     result = question_governor.generate(spec)

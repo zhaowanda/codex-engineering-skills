@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,11 @@ DEFAULT_BUDGETS = {
 EDIT_KEYS = {"allowed_files", "files_to_edit", "modify_files", "implementation_files"}
 OWNER_KEYS = {"owner_file", "selected_entrypoint", "primary_file"}
 CONFIDENCE = {"low": 0, "medium": 1, "high": 2}
+GENERIC_RELEVANCE_TERMS = {
+    "add", "change", "device", "feature", "fix", "page", "service", "update",
+    "api", "http", "true", "false", "query", "list", "detail", "paging",
+    "修改", "功能", "优化", "页面", "设备", "需求", "用户", "接口", "查询",
+}
 
 
 def load_agent_runtime_module() -> Any:
@@ -69,6 +75,13 @@ def read_json(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def read_text_if_exists(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+    except Exception:
+        return ""
 
 
 def parse_scalar(value: str) -> Any:
@@ -196,6 +209,52 @@ def add_blocker(blockers: list[dict[str, Any]], source: str, message: str, **det
     blockers.append({"source": source, "message": message, **details})
 
 
+def requirement_context(artifact_dir: Path) -> str:
+    parts = [
+        read_text_if_exists(artifact_dir / "requirement.normalized.txt"),
+        read_text_if_exists(artifact_dir / "requirement.md"),
+        json.dumps(read_json(artifact_dir / "spec.json"), ensure_ascii=False),
+    ]
+    return "\n".join(part for part in parts if part).lower()
+
+
+def relevance_terms(anchor: dict[str, Any]) -> list[str]:
+    raw_terms: list[str] = []
+    for key in ("matched_symbols", "matched_contract_terms", "matched_requirement_terms"):
+        value = anchor.get(key)
+        if isinstance(value, list):
+            raw_terms.extend(str(item) for item in value)
+    for item in anchor.get("evidence_chain", []) if isinstance(anchor.get("evidence_chain"), list) else []:
+        if isinstance(item, dict) and item.get("term"):
+            raw_terms.append(str(item["term"]))
+    terms: list[str] = []
+    for term in raw_terms:
+        normalized = term.strip().lower()
+        if not normalized or normalized in GENERIC_RELEVANCE_TERMS:
+            continue
+        if normalized not in terms:
+            terms.append(normalized)
+    return terms
+
+
+def path_tokens(path: str) -> list[str]:
+    basename = Path(path).name.lower()
+    stem = Path(path).stem.lower()
+    split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", Path(path).stem).lower()
+    tokens = [basename, stem, *re.split(r"[^a-z0-9\u4e00-\u9fff]+", split)]
+    return [token for token in tokens if len(token) >= 4 and token not in GENERIC_RELEVANCE_TERMS]
+
+
+def anchor_requirement_relevance(anchor: dict[str, Any], requirement_lower: str) -> tuple[bool, list[str]]:
+    if not requirement_lower:
+        return True, []
+    matched: list[str] = []
+    for term in [*path_tokens(str(anchor.get("path") or "")), *relevance_terms(anchor)]:
+        if term and term in requirement_lower and term not in matched:
+            matched.append(term)
+    return bool(matched), matched
+
+
 def artifact_budget_checkpoint(artifact_dir: Path, budgets: dict[str, int]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     blockers: list[dict[str, Any]] = []
     sizes: list[dict[str, Any]] = []
@@ -233,6 +292,7 @@ def source_location_checkpoint(
     minimum = str(policy.get("minimum_confidence") or "medium")
     blockers: list[dict[str, Any]] = []
     checked: list[dict[str, Any]] = []
+    requirement_lower = requirement_context(artifact_dir)
     if not modify:
         add_blocker(blockers, "source_location", "no confirmed modify anchor exists")
     for anchor in modify:
@@ -247,6 +307,17 @@ def source_location_checkpoint(
         if CONFIDENCE.get(confidence, -1) < CONFIDENCE.get(minimum, 1):
             add_blocker(blockers, "source_location", "anchor confidence is below policy", path=relative, confidence=confidence, minimum=minimum)
         row: dict[str, Any] = {"path": relative, "confidence": confidence}
+        relevant, matched_relevance = anchor_requirement_relevance(anchor, requirement_lower)
+        row["requirement_relevance_terms"] = matched_relevance
+        if policy.get("require_requirement_relevance", True) and not relevant:
+            add_blocker(
+                blockers,
+                "source_location",
+                "confirmed modify anchor is not supported by requirement text",
+                path=relative,
+                matched_symbols=anchor.get("matched_symbols", []),
+                matched_contract_terms=anchor.get("matched_contract_terms", []),
+            )
         if configured_repo:
             source = configured_repo / relative
             row["exists"] = source.is_file()
@@ -347,14 +418,20 @@ def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[
     process_flow = technical.get("process_flow")
     if policy.get("require_process_flow", True) and not process_flow:
         add_blocker(blockers, "design_completeness", "technical design is missing process_flow")
+    if process_flow and policy.get("require_process_flow_diagram", True) and not str(technical.get("process_flow_diagram") or "").strip():
+        add_blocker(blockers, "design_completeness", "technical design is missing process_flow_diagram")
     impacts = applicability_areas(spec)
     sequence_impacts = {str(item).lower() for item in policy.get("sequence_impacts", ["api", "cross_repo", "integration", "business_flow"])}
     sequence = technical.get("system_interaction_sequence")
     if impacts & sequence_impacts:
         if not isinstance(sequence, dict) or sequence.get("applicable") is not True or not sequence.get("participants") or not sequence.get("sequence"):
             add_blocker(blockers, "design_completeness", "applicable cross-component change requires a populated system interaction sequence", impacts=sorted(impacts & sequence_impacts))
+        if isinstance(sequence, dict) and sequence.get("applicable") is True and policy.get("require_system_sequence_diagram", True) and not str(technical.get("system_sequence_diagram") or "").strip():
+            add_blocker(blockers, "design_completeness", "technical design is missing system_sequence_diagram")
         if not architecture.get("integration_sequence"):
             add_blocker(blockers, "design_completeness", "architecture design is missing integration_sequence")
+        elif policy.get("require_integration_sequence_diagram", True) and not str(architecture.get("integration_sequence_diagram") or "").strip():
+            add_blocker(blockers, "design_completeness", "architecture design is missing integration_sequence_diagram")
     if isinstance(sequence, dict) and sequence.get("applicable") is True:
         participants = {str(item) for item in sequence.get("participants", []) if str(item).strip()}
         for index, edge in enumerate(sequence.get("sequence", [])):

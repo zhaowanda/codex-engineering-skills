@@ -1040,12 +1040,15 @@ def render_requirement_clarification(spec: dict[str, Any]) -> str:
     questions: list[str] = []
     for item in as_list(spec.get("open_questions")):
         if isinstance(item, dict):
-            questions.append(text(item.get("question") or item.get("summary") or item))
+            required = item.get("required", True) is not False
+            status = str(item.get("status") or "open").lower()
+            if required and status != "closed":
+                questions.append(text(item.get("question") or item.get("summary") or item))
         else:
             questions.append(text(item))
 
-    decision = str(spec.get("decision") or "")
-    blocked = bool(questions) or decision in {"needs_clarification", "blocked"}
+    understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
+    blocked = bool(questions) or str(understanding.get("decision") or "") == "needs_clarification"
     return (
         "### Clarification Status\n\n"
         f"- Status: {'blocked pending answer' if blocked else 'no blocking clarification recorded'}\n"
@@ -1086,6 +1089,8 @@ def render_open_questions(*documents: dict[str, Any], language: str = "en") -> s
     for data in documents:
         for item in as_list(data.get("open_questions")):
             if isinstance(item, dict):
+                if item.get("required", True) is not False and str(item.get("status") or "open").lower() == "closed":
+                    continue
                 lines.append(text(item.get("question") or item.get("summary") or item))
             else:
                 lines.append(text(item))
@@ -2946,7 +2951,10 @@ def render_blockers(*documents: dict[str, Any], language: str = "en") -> str:
 def render_review_context(spec: dict[str, Any], language: str = "en") -> str:
     summary = spec.get("requirement_summary") or spec.get("summary") or spec.get("title")
     acceptance_count = len([item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)])
-    question_count = len(as_list(spec.get("open_questions")))
+    question_count = len([
+        item for item in as_list(spec.get("open_questions"))
+        if not isinstance(item, dict) or (item.get("required", True) is not False and str(item.get("status") or "open").lower() != "closed")
+    ])
     if language == "zh":
         return (
             f"- 需求核心：{zh_text(summary, '未同步到需求摘要')}\n"
@@ -2969,7 +2977,11 @@ def render_spec_review_narrative(spec: dict[str, Any], language: str = "en") -> 
     out_scope = "、".join(zh_text(item) for item in as_list(scope.get("out_of_scope"))) or "未声明额外范围外事项，评审时仍需确认是否存在隐含排除项"
     acceptance = [clean_acceptance_text(item.get("criteria"), "zh") for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
     acceptance_text = "；".join(acceptance) or "未同步到明确验收标准"
-    questions = [zh_text(item.get("question") or item.get("summary") or item) if isinstance(item, dict) else zh_text(item) for item in as_list(spec.get("open_questions"))]
+    questions = [
+        zh_text(item.get("question") or item.get("summary") or item) if isinstance(item, dict) else zh_text(item)
+        for item in as_list(spec.get("open_questions"))
+        if not isinstance(item, dict) or (item.get("required", True) is not False and str(item.get("status") or "open").lower() != "closed")
+    ]
     question_text = "；".join(questions) or "当前没有记录阻塞性澄清问题"
     if language == "zh":
         return (
@@ -5518,12 +5530,19 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
         for item in as_list(spec.get("business_objectives"))
         if isinstance(item, dict)
     ] + [text(item) for item in as_list(spec.get("business_objectives")) if not isinstance(item, dict)]
+    unresolved_required_questions = [
+        item for item in as_list(spec.get("open_questions"))
+        if not isinstance(item, dict) or (item.get("required", True) is not False and str(item.get("status") or "open").lower() != "closed")
+    ]
+    spec_decision_display = spec.get("decision")
+    if not unresolved_required_questions and str(spec_decision_display or "") in {"blocked", "needs_clarification"}:
+        spec_decision_display = "ready_for_design"
     return {
         "spec": (
             f"# {heading} 需求说明\n\n"
             "## 一、摘要\n\n"
             f"- 文档编号：`{doc_id}`\n"
-            f"- 当前结论：`{zh_text(spec.get('decision'), '未知')}`\n"
+            f"- 当前结论：`{zh_text(spec_decision_display, '未知')}`\n"
             f"- 是否涉及权限敏感场景：{zh_text((spec.get('permission_scope') or {}).get('sensitive'), '未知')}\n"
             "- 本文面向需求评审、技术设计和交付计划使用，机器可读依据见证据引用章节。\n\n"
             "### 阅读与评审重点\n\n"

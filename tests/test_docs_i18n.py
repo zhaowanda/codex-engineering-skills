@@ -2162,3 +2162,23 @@ def test_expert_design_sections_are_language_neutral() -> None:
     assert "renewal_order" in en_doc
     assert "needs_confirmation" not in zh_doc
     assert "{\"" not in zh_doc
+
+
+def test_docs_clarification_status_uses_unresolved_required_questions_only() -> None:
+    spec = {
+        "decision": "blocked",
+        "open_questions": [
+            {"question": "已确认的问题", "required": True, "status": "closed", "answer": "已确认"},
+            {"question": "建议问题", "required": False, "status": "open"},
+        ],
+        "requirements_understanding": {"decision": "pass"},
+    }
+
+    rendered = docs_governor.render_requirement_clarification_zh(spec)
+    open_questions = docs_governor.render_open_questions(spec, language="zh")
+    context = docs_governor.render_review_context(spec, "zh")
+
+    assert "状态：未记录阻塞性澄清问题" in rendered
+    assert "是否允许进入设计：是" in rendered
+    assert "已确认的问题" not in open_questions
+    assert "当前记录 0 个未决问题" in context

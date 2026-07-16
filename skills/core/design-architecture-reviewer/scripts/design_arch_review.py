@@ -1038,6 +1038,33 @@ def review(
         decision = "pass"
 
     grouped = {area: [item for item in findings if item["area"] == area] for area in REVIEW_AREAS}
+    diagram_checks = {
+        "process_flow_diagram": {
+            "required": bool(process_flow),
+            "present": bool(str(process_flow_diagram or "").strip()),
+        },
+        "system_sequence_diagram": {
+            "required": bool(isinstance(system_interaction_sequence, dict) and system_interaction_sequence.get("applicable") is True),
+            "present": bool(str(system_sequence_diagram or "").strip()),
+        },
+        "integration_sequence_diagram": {
+            "required": bool(integration_sequence),
+            "present": bool(str(integration_sequence_diagram or "").strip()),
+        },
+    }
+    source_location_checks = {
+        "provided": bool(source_locations),
+        "decision": source_locations.get("decision", "") if isinstance(source_locations, dict) else "",
+        "confirmed_modify_count": len([
+            item for item in as_list(source_locations.get("confirmed_anchors") if isinstance(source_locations, dict) else [])
+            if isinstance(item, dict) and item.get("role", "modify_candidate") != "reference_only"
+        ]),
+        "selected_entrypoint": selected_entrypoint,
+        "selected_entrypoint_confirmed": bool(selected_entrypoint and source_locations and selected_entrypoint in {
+            str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
+            if isinstance(item, dict) and item.get("path") and item.get("role", "modify_candidate") != "reference_only"
+        }),
+    }
     return {
         "schema": "codex-design-architecture-review-v1",
         "input_digests": {
@@ -1046,6 +1073,8 @@ def review(
             **{name: artifact_digest(data) for name, data in specialty_artifacts.items() if data},
         },
         "specialty_review_summary": specialty_summary,
+        "diagram_checks": diagram_checks,
+        "source_location_checks": source_location_checks,
         "score": score_card["score"],
         "level": score_card["level"],
         "severity_counts": score_card["severity_counts"],
@@ -1067,7 +1096,7 @@ def review(
 
 
 def validate(data: dict[str, Any]) -> tuple[bool, list[str]]:
-    required = ["schema", "score", "level", "severity_counts", "readiness_gate", "open_questions", "solution_tradeoff_review", "blockers", "decision", *REVIEW_AREAS]
+    required = ["schema", "score", "level", "severity_counts", "readiness_gate", "open_questions", "solution_tradeoff_review", "blockers", "decision", "diagram_checks", "source_location_checks", *REVIEW_AREAS]
     issues = [f"missing {key}" for key in required if key not in data]
     if data.get("schema") != "codex-design-architecture-review-v1":
         issues.append("schema must be codex-design-architecture-review-v1")
@@ -1075,6 +1104,11 @@ def validate(data: dict[str, Any]) -> tuple[bool, list[str]]:
         issues.append("decision must be pass/needs_revision/block")
     if data.get("decision") == "pass" and data.get("blockers"):
         issues.append("pass is not allowed with blockers")
+    if data.get("decision") == "pass":
+        if not isinstance(data.get("diagram_checks"), dict) or not data["diagram_checks"]:
+            issues.append("pass requires non-empty diagram_checks")
+        if not isinstance(data.get("source_location_checks"), dict):
+            issues.append("pass requires source_location_checks")
     if not isinstance(data.get("score"), int) or not (0 <= data.get("score", -1) <= 100):
         issues.append("score must be integer 0-100")
     if data.get("level") not in {"expert_ready", "reviewable", "needs_revision", "block"}:

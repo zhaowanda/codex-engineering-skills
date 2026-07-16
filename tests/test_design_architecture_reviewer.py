@@ -249,8 +249,21 @@ def test_complete_design_passes() -> None:
     assert result["decision"] == "pass"
     assert result["score"] >= 85
     assert result["readiness_gate"]["implementation_allowed"]
+    assert result["diagram_checks"]["process_flow_diagram"]["present"] is True
+    assert "source_location_checks" in result
     valid, issues = design_arch_review.validate(result)
     assert valid, issues
+
+
+def test_pass_review_requires_auditable_check_sections() -> None:
+    technical, architecture = complete_design()
+    result = design_arch_review.review(technical, architecture)
+    result.pop("diagram_checks")
+
+    valid, issues = design_arch_review.validate(result)
+
+    assert not valid
+    assert any("diagram_checks" in issue for issue in issues)
 
 
 def test_missing_design_diagrams_block_review() -> None:
