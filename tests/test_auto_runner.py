@@ -182,6 +182,39 @@ def test_harness_source_location_blocks_requirement_irrelevant_anchor() -> None:
         assert any(item["message"] == "confirmed modify anchor is not supported by requirement text" for item in result["blockers"])
 
 
+def test_harness_source_location_reports_cross_repo_anchor_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        frontend_repo = root / "operate-platform-fe"
+        backend_repo = root / "sigreal-operate-platform"
+        backend_source = backend_repo / "src/main/java/IotCardMonitorServiceImpl.java"
+        backend_source.parent.mkdir(parents=True)
+        backend_source.write_text("class IotCardMonitorServiceImpl {}\n", encoding="utf-8")
+        frontend_repo.mkdir()
+        project = root / "project_understanding"
+        project.mkdir()
+        digest = harness_validation.sha256(backend_source)
+        (root / "requirement.normalized.txt").write_text("物联网卡 iot card expiry renewal monitor", encoding="utf-8")
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "repo_root": str(frontend_repo),
+            "anchors": [{
+                "path": "src/main/java/IotCardMonitorServiceImpl.java",
+                "role": "confirmed_modify",
+                "confidence": "high",
+                "repo": "sigreal-operate-platform",
+                "repo_root": str(backend_repo),
+                "source_digest": digest,
+                "matched_symbols": ["IotCardMonitorServiceImpl"],
+                "matched_requirement_terms": ["iot", "card"],
+            }],
+        }), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="source_location", repo=frontend_repo)
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "confirmed modify anchor belongs to a different repository" for item in result["blockers"])
+
+
 def test_harness_source_location_rejects_parent_traversal() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

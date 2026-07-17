@@ -298,6 +298,8 @@ def source_location_checkpoint(
     for anchor in modify:
         relative = normalize_path(str(anchor.get("path") or ""))
         confidence = str(anchor.get("confidence") or "low")
+        anchor_repo_root = str(anchor.get("repo_root") or anchor.get("repository_root") or "").strip()
+        anchor_repo = str(anchor.get("repo") or anchor.get("repository") or "").strip()
         if not relative:
             add_blocker(blockers, "source_location", "confirmed modify anchor has no path")
             continue
@@ -319,6 +321,26 @@ def source_location_checkpoint(
                 matched_contract_terms=anchor.get("matched_contract_terms", []),
             )
         if configured_repo:
+            configured_resolved = configured_repo.resolve()
+            if anchor_repo_root:
+                anchor_root = Path(anchor_repo_root).expanduser()
+                try:
+                    anchor_resolved = anchor_root.resolve()
+                except OSError:
+                    anchor_resolved = anchor_root
+                if anchor_resolved != configured_resolved:
+                    row["repo_mismatch"] = {"anchor_repo_root": str(anchor_resolved), "configured_repo": str(configured_resolved), "anchor_repo": anchor_repo}
+                    add_blocker(
+                        blockers,
+                        "source_location",
+                        "confirmed modify anchor belongs to a different repository",
+                        path=relative,
+                        anchor_repo=anchor_repo,
+                        anchor_repo_root=str(anchor_resolved),
+                        configured_repo=str(configured_resolved),
+                    )
+                    checked.append(row)
+                    continue
             source = configured_repo / relative
             row["exists"] = source.is_file()
             if not source.is_file():

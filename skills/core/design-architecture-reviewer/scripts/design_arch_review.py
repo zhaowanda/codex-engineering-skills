@@ -158,6 +158,85 @@ def normalized_text(value: Any) -> str:
     return re.sub(r"\s+", " ", meaningful_text(value)).strip().lower()
 
 
+def token_set(value: Any) -> set[str]:
+    return {item for item in re.findall(r"[a-z0-9\u4e00-\u9fff]+", normalized_text(value)) if len(item) >= 2}
+
+
+def similarity_ratio(left: Any, right: Any) -> float:
+    left_tokens = token_set(left)
+    right_tokens = token_set(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / max(len(left_tokens), len(right_tokens))
+
+
+def literal_value(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("literal") or item.get("value") or item.get("term") or "")
+    return str(item or "")
+
+
+def critical_source_literals(technical: dict[str, Any]) -> list[str]:
+    literals = [literal_value(item).strip() for item in as_list(technical.get("source_literals"))]
+    if not literals:
+        source_blob = text_of({
+            "requirement_trace": technical.get("requirement_trace"),
+            "business_rule_mapping": technical.get("business_rule_mapping"),
+            "acceptance_mapping": technical.get("acceptance_mapping"),
+            "target_behavior": technical.get("target_behavior"),
+        })
+        literals.extend(re.findall(r"/[A-Za-z0-9_./{}:-]+", source_blob))
+        literals.extend(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", source_blob))
+    result: list[str] = []
+    for literal in literals:
+        clean = literal.strip(".,;:，。；：)）]】\"'")
+        if len(clean) >= 3 and clean.lower() not in {"api", "req", "rule"} and clean not in result:
+            result.append(clean)
+    return result[:80]
+
+
+def review_acceptance_literal_guard(technical: dict[str, Any], architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    literals = critical_source_literals(technical)
+    if not literals:
+        return
+    design_blob = text_of({"technical": technical, "architecture": architecture})
+    raw_design_blob = json.dumps({"technical": technical, "architecture": architecture}, ensure_ascii=False)
+    raw_mappings_blob = json.dumps({
+        "requirement_breakdown": technical.get("requirement_breakdown"),
+        "business_rule_mapping": technical.get("business_rule_mapping"),
+        "acceptance_mapping": technical.get("acceptance_mapping"),
+        "api_contracts": technical.get("api_contracts"),
+    }, ensure_ascii=False)
+    mapped_upper_literals = set(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", raw_mappings_blob.upper()))
+    missing = []
+    drifted = []
+    for literal in literals:
+        low = literal.lower()
+        if low not in design_blob:
+            missing.append(literal)
+            continue
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", literal):
+            related = [match for match in re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", raw_design_blob) if literal in match and match != literal]
+            if related and literal not in mapped_upper_literals:
+                drifted.append({"source_literal": literal, "design_variants": sorted(set(related))[:5]})
+    if missing:
+        findings.append(finding(
+            "requirement_coverage",
+            "high",
+            "source requirement literals are not bound in design",
+            missing[:20],
+            "Carry exact enum/status/API/field/time-window literals from source into rule, contract, data, acceptance, or explicit no-impact mappings.",
+        ))
+    if drifted:
+        findings.append(finding(
+            "requirement_coverage",
+            "high",
+            "source literals appear rewritten without an explicit mapping",
+            drifted[:20],
+            "Do not rewrite source enum/status literals such as EXPIRING into derived labels unless the mapping is explicitly justified.",
+        ))
+
+
 def artifact_digest(data: dict[str, Any]) -> str:
     def strip_volatile(value: Any) -> Any:
         if isinstance(value, dict):
@@ -362,11 +441,47 @@ def review_integration_sequence_diagram(integration_sequence: list[Any], diagram
         if not isinstance(step, dict):
             findings.append(finding("cross_repo_contract_review", "high", "integration sequence step must be an object", {"index": idx, "value": step}, "Represent architecture integration steps as structured objects."))
             continue
-        missing = missing_required(step, ["step", "actor", "action", "failure_handling"])
+        missing = missing_required(step, ["step", "action", "failure_handling"])
+        if not (step.get("from") or step.get("actor")):
+            missing.append("from")
+        if not (step.get("to") or step.get("target")):
+            missing.append("to")
+        if not (step.get("entrypoint") or step.get("contract")):
+            missing.append("entrypoint_or_contract")
+        if not step.get("data"):
+            missing.append("data")
+        if not step.get("owner_repo"):
+            missing.append("owner_repo")
         if missing:
-            findings.append(finding("cross_repo_contract_review", "high", "integration sequence step lacks required fields", {"index": idx, "missing": missing}, "Complete actor/action/failure_handling for every integration step."))
+            findings.append(finding("cross_repo_contract_review", "high", "integration sequence step lacks required fields", {"index": idx, "missing": missing}, "Add from/to, owner_repo, entrypoint or contract, data, action, and failure_handling."))
         if normalized_text(step.get("action")) not in normalized_diagram:
             findings.append(finding("cross_repo_contract_review", "high", "integration sequence diagram misses a reviewed action", {"index": idx, "action": step.get("action")}, "Keep the Mermaid integration diagram aligned with structured integration actions."))
+
+
+def review_integration_sequence_rewrite(
+    integration_sequence: list[Any],
+    acceptance_mapping: list[Any],
+    requirement_breakdown: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+) -> None:
+    source_texts = [
+        str(item.get("summary") or item.get("criteria") or item.get("design_refs") or "")
+        for item in [*acceptance_mapping, *requirement_breakdown]
+        if isinstance(item, dict)
+    ]
+    for idx, step in enumerate(integration_sequence):
+        if not isinstance(step, dict):
+            continue
+        action = str(step.get("action") or "")
+        weak_shape = not (step.get("entrypoint") and step.get("contract") and step.get("data") and step.get("owner_repo"))
+        if weak_shape and any(similarity_ratio(action, source) >= 0.82 for source in source_texts):
+            findings.append(finding(
+                "cross_repo_contract_review",
+                "high",
+                "integration sequence looks like acceptance criteria rewritten as a sequence step",
+                {"index": idx, "action": action},
+                "Replace AC/BRK prose with an execution step that names from/to, owner repo, entrypoint/contract, data exchanged, and failure handling.",
+            ))
 
 
 def review_module_decomposition(modules: list[Any], findings: list[dict[str, Any]]) -> None:
@@ -783,6 +898,7 @@ def review(
         findings.append(finding("technical_design_quality", "high", "business rules are not mapped to technical enforcement", "business_rule_mapping empty", "Map each business rule to API/service/query/frontend/export enforcement."))
     elif any(isinstance(item, dict) and not (item.get("technical_enforcement") and item.get("source_of_truth")) for item in business_rules):
         findings.append(finding("technical_design_quality", "high", "business rule mapping lacks enforcement or source of truth", business_rules, "Each rule needs technical_enforcement and source_of_truth."))
+    review_acceptance_literal_guard(technical, architecture, findings)
 
     review_process_flow(process_flow, findings)
     review_process_flow_diagram(process_flow, process_flow_diagram, findings)
@@ -809,6 +925,23 @@ def review(
             missing = missing_required(item, ["compatibility", "old_consumer_impact"])
             if missing:
                 findings.append(finding("api_contract_review", "high", "API contract lacks compatibility fields", {"index": idx, "missing": missing}, "Add compatibility and old_consumer_impact."))
+            contract_text = str(item.get("contract") or item.get("endpoint") or "")
+            if contract_text and "no api impact confirmed" not in contract_text.lower() and not (item.get("source_evidence") or item.get("controller_file") or item.get("frontend_proxy_path")):
+                findings.append(finding("api_contract_review", "high", "API contract lacks source binding evidence", {"index": idx, "contract": contract_text}, "Bind every concrete API contract to api_surface/source_location evidence, controller file, or frontend proxy path."))
+            if contract_text and contract_text.strip() in {"/list", "/paging", "/page"} and not item.get("source_evidence"):
+                findings.append(finding("api_contract_review", "high", "API contract appears guessed from a generic list/page route", {"index": idx, "contract": contract_text}, "Replace guessed generic endpoints with confirmed routes from source evidence."))
+    confirmed_contracts = {
+        str(contract).split(" (", 1)[0].strip()
+        for contract in as_list(source_locations.get("confirmed_contracts") if isinstance(source_locations, dict) else [])
+        if str(contract).strip()
+    }
+    if confirmed_contracts:
+        for idx, item in enumerate(api_contracts):
+            if not isinstance(item, dict):
+                continue
+            endpoint = str(item.get("endpoint") or item.get("contract") or "").split(" (", 1)[0].strip()
+            if endpoint.startswith("/") and endpoint not in confirmed_contracts:
+                findings.append(finding("api_contract_review", "high", "API contract is not in confirmed source contracts", {"index": idx, "endpoint": endpoint, "confirmed_contracts": sorted(confirmed_contracts)}, "Use only confirmed_contracts from source location evidence or regenerate source evidence."))
     if api_contracts and not interface_examples and not api_excluded:
         findings.append(finding("api_contract_review", "medium", "API/interface examples are missing", "interface_examples empty", "Add request/response/error examples or an explicit no-example reason."))
     if "api" in text_of(technical) and not api_contracts:
@@ -1004,6 +1137,7 @@ def review(
         findings.append(finding("cross_repo_contract_review", "high", "integration sequence is missing", "integration_sequence empty", "Describe actor/action/contract/failure handling in execution order."))
     else:
         review_integration_sequence_diagram(integration_sequence, integration_sequence_diagram, findings)
+        review_integration_sequence_rewrite(integration_sequence, acceptance_mapping, requirement_breakdown, findings)
     if not failure_isolation:
         findings.append(finding("architecture_depth_review", "medium", "failure isolation design is missing", "failure_isolation empty", "Describe dependency failures, isolation behavior, and user impact."))
     if not rollback:

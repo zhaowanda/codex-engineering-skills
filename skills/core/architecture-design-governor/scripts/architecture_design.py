@@ -123,8 +123,8 @@ def render_integration_sequence_diagram(integration_sequence: list[dict[str, Any
         return ""
     participants: list[str] = []
     for step in steps:
-        actor = str(step.get("actor") or "").strip()
-        target = str(step.get("target") or "").strip()
+        actor = str(step.get("from") or step.get("actor") or "").strip()
+        target = str(step.get("to") or step.get("target") or "").strip()
         if actor and actor not in participants:
             participants.append(actor)
         if target and target not in participants:
@@ -136,13 +136,14 @@ def render_integration_sequence_diagram(integration_sequence: list[dict[str, Any
     for participant, alias in aliases.items():
         lines.append(f"    participant {alias} as {mermaid_label(participant)}")
     for step in steps:
-        actor_name = str(step.get("actor") or "System")
-        target_name = str(step.get("target") or step.get("actor") or "System")
+        actor_name = str(step.get("from") or step.get("actor") or "System")
+        target_name = str(step.get("to") or step.get("target") or step.get("actor") or "System")
         actor = aliases.get(actor_name, "PX")
         target = aliases.get(target_name, "PY")
         action = mermaid_label(str(step.get("action") or "action"))
+        data = mermaid_label(str(step.get("data") or step.get("contract") or ""))
         failure = mermaid_label(str(step.get("failure_handling") or "failure handling"))
-        lines.append(f"    {actor}->>{target}: {action}")
+        lines.append(f"    {actor}->>{target}: {action}{f' | {data}' if data else ''}")
         lines.append(f"    Note over {target}: Failure: {failure}")
     lines.append("```")
     return "\n".join(lines)
@@ -581,10 +582,16 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "integration_sequence": [
             {
                 "step": idx,
-                "actor": owner_repo,
-                "target": route_contract or owner_module,
-                "action": str(item.get("summary") or summary),
-                "failure_handling": "preserve existing failure behavior",
+                "from": "actor/client",
+                "to": owner_repo,
+                "actor": "actor/client",
+                "target": owner_repo,
+                "owner_repo": owner_repo,
+                "entrypoint": owner_module,
+                "contract": route_contract or f"{owner_repo} internal contract",
+                "data": f"{item.get('id')}: {item.get('summary') or summary}",
+                "action": f"execute via `{owner_module}` and verify {item.get('id') or idx}",
+                "failure_handling": "preserve existing failure behavior and expose the existing user/operator error path",
                 "requirement_breakdown_id": item.get("id"),
             }
             for idx, item in enumerate(breakdown, start=1)
@@ -593,10 +600,16 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             [
                 {
                     "step": idx,
-                    "actor": owner_repo,
-                    "target": route_contract or owner_module,
-                    "action": str(item.get("summary") or summary),
-                    "failure_handling": "preserve existing failure behavior",
+                    "from": "actor/client",
+                    "to": owner_repo,
+                    "actor": "actor/client",
+                    "target": owner_repo,
+                    "owner_repo": owner_repo,
+                    "entrypoint": owner_module,
+                    "contract": route_contract or f"{owner_repo} internal contract",
+                    "data": f"{item.get('id')}: {item.get('summary') or summary}",
+                    "action": f"execute via `{owner_module}` and verify {item.get('id') or idx}",
+                    "failure_handling": "preserve existing failure behavior and expose the existing user/operator error path",
                     "requirement_breakdown_id": item.get("id"),
                 }
                 for idx, item in enumerate(breakdown, start=1)

@@ -567,6 +567,40 @@ def test_question_governor_filters_placeholder_and_localizes_chinese_questions()
     assert not any(item["message"] == "Chinese requirement generated an English template question" for item in validation["blockers"])
 
 
+def test_question_governor_adds_quality_score_and_blocks_low_quality_required_question() -> None:
+    spec = {"doc_id": "REQ-Q", "title": "物联网卡续费", "requirement_summary": "物联网卡到期续费"}
+    result = question_governor.generate({
+        **spec,
+        "impact_surface": [{"area": "data"}],
+        "impact_applicability": [{"area": "data", "status": "required"}],
+    })
+
+    assert result["questions"]
+    assert all(isinstance(item.get("quality"), dict) for item in result["questions"])
+    assert all("score" in item["quality"] for item in result["questions"])
+
+    low_quality = {
+        "schema": "codex-open-questions-v1",
+        "spec_digest": question_governor.canonical_spec_digest(spec),
+        "questions": [{
+            "id": "Q-BAD",
+            "question": "待确认？",
+            "owner": "product",
+            "required": True,
+            "status": "closed",
+            "answer": "ok",
+            "source": "test",
+            "category": "general",
+            "risk_if_unanswered": "wrong design",
+            "quality": {"score": 20, "actionable": False, "domain_specific": False, "not_template": False, "non_duplicate": True, "answerable_by_owner": True, "has_source": True},
+        }],
+    }
+    validation = question_governor.validate_questions(low_quality, spec)
+
+    assert validation["decision"] == "block"
+    assert any("quality" in item["message"] for item in validation["blockers"])
+
+
 def test_question_governor_asks_from_weak_understanding_dimensions() -> None:
     spec = spec_governor.normalize("REQ-WEAK-SCORE", "订单导出", "Goal: reduce support work.\nReq: Admin exports orders.\nAC: exported file works.")
     result = question_governor.generate(spec)

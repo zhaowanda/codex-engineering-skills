@@ -124,8 +124,28 @@ def write_ready_small_feature(root: Path, docs_root: Path, doc_id: str = "REQ-1"
         "open_questions.json": {"schema": "codex-open-questions-v1", "questions": [], "decision": "pass"},
         "domain_model_design.json": {"schema": "codex-domain-model-design-v1", "decision": "pass", "blockers": [], "business_objects": [{"name": "SyntheticFeature"}], "rules": [{"id": "RULE-1", "statement": "Keep behavior compatible"}]},
         "architecture_framing.json": {"schema": "codex-architecture-framing-v1", "decision": "pass", "blockers": [], "system_boundary": {"inside": ["target-repo"]}, "repo_responsibilities": [{"repo": "target-repo", "responsibility": "Own the feature"}]},
-        "technical_design.json": {"schema": "codex-technical-design-v1", "decision": "pass", "blockers": [], "design_scope": {"modules": ["app"]}, "process_flow": [{"step": "Apply the change"}], "solution_options": [{"id": "option-a"}], "selected_solution": {"id": "option-a"}, "test_strategy": [{"type": "regression"}]},
-        "architecture_design.json": {"schema": "codex-architecture-design-v1", "decision": "pass", "blockers": [], "architecture_scope": {"repos": ["target-repo"]}, "architecture_options": [{"id": "in-place"}], "selected_architecture": {"id": "in-place"}, "component_boundaries": [{"component": "app", "owns": "feature"}]},
+        "technical_design.json": {
+            "schema": "codex-technical-design-v1",
+            "decision": "pass",
+            "blockers": [],
+            "design_scope": {"modules": ["app"]},
+            "process_flow": [{"flow_name": "synthetic feature", "steps": [{"step": 1, "actor": "user", "action": "Apply the change", "input": "request", "output": "feature updated", "exception": "show existing error"}]}],
+            "process_flow_diagram": "```mermaid\nflowchart TD\n    S1[\"user: Apply the change\"]\n```",
+            "system_interaction_sequence": {"applicable": False, "not_applicable_reason": "single-repo synthetic fixture has no cross-component API, MQ, or data dependency"},
+            "solution_options": [{"id": "option-a"}],
+            "selected_solution": {"id": "option-a"},
+            "test_strategy": [{"type": "regression"}],
+        },
+        "architecture_design.json": {
+            "schema": "codex-architecture-design-v1",
+            "decision": "pass",
+            "blockers": [],
+            "architecture_scope": {"repos": ["target-repo"]},
+            "architecture_options": [{"id": "in-place"}],
+            "selected_architecture": {"id": "in-place"},
+            "component_boundaries": [{"component": "app", "owns": "feature"}],
+            "integration_sequence": [{"step": 1, "from": "user", "to": "target-repo", "owner_repo": "target-repo", "entrypoint": "src/app.py", "contract": "target-repo internal contract", "data": "synthetic feature request", "action": "apply synthetic feature update", "failure_handling": "show existing error"}],
+        },
         "design_architecture_review.json": {"schema": "codex-design-architecture-review-v1", "decision": "pass", "blockers": [], "score": 100, "readiness_gate": {"implementation_allowed": True}},
         "test_design.json": {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [{"id": "TC-1", "expected": "feature passes"}], "evidence_required": ["pytest output"]},
         "test_data_plan.json": {"schema": "codex-test-data-plan-v1", "decision": "pass", "datasets": [{"id": "DATA-1", "type": "synthetic"}], "case_data_matrix": [{"case_id": "TC-1", "dataset_ids": ["DATA-1"]}]},
@@ -458,6 +478,9 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
     assert tech["source_location_evidence"]["decision"] == "pass"
     assert {item["module"] for item in tech["module_decomposition"]} == {"src/views/plugIn/accidentAnalysis.vue", "src/components/DualCameraLivePlayer.vue"}
     assert tech["api_contracts"][0]["contract"] == "/operate/api/dualCamera/playbackStreamControl"
+    assert tech["api_contracts"][0]["source_evidence"]
+    assert tech["api_contracts"][0]["confirmed_contract"] is True
+    assert any(item["literal"] == "/operate/api/dualCamera/playbackStreamControl" for item in tech["source_literals"])
     assert {item["to"] for item in tech["system_interaction_sequence"]["sequence"]} >= {"/operate/api/dualCamera/playbackStreamControl", "src/components/DualCameraLivePlayer.vue"}
     assert len(tech["process_flow"][0]["steps"]) >= 2
     assert "playback" in tech["system_sequence_diagram"].lower()

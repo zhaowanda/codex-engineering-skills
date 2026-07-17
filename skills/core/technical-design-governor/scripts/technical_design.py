@@ -293,6 +293,63 @@ def contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any]) -> 
     return route_refs[0]
 
 
+def parse_contract_ref(contract: str) -> dict[str, Any]:
+    match = re.match(r"^\s*(?:(?P<method>[A-Z]+)\s+)?(?P<route>[^()\s]+)(?:\s+\((?P<file>[^)]+)\))?", contract)
+    if not match:
+        return {"contract": contract, "confirmed_contract": False}
+    route = (match.group("route") or "").strip()
+    file = (match.group("file") or "").strip()
+    return {
+        "contract": contract,
+        "method": (match.group("method") or "").strip(),
+        "endpoint": route if route.startswith("/") else "",
+        "controller_file": "" if file == "evidence_bundle.json" else file,
+        "source_evidence": file or "evidence_bundle.contracts",
+        "confirmed_contract": bool(route and not contract.startswith("No API impact confirmed")),
+    }
+
+
+def api_contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any]) -> dict[str, Any]:
+    contract = contract_for_breakdown(route_refs, breakdown)
+    parsed = parse_contract_ref(contract)
+    return {
+        **parsed,
+        "compatibility": "preserve existing consumers unless design updates contract",
+        "old_consumer_impact": "review route consumers before implementation",
+        "requirement_breakdown_id": breakdown.get("id"),
+        "api_impact": breakdown.get("api_impact"),
+        "binding_rule": "contract must come from api_surface routes or source_location evidence; guessed endpoint names are not implementation-ready",
+    }
+
+
+def extract_source_literals(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    blob = json.dumps(
+        {
+            "title": spec.get("title"),
+            "summary": spec.get("requirement_summary"),
+            "requirements": spec.get("requirements"),
+            "acceptance": spec.get("acceptance_criteria"),
+            "business_rules": spec.get("business_rules"),
+            "source_trace": spec.get("source_trace"),
+            "source": spec.get("source"),
+            "data_fields": spec.get("data_fields"),
+            "business_objects": spec.get("business_objects"),
+        },
+        ensure_ascii=False,
+    )
+    candidates = set(re.findall(r"/[A-Za-z0-9_./{}:-]+", blob))
+    candidates.update(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", blob))
+    candidates.update(re.findall(r"\b[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)+\b", blob))
+    candidates.update(re.findall(r"\b\d+\s*(?:天|日|day|days|小时|hour|hours)\b", blob, flags=re.I))
+    result: list[dict[str, Any]] = []
+    for literal in sorted(candidates):
+        clean = literal.strip(".,;:，。；：)）]】\"'")
+        if len(clean) < 2 or clean.lower() in {"api", "req", "rule"}:
+            continue
+        result.append({"literal": clean, "source": "spec.source", "required_binding": True})
+    return result[:80]
+
+
 def rank_files_for_subject(subject: str, ctx: dict[str, Any]) -> list[dict[str, Any]]:
     tokens = tokenize_requirement(subject)
     candidates: list[dict[str, Any]] = []
@@ -1237,6 +1294,11 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
                 "requirement_breakdown_id": breakdown[0].get("id") if breakdown else "BRK-1",
                 "entrypoint_confidence": entrypoint_confidence.get("level"),
             })
+    source_literals = extract_source_literals(spec)
+    known_literals = {str(item.get("literal")) for item in source_literals if isinstance(item, dict)}
+    for contract in confirmed_contracts:
+        if contract not in known_literals:
+            source_literals.append({"literal": contract, "source": "source_location_evidence.confirmed_contracts", "required_binding": True})
     return {
         "schema": "codex-technical-design-v1",
         "decision": "pass" if design_allowed else "block",
@@ -1252,6 +1314,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
             "test_file_hints": ctx["test_file_hints"],
         },
         "source_location_evidence": location_evidence,
+        "source_literals": source_literals,
         "design_scope": spec.get("scope") or {"in_scope": [summary], "out_of_scope": [], "assumptions": [], "non_goals": []},
         "impact_applicability": as_list(spec.get("impact_applicability")),
         "scope_model": spec.get("scope_model") or {},
@@ -1280,7 +1343,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "module_decomposition": module_decomposition,
         "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": str(item.get("summary") or summary), "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
-        "api_contracts": [{"contract": contract_for_breakdown(route_refs, item), "compatibility": "preserve existing consumers unless design updates contract", "old_consumer_impact": "review route consumers before implementation", "requirement_breakdown_id": item.get("id"), "api_impact": item.get("api_impact")} for item in breakdown],
+        "api_contracts": [api_contract_for_breakdown(route_refs, item) for item in breakdown],
         "interface_examples": [] if applicability.get("api") in {"excluded", "not_applicable"} else [{"name": route_refs[0] if route_refs else "no API request expected", "request": route_refs[0] if route_refs else "no API request expected", "response": f"response contract for {route_refs[0]}" if route_refs else "no API response change expected", "error_response": f"error contract for {route_refs[0]}" if route_refs else "no API error contract change expected"}],
         "compatibility_strategy": [{"old_consumer": "existing consumers", "old_data": "existing data", "rollback": "revert changed behavior", "behavior": "preserve backward compatibility"}],
         "compatibility_matrix": [{"consumer": "existing consumers", "old_behavior": "current behavior before this requirement", "new_behavior": summary, "compatibility": "backward compatible by default", "rollback_behavior": "revert changed behavior"}],

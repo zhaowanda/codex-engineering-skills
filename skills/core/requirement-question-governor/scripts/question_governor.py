@@ -27,6 +27,15 @@ ENGLISH_TEMPLATE_PREFIXES = (
     "clarify ",
     "resolve ",
 )
+GENERIC_LOW_QUALITY_TERMS = {
+    "功能正常",
+    "是否合理",
+    "怎么处理",
+    "待确认",
+    "confirm later",
+    "clarify requirement",
+    "to be confirmed",
+}
 
 
 def as_list(value: Any) -> list[Any]:
@@ -114,6 +123,35 @@ def semantic_question_key(question: dict[str, Any]) -> str:
     return aliases.get(category, category)
 
 
+def question_quality(question: dict[str, Any], spec: dict[str, Any] | None = None, existing_questions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    text = str(question.get("question") or "").strip()
+    lower = text.lower()
+    category = str(question.get("category") or "")
+    source = str(question.get("source") or "")
+    owner = str(question.get("owner") or "")
+    existing_questions = existing_questions or []
+    duplicate_count = sum(1 for item in existing_questions if item is not question and question_key(item) == lower)
+    actionable = text.endswith(("?", "？")) and len(text) >= 8 and not any(term in lower or term in text for term in GENERIC_LOW_QUALITY_TERMS)
+    domain_specific = any(token in lower or token in text for token in [
+        "api", "endpoint", "contract", "field", "state", "permission", "tenant", "role", "repo", "entrypoint", "retry", "idempotency", "接口", "字段", "状态", "权限", "租户", "角色", "仓库", "入口", "重试", "幂等", "验收", "流程", "数据",
+    ]) or category not in {"general", "ambiguity", ""}
+    not_template = not is_placeholder_question(text) and not lower.startswith(("clarify requirement ambiguity", "clarification question", "what needs to be confirmed"))
+    if spec is not None and spec_prefers_zh(spec) and not has_cjk(text) and lower.startswith(ENGLISH_TEMPLATE_PREFIXES):
+        not_template = False
+    non_duplicate = duplicate_count == 0
+    answerable_by_owner = bool(owner.strip()) and owner not in {"unknown", "tbd", "待确认"}
+    dimensions = {
+        "actionable": actionable,
+        "domain_specific": domain_specific,
+        "not_template": not_template,
+        "non_duplicate": non_duplicate,
+        "answerable_by_owner": answerable_by_owner,
+        "has_source": bool(source.strip()),
+    }
+    score = sum(1 for value in dimensions.values() if value) * 100 // len(dimensions)
+    return {**dimensions, "score": score}
+
+
 def canonical_spec_digest(spec: dict[str, Any]) -> str:
     def strip_volatile(value: Any) -> Any:
         if isinstance(value, dict):
@@ -180,7 +218,7 @@ def add_question(questions: list[dict[str, Any]], question: str, owner: str, req
     candidate = {"question": question, "category": category, "source": source}
     if question.lower() in {question_key(item) for item in questions} or semantic_question_key(candidate) in {semantic_question_key(item) for item in questions}:
         return
-    questions.append({
+    row = {
         "id": f"Q-{len(questions) + 1}",
         "question": question,
         "owner": owner,
@@ -190,7 +228,9 @@ def add_question(questions: list[dict[str, Any]], question: str, owner: str, req
         "source": source,
         "category": category,
         "risk_if_unanswered": risk or risk_for_category(category),
-    })
+    }
+    row["quality"] = question_quality(row, existing_questions=questions)
+    questions.append(row)
 
 
 def impact_areas(spec: dict[str, Any]) -> set[str]:
@@ -315,7 +355,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             raw_question = str(item.get("question") or "")
             if is_placeholder_question(raw_question):
                 continue
-            questions.append({
+            row = {
                 "id": item.get("id") or f"Q-{len(questions) + 1}",
                 "question": localize_question(raw_question or str(item), str(item.get("category") or "general"), spec),
                 "owner": item.get("owner") or "product/engineering",
@@ -325,7 +365,9 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
                 "source": "spec.open_questions",
                 "category": item.get("category", "general"),
                 "risk_if_unanswered": item.get("risk_if_unanswered") or risk_for_category(str(item.get("category") or "general")),
-            })
+            }
+            row["quality"] = question_quality(row, spec, questions)
+            questions.append(row)
     for conflict in as_list(spec.get("rule_conflicts")):
         if isinstance(conflict, dict):
             add_question(questions, f"Resolve rule conflict: {conflict.get('message')}", "product/engineering", True, "spec.rule_conflicts", "business_rule")
@@ -464,6 +506,9 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             )
     finalize_question_ids(questions)
     questions = merge_existing_answers(questions, existing, spec)
+    for question in questions:
+        if isinstance(question, dict):
+            question["quality"] = question_quality(question, spec, questions)
     decision = "block" if any(q["required"] and q["status"] != "closed" for q in questions) else "pass"
     return {
         "schema": SCHEMA,
@@ -502,6 +547,13 @@ def validate_questions(data: dict[str, Any], spec: dict[str, Any] | None = None)
             blockers.append({"source": question.get("id", "question"), "message": "required closed question must include an answer"})
         if isinstance(question, dict) and question.get("required") and not str(question.get("risk_if_unanswered") or "").strip():
             blockers.append({"source": question.get("id", "question"), "message": "required question must include risk_if_unanswered"})
+        if isinstance(question, dict) and question.get("required") and (spec is not None or isinstance(question.get("quality"), dict)):
+            quality = question.get("quality") if isinstance(question.get("quality"), dict) else question_quality(question, spec, as_list(data.get("questions")))
+            if int(quality.get("score") or 0) < 80:
+                blockers.append({"source": question.get("id", "question"), "message": "required question quality score is below policy", "quality": quality})
+            for key in ["actionable", "not_template", "answerable_by_owner", "has_source"]:
+                if quality.get(key) is not True:
+                    blockers.append({"source": question.get("id", "question"), "message": f"required question quality check failed: {key}", "quality": quality})
     return {"schema": "codex-open-questions-validation-v1", "decision": "block" if blockers else "pass", "blockers": blockers}
 
 

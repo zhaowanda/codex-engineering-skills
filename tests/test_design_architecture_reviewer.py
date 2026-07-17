@@ -82,7 +82,7 @@ def complete_design() -> tuple[dict, dict]:
         "module_decomposition": [{"module": "src/checkout/CheckoutSummary.tsx", "responsibility": "render discount rows", "input": "pricing response", "output": "summary UI", "dependencies": ["pricing API"], "cohesion_reason": "presentation only", "coupling_control": "no pricing calculation in UI"}],
         "logical_data_flow": [{"source": "pricing API", "transform": "format discount rows", "destination": "checkout summary", "owner": "pricing-service", "data_security": "no sensitive personal data"}],
         "target_behavior": [{"requirement_id": "REQ-1", "behavior": "buyer sees discount breakdown"}],
-        "api_contracts": [{"contract": "discounts[] field unchanged", "compatibility": "additive rendering only", "old_consumer_impact": "none"}],
+        "api_contracts": [{"contract": "GET /api/pricing (src/checkout/usePricing.ts)", "endpoint": "/api/pricing", "controller_file": "src/checkout/usePricing.ts", "source_evidence": "api_surface.routes", "confirmed_contract": True, "compatibility": "additive rendering only", "old_consumer_impact": "none"}],
         "interface_examples": [{"name": "pricing response", "request": "GET /api/pricing", "response": "{\"discounts\":[]}", "error_response": "{\"error\":\"pricing unavailable\"}"}],
         "compatibility_strategy": [{"old_consumer": "checkout page", "old_data": "orders without discounts", "rollback": "hide rows", "behavior": "empty discounts render nothing"}],
         "compatibility_matrix": [{"consumer": "checkout page", "old_behavior": "subtotal only", "new_behavior": "discount rows when present", "compatibility": "additive", "rollback_behavior": "hide rows"}],
@@ -159,7 +159,7 @@ def complete_design() -> tuple[dict, dict]:
         "cross_repo_dependency_graph": [{"from": "pricing-service", "to": "web-app", "contract": "discounts[]", "change": "confirm only"}],
         "data_flow": [{"source": "pricing-service", "target": "web-app", "rule": "display only"}],
         "data_ownership": [{"business_object": "discount", "owner_repo": "pricing-service", "write_authority": "pricing-service", "consistency_rule": "web read only"}],
-        "integration_sequence": [{"step": 1, "actor": "web-app", "target": "pricing-service", "action": "load pricing", "failure_handling": "show existing error"}],
+        "integration_sequence": [{"step": 1, "from": "web-app", "to": "pricing-service", "actor": "web-app", "target": "pricing-service", "owner_repo": "web-app", "entrypoint": "src/checkout/CheckoutSummary.tsx", "contract": "GET /api/pricing", "data": "pricing response discounts[]", "action": "load pricing", "failure_handling": "show existing error"}],
         "integration_sequence_diagram": "```mermaid\nsequenceDiagram\n    autonumber\n    participant web-app\n    participant pricing-service\n    web-app->>pricing-service: load pricing\n```",
         "failure_isolation": [{"failure": "discounts omitted", "isolation": "render subtotal only", "user_impact": "checkout continues"}],
         "security_and_permission": [{"control": "cart ownership enforced by API", "impact": "no new permission"}],
@@ -279,6 +279,58 @@ def test_missing_design_diagrams_block_review() -> None:
     assert "process flow diagram is missing" in messages
     assert "system sequence diagram is missing" in messages
     assert "integration sequence diagram is missing" in messages
+
+
+def test_source_literal_drift_blocks_design_review() -> None:
+    technical, architecture = complete_design()
+    technical["source_literals"] = [{"literal": "EXPIRING", "source": "source.requirement", "required_binding": True}]
+    technical["business_rule_mapping"][0]["technical_enforcement"] = "render EXPIRING_30D status"
+    technical["target_behavior"][0]["behavior"] = "buyer sees EXPIRING_30D renewal marker"
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "needs_revision"
+    assert "source literals appear rewritten without an explicit mapping" in json_dumps(result)
+
+
+def test_api_contract_without_source_binding_needs_revision() -> None:
+    technical, architecture = complete_design()
+    technical["api_contracts"] = [{"contract": "/list", "compatibility": "unknown", "old_consumer_impact": "unknown"}]
+
+    result = design_arch_review.review(technical, architecture)
+
+    messages = json_dumps(result)
+    assert result["decision"] == "needs_revision"
+    assert "API contract lacks source binding evidence" in messages
+    assert "generic list/page route" in messages
+
+
+def test_integration_sequence_rewritten_from_acceptance_needs_revision() -> None:
+    technical, architecture = complete_design()
+    architecture["integration_sequence"] = [{
+        "step": 1,
+        "actor": "web-app",
+        "target": "pricing-service",
+        "action": "business slice discount display",
+        "failure_handling": "show error",
+    }]
+    architecture["integration_sequence_diagram"] = "```mermaid\nsequenceDiagram\n    web-app->>pricing-service: business slice discount display\n```"
+    technical["requirement_breakdown"] = [{
+        "id": "BRK-1",
+        "summary": "business slice discount display",
+        "behavior_change": "show discount",
+        "impact_areas": ["ui"],
+        "field_impact": "discounts[]",
+        "api_impact": "existing pricing API",
+        "permission_impact": "preserve permission",
+    }]
+
+    result = design_arch_review.review(technical, architecture)
+
+    messages = json_dumps(result)
+    assert result["decision"] == "needs_revision"
+    assert "integration sequence step lacks required fields" in messages
+    assert "acceptance criteria rewritten" in messages
 
 
 def test_specialty_blocker_is_aggregated_and_blocks_implementation() -> None:
