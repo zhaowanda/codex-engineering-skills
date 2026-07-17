@@ -131,7 +131,7 @@ def is_section_heading(line: str) -> bool:
     if re.match(r"^#{1,6}\s+", stripped):
         return True
     compact = stripped.strip("# \t")
-    return bool(re.match(r"^(范围|可执行需求|需求|验收标准|非范围|非目标|业务规则|背景|说明|acceptance criteria|acceptance|requirements?|scope|out of scope|business rules?)$", compact, re.I))
+    return bool(re.match(r"^(范围|可执行需求|需求|验收标准|非范围|非目标|业务规则|背景|说明|业务目标|当前痛点|预期业务结果|业务流程|业务边界|明确入口|明确改动目标|状态机|状态迁移规则|幂等与补偿|重试策略|约定|acceptance criteria|acceptance|requirements?|scope|out of scope|business rules?)$", compact, re.I))
 
 
 def section_title(line: str) -> str:
@@ -233,7 +233,7 @@ def extract_acceptance(lines: list[str], raw_text: str = "", requirement_ir: dic
                 "source_evidence": "input",
             })
     structured = ir_acceptance_items(requirement_ir)
-    section_items = [item[0] for item in structured] if structured else collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance"))
+    section_items = [item[0] for item in structured] if structured else collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance", "预期业务结果", "业务边界"))
     evidence_by_criteria = {item[0]: item[1] for item in structured}
     for criteria in section_items:
         if criteria and criteria not in {str(item.get("criteria")) for item in result}:
@@ -341,6 +341,7 @@ def extract_state_transitions(lines: list[str]) -> list[dict[str, str]]:
         re.compile(r"状态\s*从\s*(.+?)\s*(?:到|变为)\s*(.+)"),
         re.compile(r"state\s*[:：]\s*(.+?)\s*->\s*(.+)", re.I),
         re.compile(r"状态\s*[:：]\s*(.+?)\s*->\s*(.+)"),
+        re.compile(r"`?([A-Z][A-Z0-9_]+)`?\s*->\s*`?([A-Z][A-Z0-9_]+)`?"),
     ]
     for line in lines:
         for pattern in patterns:
@@ -471,7 +472,7 @@ def expert_readiness_gaps(
 
 def is_negative(text: str) -> bool:
     lower = text.lower()
-    return any(token in lower for token in ["cannot", "must not", "should not", "deny", "forbid", "unauthorized", "non-admin", "不能", "不得", "禁止", "无权限", "非管理员"])
+    return any(token in lower for token in ["cannot", "must not", "should not", "deny", "forbid", "unauthorized", "non-admin", "不能", "不得", "禁止", "无权限", "非管理员", "不创建", "不重复", "不允许"])
 
 
 def evidence_for_text(text: str) -> list[str]:
@@ -537,8 +538,10 @@ def extract_user_scenarios(lines: list[str], actors: list[str]) -> list[dict[str
     return scenarios
 
 
-def extract_business_objectives(lines: list[str]) -> list[dict[str, str]]:
+def extract_business_objectives(lines: list[str], raw_text: str = "") -> list[dict[str, str]]:
     objectives = extract_prefixed(lines, ("objective", "goal", "业务目标", "目标"))
+    if not objectives and raw_text:
+        objectives = collect_section_items(raw_text, ("业务目标", "预期业务结果"))
     if objectives:
         return [{"id": f"BO-{idx + 1}", "objective": item, "source_evidence": "input"} for idx, item in enumerate(objectives)]
     return []
@@ -849,17 +852,21 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
     return entries
 
 
-def extract_business_flow(lines: list[str], actors: list[str], entrypoints: list[dict[str, str]], acceptance: list[dict[str, Any]], summary: str) -> list[dict[str, Any]]:
+def extract_business_flow(lines: list[str], actors: list[str], entrypoints: list[dict[str, str]], acceptance: list[dict[str, Any]], summary: str, raw_text: str = "") -> list[dict[str, Any]]:
     flow_items = extract_prefixed(lines, ("business flow", "flow", "流程", "业务流程", "scenario", "场景"))
+    if not flow_items and raw_text:
+        flow_items = collect_section_items(raw_text, ("业务流程",))
     if flow_items:
         result = []
         for idx, item in enumerate(flow_items):
             actor = actors[0] if actors else "actor to confirm"
-            entrypoint = entrypoints[0].get("trigger", item) if entrypoints else item
+            entrypoint = entrypoints[0].get("trigger", "") if entrypoints else ""
+            if not entrypoint:
+                entrypoint = f"business flow step {idx + 1}"
             result.append({
                 "step": idx + 1,
                 "actor": actor,
-                "trigger": item,
+                "trigger": entrypoint,
                 "system_behavior": item,
                 "expected_outcome": item,
                 "structured_step": structured_flow_step(item, actor, entrypoint, idx + 1),
@@ -1024,6 +1031,14 @@ def state_machine_model(lines: list[str], text: str, transitions: list[dict[str,
     compensation = extract_prefixed(lines, ("compensation", "compensation rule", "补偿", "补偿规则"))
     timeout = extract_prefixed(lines, ("timeout", "超时", "超时规则"))
     invalid_transitions = extract_prefixed(lines, ("invalid transition", "非法流转", "禁止流转"))
+    if not retry_policy:
+        retry_policy = collect_section_items(text, ("重试策略",))
+    if not idempotency:
+        idempotency = [item for item in collect_section_items(text, ("幂等与补偿",)) if "幂等" in item or "重复" in item]
+    if not compensation:
+        compensation = collect_section_items(text, ("幂等与补偿",))
+    if not invalid_transitions:
+        invalid_transitions = [line.strip(" -") for line in lines if any(term in line for term in ["不允许", "禁止"]) and any(token in line for token in ["状态", "终态", "建单"])]
     mq_context = any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"])
     requires_state_model = bool(transitions or retry_policy or idempotency or compensation or timeout or invalid_transitions) or mq_context or any(term in lower or term in text for term in [
         "状态流转", "状态从", "状态变更", "状态更新", "异步", "幂等", "补偿", "超时", "idempot", "compensation", "timeout",
@@ -1226,6 +1241,8 @@ def detect_ambiguities(
         present = bool(re.search(rf"\b{re.escape(term)}\b", text, re.I)) if term.isascii() else term in text
         if present:
             required = not ambiguous_term_context_resolved(term, category, acceptance, intent, business_flow, entrypoints)
+            if term == "自动" and any(marker in text for marker in ["“自动”：指", "\"自动\":", "自动”指", "自动：指"]):
+                required = False
             add("ambiguous_term", category, f"Requirement uses ambiguous term '{term}' and needs concrete business meaning.", required)
     if not str(intent.get("intent") or "").strip():
         add("business_intent", "business_goal", "Business intent is missing; cannot tell what outcome the requirement optimizes.")
@@ -1451,7 +1468,7 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     operations = extract_operations(text)
     state_transitions = extract_state_transitions(lines)
     personas = extract_personas(sorted(set(actors)))
-    objectives = extract_business_objectives(lines)
+    objectives = extract_business_objectives(lines, text)
     if not objectives:
         objectives = [
             {"id": f"BO-{idx + 1}", "objective": value, "source_evidence": evidence}
@@ -1465,7 +1482,7 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     if explicit_intents:
         intent = {"intent": explicit_intents[0]["intent"], "source_evidence": "input", "confidence": "high", "inference": "explicit_business_intent"}
     entrypoints = extract_entrypoints(text, lines, impact_surface, project_items)
-    business_flow = extract_business_flow(lines, sorted(set(actors)), entrypoints, acceptance, summary)
+    business_flow = extract_business_flow(lines, sorted(set(actors)), entrypoints, acceptance, summary, text)
     current_business_state = extract_current_business_state(text, lines, entrypoints, impact_surface, project_items)
     closure_model = business_closure_model(entrypoints, business_flow, impact_surface, current_state_evidence, project_items)
     state_model = state_machine_model(lines, text, state_transitions, project_items)

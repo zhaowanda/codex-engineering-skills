@@ -658,10 +658,12 @@ def test_auto_runner_reuses_clarification_answers_as_spec_input() -> None:
         assert first["next_command"] == f"python3 scripts/codex_eng.py clarify --artifact-dir {out.resolve()}"
         (out / "clarification_answers.md").write_text(
             "# Requirement Clarification Answers\n\n"
-            "Goal: Reduce playback recovery failures.\n"
-            "Flow: Operator seeks a playing device video; the system sends one control request, rebuilds the player after success, and shows an error after failure.\n"
-            "Entrypoint: Device playback dialog seek action.\n"
-            "AC: Playback resumes within two seconds after a successful seek.\n",
+            "## 业务目标\n\n"
+            "- Reduce playback recovery failures.\n\n"
+            "## 业务流程\n\n"
+            "- Operator seeks a playing device video; the system sends one control request, rebuilds the player after success, and shows an error after failure.\n\n"
+            "## 验收标准\n\n"
+            "- Playback resumes within two seconds after a successful seek.\n",
             encoding="utf-8",
         )
         second = auto_runner.run(requirement, doc_id="REQ-CLARIFIED", out=out)
@@ -671,6 +673,11 @@ def test_auto_runner_reuses_clarification_answers_as_spec_input() -> None:
         spec_step = next(step for step in second["steps"] if step["name"] == "spec")
         assert str(clarified.resolve()) in spec_step["command"]
         assert "requirement.clarified.txt" in second["generated_artifacts"]
+        ir = json.loads((out / "requirement_ir.json").read_text(encoding="utf-8"))
+        assert Path(ir["source_file"]).resolve() == clarified.resolve()
+        assert "Playback resumes within two seconds" in ir["executable_text"]
+        runtime_intake = json.loads((out / "runtime/checkpoints/intake.json").read_text(encoding="utf-8"))
+        assert runtime_intake["decision"] == "pass"
 
 
 def test_auto_runner_regenerates_transitive_artifacts_when_requirement_changes() -> None:

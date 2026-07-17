@@ -41,6 +41,18 @@ AGENT_RUNTIME = load_agent_runtime_module()
 RUNTIME_ARTIFACT_DIR: Path | None = None
 
 
+def load_requirement_ingestor_module() -> Any:
+    path = ROOT / "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py"
+    spec = importlib.util.spec_from_file_location("auto_runner_requirement_ingestor", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+REQUIREMENT_INGESTOR = load_requirement_ingestor_module()
+
+
 def slug(value: str) -> str:
     text = re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-")
     return text or "requirement"
@@ -450,6 +462,32 @@ def run_if_needed(name: str, output: Path, command: list[str], force: bool, gene
     if output.exists():
         WORKFLOW_CONTRACT.bind_lineage(output, name, inputs, command=command, workspace=ROOT)
         generated.append(output.name)
+
+
+def refresh_clarified_requirement_ir(out: Path, doc_id: str, clarified: Path, generated: list[str]) -> None:
+    text = clarified.read_text(encoding="utf-8")
+    requirement_ir = REQUIREMENT_INGESTOR.parse_markdown_ir(text, doc_id, clarified)
+    requirement_ir_path = out / "requirement_ir.json"
+    write_json(requirement_ir_path, requirement_ir)
+    if "requirement_ir.json" not in generated:
+        generated.append("requirement_ir.json")
+
+    ingestion_path = out / "requirement_ingestion.json"
+    ingestion = read_json(ingestion_path)
+    if ingestion:
+        ingestion["source_file"] = str(clarified)
+        ingestion["normalized_text"] = str(clarified)
+        ingestion["requirement_ir"] = str(requirement_ir_path)
+        ingestion["features"] = REQUIREMENT_INGESTOR.detect_features(text)
+        ingestion["next_action"] = "Run spec-governor on requirement.clarified.txt."
+        write_json(ingestion_path, ingestion)
+        WORKFLOW_CONTRACT.bind_lineage(
+            ingestion_path,
+            "ingest",
+            [clarified],
+            command=["auto-runner", "refresh-clarified-requirement-ir", str(clarified)],
+            workspace=ROOT,
+        )
 
 
 def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any], include_inspect: bool = True) -> list[dict[str, Any]]:
@@ -1474,16 +1512,6 @@ def run(
     )
     if (out / "requirement_ir.json").exists():
         generated.append("requirement_ir.json")
-    if "requirement_ingestion.json" not in skipped or not (out / "runtime/checkpoints/intake.json").exists():
-        AGENT_RUNTIME.append_event(
-            out,
-            "requirement_ingested",
-            "requirement-document-ingestor",
-            target=str(input_path),
-            evidence_refs=["requirement_ingestion.json", "requirement_ir.json"],
-        )
-        AGENT_RUNTIME.checkpoint(out, "intake", ["requirement_ingestion.json", "requirement_ir.json"])
-        generated.append("runtime/checkpoints/intake.json")
 
     spec_input = normalized
     clarification_answers = out / "clarification_answers.md"
@@ -1497,7 +1525,19 @@ def run(
             encoding="utf-8",
         )
         spec_input = clarified
+        refresh_clarified_requirement_ir(out, doc_id, clarified, generated)
         generated.append(clarified.name)
+
+    if "requirement_ingestion.json" not in skipped or not (out / "runtime/checkpoints/intake.json").exists() or spec_input.name == "requirement.clarified.txt":
+        AGENT_RUNTIME.append_event(
+            out,
+            "requirement_ingested",
+            "requirement-document-ingestor",
+            target=str(spec_input),
+            evidence_refs=["requirement_ingestion.json", "requirement_ir.json"],
+        )
+        AGENT_RUNTIME.checkpoint(out, "intake", ["requirement_ingestion.json", "requirement_ir.json"])
+        generated.append("runtime/checkpoints/intake.json")
 
     if repo and project:
         project_out = out / "project_understanding"

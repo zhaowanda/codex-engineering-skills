@@ -76,6 +76,54 @@ def test_spec_consumes_requirement_ir_without_heading_only_acceptance() -> None:
         assert spec["acceptance_criteria"][0]["criteria"] == "Seek；send one control request；rebuild the player after success"
 
 
+def test_chinese_clarification_sections_feed_spec_state_and_acceptance() -> None:
+    text = """# Clarification Answers
+
+## 业务目标
+
+- 先审批后建单，避免未审批先出账。
+
+## 业务流程
+
+1. 定时任务扫描 30 天内即将到期且满足续费条件的物联网卡。
+2. 系统按批次创建飞书审批实例。
+3. 飞书审批通过后回调本系统，系统创建 IoT 结算单。
+4. 飞书审批拒绝后只更新审批状态，不创建结算单。
+
+## 术语定义
+
+- “自动”：指飞书审批通过回调到达后，由系统立即调用现有 IoT 建单逻辑。
+
+## 业务边界
+
+- 审批通过前不创建结算单。
+- 审批拒绝后不创建结算单。
+
+## 状态迁移规则
+
+- `PENDING_APPROVAL -> APPROVED`：飞书回调审批通过。
+- `PENDING_APPROVAL -> REJECTED`：飞书回调审批拒绝。
+- `APPROVED -> ORDER_CREATED`：审批通过后建单成功。
+- `REJECTED` 为终态，不允许再创建结算单。
+
+## 幂等与补偿
+
+- 审批批次幂等键：`providerCode + rootTenantId + batchDate`。
+- 同一审批实例 ID 只允许回调成功处理一次；重复回调必须返回成功但不重复建单。
+- 若建单失败，记录失败原因并允许页面重试。
+
+## 重试策略
+
+- 页面重试只面向建单失败批次。
+"""
+    ir = ingest_requirement.parse_markdown_ir(text, "REQ-ZH-CLARIFIED", Path("requirement.clarified.txt"))
+    spec = spec_governor.normalize("REQ-ZH-CLARIFIED", "审批后建单", text, requirement_ir=ir)
+    assert "“自动”：指飞书审批通过回调到达后" in ir["executable_text"]
+    assert spec["state_machine"]["ready"] is True
+    assert {item["type"] for item in spec["negative_acceptance_criteria"]} == {"negative"}
+    assert not [item for item in spec["ambiguities"] if item["required"] and "自动" in item["message"]]
+
+
 def test_requirement_ingestor_blocks_pdf_without_text() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
