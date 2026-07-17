@@ -228,10 +228,18 @@ def verify(artifact_dir: Path, expected_head: str = "") -> dict[str, Any]:
         heads = {str(item.get("head") or "") for item in session.get("repositories", []) if isinstance(item, dict)}
         if expected_head not in heads:
             blockers.append({"source": "git", "message": "runtime session is not bound to expected Git HEAD", "expected_head": expected_head})
+    decision = "block" if blockers else "pass"
+    if session:
+        session["decision"] = "block" if blockers else "ready"
+        session["verification_decision"] = decision
+        session["verification_blockers"] = blockers
+        session["verified_event_count"] = len(events)
+        session["verified_event_root_digest"] = previous
+        write_json(session_path, session)
     return {
         "schema": "codex-agent-runtime-verification-v1",
         "session_id": session.get("session_id", ""),
-        "decision": "block" if blockers else "pass",
+        "decision": decision,
         "status": session.get("status", "missing"),
         "event_count": len(events),
         "event_root_digest": previous,

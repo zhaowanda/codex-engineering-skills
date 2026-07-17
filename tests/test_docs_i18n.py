@@ -877,6 +877,9 @@ def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> 
         human = (docs_root / "human/specs" / f"{doc_id}.md").read_text(encoding="utf-8")
         assert result["decision"] == "pass"
         assert delivery["artifact_digest"] == digest
+        assert delivery["projection_decision"] == "pass"
+        assert delivery["projection_digest"] == digest
+        assert delivery["projection_blockers"] == []
         assert manifest["projection_source_digest"] == digest
         assert machine["source_digest"] == digest
         assert f"codex:projection-source-digest:{digest}" in human
@@ -899,6 +902,11 @@ def test_sync_blocks_upstream_block_with_downstream_pass_projection() -> None:
 
         assert result["decision"] == "block"
         assert any(item["source"] == "docs_projection_state" for item in result["blockers"])
+        delivery = json.loads((root / "docs" / "deliveries" / doc_id / "delivery.json").read_text(encoding="utf-8"))
+        assert delivery["status"] == "synced"
+        assert delivery["projection_decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in delivery["projection_blockers"])
+        assert docs_governor.validate(root / "docs", doc_id)["decision"] == "block"
 
 
 def test_validate_blocks_stale_canonical_delivery_projection() -> None:

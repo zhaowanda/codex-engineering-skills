@@ -191,6 +191,9 @@ def sync_canonical_delivery(
         "title": title,
         "doc_language": language,
         "status": "synced",
+        "projection_decision": "pending",
+        "projection_blockers": [],
+        "projection_digest": "",
         "artifact_digest": digest,
         "managed_files": sorted(set(managed)),
         "directories": {name: str(paths[name].relative_to(docs_root)) for name in DELIVERY_DIRS},
@@ -205,6 +208,23 @@ def sync_canonical_delivery(
         "managed_files": delivery["managed_files"],
         "blockers": [],
     }
+
+
+def update_delivery_projection_state(
+    docs_root: Path,
+    doc_id: str,
+    decision: str,
+    blockers: list[dict[str, Any]] | None = None,
+    projection_digest: str = "",
+) -> None:
+    manifest_path = delivery_paths(docs_root, doc_id)["manifest"]
+    delivery = read_json(manifest_path)
+    if not delivery:
+        return
+    delivery["projection_decision"] = decision
+    delivery["projection_blockers"] = blockers or []
+    delivery["projection_digest"] = projection_digest
+    write_json(manifest_path, delivery)
 
 
 def artifact_decision(data: dict[str, Any]) -> str:
@@ -6000,6 +6020,7 @@ def sync(
     render_artifact_dir = Path(str(canonical.get("canonical_artifact_dir"))) if canonical else artifact_dir
     projection_blockers = docs_projection_state_blockers(render_artifact_dir) if human_section == "all" else []
     if projection_blockers:
+        update_delivery_projection_state(docs_root, doc_id, "block", projection_blockers)
         return {
             "schema": "codex-docs-governor-sync-v1",
             "decision": "block",
@@ -6093,6 +6114,7 @@ def sync(
     manifest["projection_schema"] = "codex-docs-projection-v1"
     manifest = sanitize_for_docs(manifest, docs_root, artifact_dir)
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", manifest)
+    update_delivery_projection_state(docs_root, doc_id, "pass", [], str(manifest.get("projection_source_digest") or ""))
     return sanitize_for_docs({
         "schema": "codex-docs-governor-sync-v1",
         "decision": "pass",
@@ -6187,6 +6209,9 @@ def init(docs_root: Path, doc_id: str, git_url: str = "", title: str = "", doc_l
             "title": title,
             "doc_language": language,
             "status": "initialized",
+            "projection_decision": "pending",
+            "projection_blockers": [],
+            "projection_digest": "",
             "artifact_digest": "",
             "managed_files": [],
             "directories": {name: str(delivery[name].relative_to(docs_root)) for name in DELIVERY_DIRS},
@@ -6319,8 +6344,13 @@ def validate(docs_root: Path, doc_id: str, require_git: bool = False, require_gi
             expected_digest = str(delivery.get("artifact_digest") or "")
             if not expected_digest or actual_digest != expected_digest:
                 blockers.append({"source": "delivery", "message": "canonical delivery artifact digest is stale"})
+            projection_decision = str(delivery.get("projection_decision") or "").lower()
+            if projection_decision in {"block", "blocked", "failed", "fail"}:
+                blockers.append({"source": "delivery", "message": "canonical delivery projection is blocked"})
             if manifest.get("projection_source_digest") != expected_digest:
                 blockers.append({"source": "projection", "message": "manifest projection digest does not match canonical delivery"})
+            if projection_decision == "pass" and str(delivery.get("projection_digest") or "") != expected_digest:
+                blockers.append({"source": "delivery", "message": "canonical delivery projection digest does not match artifacts"})
             marker = f"<!-- codex:projection-source-digest:{expected_digest} -->"
             for name, rel_path in (manifest.get("human_docs") or {}).items():
                 target = docs_root / str(rel_path)
