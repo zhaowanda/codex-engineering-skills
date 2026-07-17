@@ -14,7 +14,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[4]
 DIRS = ["human/specs", "human/designs", "human/tests", "human/releases", "machine/specs", "machine/designs", "machine/reviews", "machine/releases", "baseline", "indexes"]
 DELIVERY_DIRS = ["input", "artifacts", "evidence", "runtime"]
-DELIVERY_TEXT_SUFFIXES = {".json", ".md", ".txt", ".log", ".diff", ".yaml", ".yml"}
+DELIVERY_TEXT_SUFFIXES = {".json", ".jsonl", ".md", ".txt", ".log", ".diff", ".yaml", ".yml"}
 MACHINE_ARTIFACTS = {
     "spec": ("machine/specs", ".spec.json"),
     "design": ("machine/designs", ".design.json"),
@@ -116,6 +116,11 @@ def write_sanitized_copy(source: Path, target: Path, docs_root: Path, artifact_d
     target.write_text(sanitize_local_paths(text, docs_root, artifact_dir), encoding="utf-8")
 
 
+def write_canonical_copy(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
 def artifact_doc_id_blockers(artifact_dir: Path, doc_id: str) -> list[dict[str, str]]:
     blockers: list[dict[str, str]] = []
     for name in ["spec.json", "technical_design.json", "architecture_design.json", "auto_run_summary.json"]:
@@ -172,17 +177,17 @@ def sync_canonical_delivery(
                 target = paths["evidence"].joinpath(*relative.parts[1:])
             else:
                 target = paths["artifacts"] / relative
-            write_sanitized_copy(source, target, docs_root, artifact_dir)
+            write_canonical_copy(source, target)
             managed.append(str(target.relative_to(paths["root"])))
 
     normalized = paths["artifacts"] / "requirement.normalized.txt"
     if normalized.exists():
         input_target = paths["input"] / "requirement.normalized.txt"
-        write_sanitized_copy(normalized, input_target, docs_root, artifact_dir)
+        write_canonical_copy(normalized, input_target)
         managed.append(str(input_target.relative_to(paths["root"])))
     if input_file and input_file.is_file():
         input_target = paths["input"] / ("requirement" + input_file.suffix.lower())
-        write_sanitized_copy(input_file, input_target, docs_root, artifact_dir)
+        write_canonical_copy(input_file, input_target)
         managed.append(str(input_target.relative_to(paths["root"])))
     for relative in sorted(set(previous_managed) - set(managed)):
         stale = paths["root"] / relative
@@ -202,7 +207,11 @@ def sync_canonical_delivery(
         "artifact_digest": digest,
         "managed_files": sorted(set(managed)),
         "directories": {name: str(paths[name].relative_to(docs_root)) for name in DELIVERY_DIRS},
-        "privacy": {"local_paths_sanitized": True, "binary_files_copied": False},
+        "privacy": {
+            "canonical_artifacts_preserve_lineage": True,
+            "projection_outputs_sanitized": True,
+            "binary_files_copied": False,
+        },
     }
     write_json(paths["manifest"], delivery)
     return {
@@ -5098,7 +5107,40 @@ def runtime_evidence_source_paths(payload: dict[str, Any]) -> set[str]:
     return paths
 
 
+def technical_contract_set(artifact_dir: Path) -> set[str]:
+    technical = read_json(artifact_dir / "technical_design.json")
+    result: set[str] = set()
+    for item in as_list(technical.get("api_contracts")):
+        if not isinstance(item, dict):
+            continue
+        method, path = parse_contract_method_path(text(item.get("contract"), ""))
+        if method and path and not path.startswith("BRK-"):
+            result.add(f"{method} {path}")
+    return result
+
+
+def runtime_contract_set(payload: dict[str, Any]) -> set[str]:
+    result: set[str] = set()
+    for item in as_list(payload.get("api_contracts")):
+        if not isinstance(item, dict):
+            continue
+        method = text(item.get("method"), "").upper()
+        path = text(item.get("path") or item.get("api"), "")
+        if method and path and not path.startswith("BRK-"):
+            result.add(f"{method} {path}")
+    for item in as_list(payload.get("interactions")):
+        if not isinstance(item, dict):
+            continue
+        method, path = parse_contract_method_path(text(item.get("api"), ""))
+        if method and path and not path.startswith("BRK-"):
+            result.add(f"{method} {path}")
+    return result
+
+
 def runtime_evidence_matches_current_anchors(payload: dict[str, Any], artifact_dir: Path) -> bool:
+    current_contracts = technical_contract_set(artifact_dir)
+    if current_contracts and not (current_contracts & runtime_contract_set(payload)):
+        return False
     confirmed = current_confirmed_modify_paths(artifact_dir)
     if not confirmed:
         return True

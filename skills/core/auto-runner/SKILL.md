@@ -40,6 +40,7 @@ user requirement
 - When `--project` resolves an installed company project skill, consume relevant reference excerpts into Evidence Bundle with file digests and provenance; do not copy full private references.
 - Propagate the canonical scope model through design, planning, edit readiness, post-change checks, and acceptance evidence.
 - Stop after spec and requirement questions when requirement understanding or source-location confirmation blocks design. Do not emit pass-looking design, test, or plan artifacts.
+- Do not stop for optional clarification/advisory questions when `spec.design_allowed=true` and `open_questions.json.decision=pass`; carry those advisories into design context instead of forcing another Spec round.
 - When requirement clarification blocks progress, return `python3 scripts/codex_eng.py clarify --artifact-dir <out>` as the next command. Do not prompt inside captured `auto --format human` execution.
 - On a same-directory rerun, merge non-empty `clarification_answers.md` with `requirement.normalized.txt` into `requirement.clarified.txt`; use that file for source-location evidence and Spec so answers change downstream evidence instead of merely closing questions.
 - Treat impact applicability as `required`, `conditional`, or `excluded`; do not promote generic runtime data, API references, or read-only repositories into specialist profiles without change evidence.

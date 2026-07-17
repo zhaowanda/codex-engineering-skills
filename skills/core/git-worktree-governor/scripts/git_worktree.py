@@ -101,6 +101,7 @@ def inspect(repo: Path, remote: str = "origin", base_branch: str = "") -> dict[s
         "repo": str(repo),
         "remote": remote,
         "base_branch": base or "",
+        "branch": branch,
         "start_branch": branch,
         "current_branch": branch,
         "status_clean_before": not bool(status),
@@ -149,6 +150,7 @@ def prepare(repo: Path, branch: str, remote: str = "origin", base_branch: str = 
     _, current, _ = run_git(Path(evidence["repo"]), ["branch", "--show-current"])
     _, commit, _ = run_git(Path(evidence["repo"]), ["rev-parse", "HEAD"])
     evidence["current_branch"] = current
+    evidence["branch"] = current
     evidence["baseline_commit"] = commit
     if current != branch:
         evidence["blockers"].append("current branch is not the requested feature branch")

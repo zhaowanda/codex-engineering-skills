@@ -1973,8 +1973,13 @@ def run(
         workspace=ROOT,
     )
     generated.append("docs_quality.json")
-
     finalize_runtime_lineage(out)
+    if docs_sync.get("decision") == "pass":
+        final_docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
+        if final_docs_sync.get("decision") == "pass":
+            docs_sync = final_docs_sync
+            docs_status = docs_readiness(effective_docs_root, doc_id)
+
     delivery_status = out / "delivery_status.json"
     inspect_command = [
         "python3",

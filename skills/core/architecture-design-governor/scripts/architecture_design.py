@@ -544,8 +544,8 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "architecture_scope": {"in_scope": as_list((spec.get("scope") or {}).get("in_scope")) or [summary], "out_of_scope": as_list((spec.get("scope") or {}).get("out_of_scope")), "assumptions": as_list((spec.get("scope") or {}).get("assumptions")), "decision_drivers": ["low coupling", "clear ownership", "rollback safety"]},
         "current_architecture": {
             "system_context": f"{owner_repo} 承担本需求的初始变更边界；主入口 `{owner_module}` 的置信度为 {entrypoint_confidence.get('level', 'unknown')}。",
-            "repo_entrypoints": [owner_module, route_contract or "existing entrypoint to be confirmed"],
-            "upstream_downstream": [f"{route_contract or 'existing producer'} -> {owner_repo}"],
+            "repo_entrypoints": [owner_module, route_contract or f"{owner_repo} confirmed owner/module boundary"],
+            "upstream_downstream": [f"{route_contract or 'No additional upstream producer for this design'} -> {owner_repo}"],
             "constraints": ["keep owner boundary narrow", "preserve backward compatibility", "support rollback by reverting owner repo"],
         },
         "requirement_breakdown": breakdown,

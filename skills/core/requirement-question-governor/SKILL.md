@@ -42,12 +42,14 @@ The command asks required open questions in artifact order and persists both `op
 ## Rules
 
 - Block design/implementation while required questions are open.
+- Keep the required-question set minimal: only questions that block `spec.design_allowed=true` or come from explicit `spec.open_questions`, rule conflicts, missing acceptance criteria, or inferred acceptance may block the workflow.
+- When Spec is already `design_allowed=true`, generate weak-scorecard, current-state evidence, impact-surface, implicit-constraint, dependency, and specialist detail questions as optional advisory questions; downstream design and specialist governors must consume them without forcing another Spec clarification round.
 - Ask focused questions only; do not ask for information already present in the spec.
 - Track owner, required flag, answer, and status.
 - Every required question must include `risk_if_unanswered` so reviewers understand why design must stop.
 - Generate categorized clarification questions for unclear business goal, business flow, actor/entrypoint, scope boundary, data rule, state transition, trigger timing, exception handling, compatibility, and acceptance evidence.
 - Convert `spec.ambiguities` and `requirements_understanding.blockers` into required clarification questions.
-- Convert weak `requirements_understanding.scorecard` dimensions into targeted clarification questions.
+- Convert weak `requirements_understanding.scorecard` dimensions into targeted clarification questions; mark them required only when the current Spec blocks design.
 - Ask for current-state implementation evidence when existing UI/API/task/MQ/manual entrypoints, data ownership, or downstream dependencies are missing.
 - Ask decision-level questions for missing business closure, state machine, retry/idempotency/timeout/compensation, dependency chain, and repository/service ownership.
 - Generate expert clarification questions from impact surface and implicit constraints, including permission, data/export, API, performance, security, and configuration questions.

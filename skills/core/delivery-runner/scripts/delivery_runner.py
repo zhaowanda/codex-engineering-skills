@@ -67,6 +67,17 @@ def load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def artifact_path(artifact_dir: Path, relative: str) -> Path:
+    if relative.startswith("runtime/") and artifact_dir.name == "artifacts":
+        sibling = artifact_dir.parent / relative
+        if sibling.exists():
+            return sibling
+    path = artifact_dir / relative
+    if path.exists():
+        return path
+    return path
+
+
 def stage_is_pass(stage: dict[str, Any], data: dict[str, Any]) -> bool:
     return not CONTRACT.validate_artifact_contract(stage, data)
 
@@ -199,7 +210,7 @@ def missing_profile_artifacts(profile: dict[str, Any], artifact_dir: Path) -> li
     items = profile.get("expected_artifacts", [])
     if not isinstance(items, list):
         items = [items]
-    return [str(item) for item in items if not (artifact_dir / str(item)).exists()]
+    return [str(item) for item in items if not artifact_path(artifact_dir, str(item)).exists()]
 
 
 def nested_value(data: dict[str, Any], path: str) -> Any:
@@ -228,7 +239,7 @@ def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[d
         if not artifact_name:
             blockers.append({"source": "workflow_profile", "message": "required gate artifact is missing artifact path"})
             continue
-        path = artifact_dir / artifact_name
+        path = artifact_path(artifact_dir, artifact_name)
         data = load_json(path)
         if not data:
             blockers.append({"source": f"profile_gate.{artifact_name}", "message": "required gate artifact is missing or invalid"})
@@ -248,7 +259,7 @@ def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[d
         digest_source = str(gate.get("digest_source") or "")
         digest_path = str(gate.get("digest_path") or "")
         if digest_source and digest_path:
-            source_data = load_json(artifact_dir / digest_source)
+            source_data = load_json(artifact_path(artifact_dir, digest_source))
             actual_digest = nested_value(data, digest_path)
             expected_digest = canonical_artifact_digest(source_data) if source_data else ""
             if not expected_digest or actual_digest != expected_digest:
@@ -331,7 +342,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     if profile.get("profile_stage_mode") == "release_only":
         stages = [stage for stage in stages if stage.get("release_required")]
     order = [(str(stage["name"]), str(stage["artifact"])) for stage in stages]
-    artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_dir / filename) for name, filename in order}
+    artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_path(artifact_dir, filename)) for name, filename in order}
     state = load_json(artifact_dir / "delivery_state.json")
     profile_missing = missing_profile_artifacts(profile, artifact_dir)
     completed = [str(stage["name"]) for stage in stages if stage_is_pass(stage, artifacts[str(stage["name"])])]
@@ -362,7 +373,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         recorded = data.get("input_digests") if isinstance(data.get("input_digests"), dict) else {}
         stale_inputs = []
         for artifact_name in input_artifacts:
-            source_path = artifact_dir / artifact_name
+            source_path = artifact_path(artifact_dir, artifact_name)
             recorded_digest = recorded.get(artifact_name) or recorded.get(source_path.name)
             if source_path.exists() and recorded_digest != CONTRACT.path_digest(source_path):
                 stale_inputs.append(artifact_name)

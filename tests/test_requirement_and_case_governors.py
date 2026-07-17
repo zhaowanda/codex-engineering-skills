@@ -338,6 +338,9 @@ def test_question_governor_answers_required_questions_one_at_a_time_and_persists
     assert "Q-OPTIONAL" not in markdown
     parsed_lines = spec_governor.split_lines(markdown)
     assert spec_governor.extract_open_questions(parsed_lines) == []
+    clarified = spec_governor.normalize("REQ-CLARIFIED", "Playback", markdown)
+    assert clarified["business_intent"]["confidence"] == "high"
+    assert any(item["criteria"] == "Playback resumes after seeking" for item in clarified["acceptance_criteria"])
 
 
 def test_spec_parses_generic_clarification_as_confirmed_requirement() -> None:
@@ -544,6 +547,41 @@ def test_spec_blocks_async_stateful_requirement_without_state_controls() -> None
     assert "state_machine" in categories
 
 
+def test_spec_accepts_markdown_key_blocks_and_negated_mq_for_feishu_approval() -> None:
+    text = """
+    业务目的: 飞书审批通过后再创建物联网卡续费结算单。
+    流程: 系统按批次发起飞书审批实例；飞书将审批结果回调给后端；审批通过后创建结算单；审批拒绝后不建单。
+    入口: 物联网卡即将到期批次进入审批链路。
+    downstream_effect: 页面展示审批状态、失败原因和重试入口；审批通过后在本地生成结算单；审批拒绝后仅保留审批结果不建单。
+    mq_upstream_downstream: 无 MQ 上游；无 MQ 下游；无 topic；无 producer；无 consumer。
+
+    状态:
+    - `APPROVAL_CREATE_PENDING -> PENDING_APPROVAL`
+    - `PENDING_APPROVAL -> APPROVED`
+    - `PENDING_APPROVAL -> REJECTED`
+    - `APPROVED -> ORDER_CREATED`
+
+    invalid_transition_rules:
+    - `REJECTED` 不能转为 `ORDER_CREATED`
+    - 同一审批实例重复回调不能重复建单
+
+    compensation_rule:
+    - 审批创建失败时允许页面重试发起审批
+    - 回调处理失败时允许页面重试处理回调结果
+
+    AC: 审批通过后只创建一次对应批次结算单。
+    AC: 审批拒绝后不创建结算单。
+    """
+
+    spec = spec_governor.normalize("REQ-FEISHU-APPROVAL", "飞书审批能力接入", text)
+
+    assert spec["design_allowed"] is True
+    assert spec["state_machine"]["ready"] is True
+    assert spec["dependency_chain"]["ready"] is True
+    assert "mq_upstream_downstream" not in spec["dependency_chain"]["missing"]
+    assert any("重复回调" in item or "重复建单" in item for item in spec["state_machine"]["idempotency_key"])
+
+
 def test_spec_uses_project_understanding_evidence_for_current_state() -> None:
     text = """
     业务目的: 减少续费状态不一致导致的人工排查。
@@ -657,6 +695,29 @@ def test_question_governor_asks_from_weak_understanding_dimensions() -> None:
     assert all(item.get("risk_if_unanswered") for item in result["questions"] if item.get("required"))
 
 
+def test_question_governor_keeps_ready_spec_advisories_non_blocking() -> None:
+    spec = {
+        "doc_id": "REQ-READY-WEAK",
+        "decision": "ready_for_design",
+        "design_allowed": True,
+        "requirements_understanding": {
+            "decision": "pass",
+            "design_allowed": True,
+            "scorecard": {"weak_dimensions": ["evidence_score", "dependency_score"]},
+        },
+        "impact_surface": [{"area": "api"}, {"area": "data"}],
+        "impact_applicability": [{"area": "api", "status": "required"}, {"area": "data", "status": "required"}],
+        "acceptance_criteria": [{"id": "AC-1", "criteria": "API returns approved rows", "source_evidence": "input"}],
+        "scope": {"out_of_scope": ["schema migration"]},
+    }
+
+    result = question_governor.generate(spec)
+
+    assert result["questions"]
+    assert result["decision"] == "pass"
+    assert not any(item.get("required") for item in result["questions"])
+
+
 def test_delivery_case_capture_summarizes_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -740,6 +801,7 @@ def run_all() -> None:
     test_spec_uses_project_understanding_evidence_for_current_state()
     test_question_governor_generates_categorized_clarification_for_ambiguous_spec()
     test_question_governor_asks_from_weak_understanding_dimensions()
+    test_question_governor_keeps_ready_spec_advisories_non_blocking()
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
     test_real_project_replay_requires_privacy_review_and_ground_truth()

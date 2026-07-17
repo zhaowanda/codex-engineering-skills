@@ -36,7 +36,7 @@ DOMAIN_HINTS = {
     "device": ["device", "设备", "imei", "terminal"],
 }
 DATA_TERMS = ["字段", "数据库", "表", "数据", "迁移", "状态", "金额", "结算", "回填", "索引", "唯一", "外键", "月份", "历史", "database", "table", "field", "schema", "migration", "status", "amount"]
-SYSTEM_TERMS = ["跨系统", "第三方", "上下游", "调用", "接口", "api", "service", "provider", "consumer", "同步", "异步"]
+SYSTEM_TERMS = ["跨系统", "第三方", "上下游", "调用", "接口", "api", "service", "provider", "consumer", "同步", "异步", "飞书", "审批流", "审批回调", "回调"]
 MQ_TERMS = ["mq", "消息", "topic", "queue", "producer", "consumer", "kafka", "rocketmq", "rabbitmq", "事件", "发布", "订阅", "消费"]
 CACHE_TERMS = ["缓存", "cache", "redis", "高频", "热点", "慢查询", "统计", "列表", "字典", "配置", "命中率"]
 CONSISTENCY_TERMS = ["事务", "一致性", "幂等", "重试", "补偿", "对账", "多表", "多系统", "写入", "回滚", "结算", "金额", "transaction", "consistency", "idempotency", "retry", "compensation", "rollback", "settlement", "payment", "commit"]
@@ -68,7 +68,15 @@ def impact_signals(spec: dict[str, Any], breakdown: list[dict[str, Any]], route_
     blob = " ".join([
         str(spec.get("title") or ""),
         str(spec.get("requirement_summary") or ""),
-        json_text(spec.get("business_objects"), spec.get("operations")),
+        json_text(
+            spec.get("business_objects"),
+            spec.get("operations"),
+            spec.get("business_flow"),
+            spec.get("business_rules"),
+            spec.get("acceptance_criteria"),
+            spec.get("source_trace"),
+            spec.get("external_references"),
+        ),
         " ".join(str(item.get("summary") or "") for item in breakdown),
         " ".join(route_refs),
     ])
@@ -263,7 +271,7 @@ def route_relevance_score(route: dict[str, Any], subject: str) -> int:
 def contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any]) -> str:
     """Choose an existing contract by action semantics instead of list position."""
     if not route_refs:
-        return f"{breakdown.get('id')}: No API impact confirmed yet"
+        return f"{breakdown.get('id')}: no external API contract change; use confirmed owner/module boundary"
     subject = " ".join(
         str(breakdown.get(key) or "")
         for key in ["summary", "business_goal", "behavior_change"]
@@ -293,6 +301,26 @@ def contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any]) -> 
     return route_refs[0]
 
 
+def explicit_contract_refs_from_spec(spec: dict[str, Any]) -> list[str]:
+    raw = json.dumps({
+        "source_trace": spec.get("source_trace"),
+        "business_rules": spec.get("business_rules"),
+        "entrypoints": spec.get("entrypoints"),
+        "current_business_state": spec.get("current_business_state"),
+        "requirements": spec.get("requirements"),
+    }, ensure_ascii=False)
+    refs: list[str] = []
+    for method, path in re.findall(r"\b(GET|POST|PUT|DELETE|PATCH)\s+(/[A-Za-z0-9_./{}:-]+)", raw, flags=re.I):
+        ref = f"{method.upper()} {path.rstrip('`，。；;,.')}"
+        if ref not in refs:
+            refs.append(ref)
+    for path in re.findall(r"(?<![A-Za-z0-9_])(/[A-Za-z0-9_./{}:-]+)", raw):
+        clean = path.rstrip("`，。；;,.")
+        if clean and not any(clean in ref for ref in refs):
+            refs.append(clean)
+    return refs[:10]
+
+
 def parse_contract_ref(contract: str) -> dict[str, Any]:
     match = re.match(r"^\s*(?:(?P<method>[A-Z]+)\s+)?(?P<route>[^()\s]+)(?:\s+\((?P<file>[^)]+)\))?", contract)
     if not match:
@@ -305,7 +333,7 @@ def parse_contract_ref(contract: str) -> dict[str, Any]:
         "endpoint": route if route.startswith("/") else "",
         "controller_file": "" if file == "evidence_bundle.json" else file,
         "source_evidence": file or "evidence_bundle.contracts",
-        "confirmed_contract": bool(route and not contract.startswith("No API impact confirmed")),
+        "confirmed_contract": bool(route and not contract.endswith("use confirmed owner/module boundary")),
     }
 
 
@@ -897,7 +925,7 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
     bundle_file = base / "evidence_bundle.json"
     if bundle_file.exists():
         result["evidence_bundle"] = load_json(bundle_file)
-        for name in ["repository_analysis", "dependency_surface"]:
+        for name in ["repository_analysis", "api_surface", "config_surface", "dependency_surface", "code_index", "source_location_evidence"]:
             file = base / f"{name}.json"
             if file.exists():
                 result[name] = load_json(file)
@@ -917,7 +945,12 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
     deps = project_understanding.get("dependency_surface", {})
     index = project_understanding.get("code_index", {})
     baseline = project_understanding.get("baseline", {})
-    source_locations = bundle or project_understanding.get("source_location_evidence", {})
+    source_locations = project_understanding.get("source_location_evidence", {})
+    if bundle:
+        merged_source_locations = dict(source_locations) if isinstance(source_locations, dict) else {}
+        for key, value in bundle.items():
+            merged_source_locations.setdefault(key, value)
+        source_locations = merged_source_locations
     project = str(bundle.get("project") or repo.get("project") or api.get("project") or baseline.get("project") or "target-repo")
     repo_root = str(bundle.get("repo_root") or index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
     entrypoints = [str(item) for item in as_list(repo.get("entrypoint_hints"))]
@@ -1024,8 +1057,35 @@ def render_system_interaction_sequence(signals: dict[str, bool], route_refs: lis
     applicable = bool(signals.get("system"))
     confirmed_modules = confirmed_modules or []
     participants = ["User/Client", owner_file, *[item for item in confirmed_modules if item != owner_file]]
+    external_participants: list[str] = []
+    if "飞书" in summary or "feishu" in summary.lower():
+        external_participants.append("Feishu Approval")
+    participants.extend(external_participants)
     participants.extend(item for item in route_refs if item not in participants)
     sequence = [{"step": 1, "from": "User/Client", "to": owner_file, "mode": "sync", "action": summary, "success": "页面接受操作", "failure": "保留输入并展示错误", "state_transition": "idle -> handling", "source_evidence": "spec.entrypoints"}]
+    if "Feishu Approval" in external_participants:
+        sequence.append({
+            "step": len(sequence) + 1,
+            "from": owner_file,
+            "to": "Feishu Approval",
+            "mode": "sync_or_async",
+            "action": "create approval instance for the configured scenario and template",
+            "success": "approval instance id and pending status are persisted",
+            "failure": "record creation failure reason and expose retry from the operation page",
+            "state_transition": "pending_create -> pending_approval|create_failed",
+            "source_evidence": "requirement.business_flow",
+        })
+        sequence.append({
+            "step": len(sequence) + 1,
+            "from": "Feishu Approval",
+            "to": owner_file,
+            "mode": "callback",
+            "action": "send approval result callback",
+            "success": "approved callback triggers one settlement order; rejected callback records rejection without order creation",
+            "failure": "record callback/build-order failure and keep idempotent retry path",
+            "state_transition": "pending_approval -> approved|rejected|callback_failed",
+            "source_evidence": "requirement.business_flow",
+        })
     for contract in route_refs:
         sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": contract, "mode": "async_response", "action": f"调用或复用已确认契约 {contract}", "success": "契约返回兼容结果并只提交当前有效响应", "failure": "超时/错误时保持当前稳定状态并展示错误", "state_transition": "handling -> success|failed", "source_evidence": "evidence_bundle.contracts"})
     for module in confirmed_modules:
@@ -1034,6 +1094,7 @@ def render_system_interaction_sequence(signals: dict[str, bool], route_refs: lis
     return {
         "applicable": applicable,
         "reason": "需求涉及接口/跨模块调用或已识别业务路由。" if applicable else "未识别到跨系统或接口调用影响。",
+        "not_applicable_reason": "" if applicable else "本次只在已确认 owner 模块内处理本地行为，不新增第三方、跨仓、MQ、HTTP API 或回调交互。",
         "participants": participants if applicable else [],
         "sequence": sequence if applicable else [],
         "timeout_retry": "同步调用需确认超时、重试次数和用户可见错误；异步调用需确认补偿任务。",
@@ -1249,7 +1310,8 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     )
     location_evidence = ctx.get("source_location_evidence") if isinstance(ctx.get("source_location_evidence"), dict) else {}
     confirmed_contracts = [str(item) for item in as_list(location_evidence.get("confirmed_contracts") or location_evidence.get("contracts")) if item]
-    route_refs = confirmed_contracts or [route_ref(item) for item in business_routes[:5]]
+    explicit_contracts = explicit_contract_refs_from_spec(spec)
+    route_refs = confirmed_contracts or explicit_contracts or [route_ref(item) for item in business_routes[:5]]
     config_refs = [str(item.get("path")) for item in ctx["config_items"][:5]]
     test_evidence = [f"{cmd} evidence" for cmd in ctx["test_hints"][:3]] or ["test evidence"]
     applicability = {str(item.get("area")): str(item.get("status")) for item in as_list(spec.get("impact_applicability")) if isinstance(item, dict)}
@@ -1450,7 +1512,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
                 "process_flow_refs": [title or summary],
                 "module_refs": list(dict.fromkeys(str(mod.get("module")) for mod in as_list([{"module": owner_file}]) if mod.get("module"))),
                 "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"],
-                "api_contract_refs": route_refs or ["No API impact confirmed yet"],
+                "api_contract_refs": route_refs or ["No external API contract change; implementation stays inside confirmed owner/module boundary"],
                 "ui_ue_refs": ["affected UI if any"],
                 "test_refs": [f"TEST-{item.get('id') or req_id}"],
                 "acceptance_refs": [str(ac.get("id") or ac_id) for ac in acceptance] or [ac_id],
@@ -1458,7 +1520,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
                 "decision_reason": selected_solution.get("selection_reason"),
             }
             for item in requirements
-        ] or [{"requirement_id": req_id, "requirement_breakdown_refs": [row.get("id") for row in breakdown], "process_flow_refs": [title or summary], "module_refs": [owner_file], "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"], "api_contract_refs": route_refs or ["No API impact confirmed yet"], "ui_ue_refs": ["affected UI if any"], "test_refs": [f"TEST-{req_id}"], "acceptance_refs": [ac_id], "selected_option_id": selected_solution.get("selected_option_id"), "decision_reason": selected_solution.get("selection_reason")}],
+        ] or [{"requirement_id": req_id, "requirement_breakdown_refs": [row.get("id") for row in breakdown], "process_flow_refs": [title or summary], "module_refs": [owner_file], "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"], "api_contract_refs": route_refs or ["No external API contract change; implementation stays inside confirmed owner/module boundary"], "ui_ue_refs": ["affected UI if any"], "test_refs": [f"TEST-{req_id}"], "acceptance_refs": [ac_id], "selected_option_id": selected_solution.get("selected_option_id"), "decision_reason": selected_solution.get("selection_reason")}],
         "acceptance_mapping": [{"acceptance_id": str(item.get("id") or ac_id), "design_refs": [summary], "evidence_required": as_list(item.get("evidence_required")) or test_evidence} for item in acceptance] or [{"acceptance_id": ac_id, "design_refs": [summary], "evidence_required": test_evidence}],
         "ui_ue_design": [{"page_or_route": route_refs[0] if route_refs else "confirm if UI is affected", "user_goal": summary, "entry_point": "existing entry", "layout": "preserve existing layout unless requirement changes it", "interaction_flow": ["open affected behavior", "perform action", "verify result"], "states": ["loading", "success", "error"], "field_rules": ["preserve existing field validation and visibility"], "permission_visibility": "preserve role visibility", "acceptance_evidence": "browser evidence if UI changed"}],
         "test_strategy": [{"summary": f"Validate acceptance criteria for {summary}; detailed cases belong in test_design.json.", "evidence": test_evidence, "type": "strategy_summary", "test_design_ref": "test_design.json"}],

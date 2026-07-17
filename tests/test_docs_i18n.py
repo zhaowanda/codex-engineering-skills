@@ -19,6 +19,7 @@ def load_module(name: str, path: Path):
 docs_i18n = load_module("docs_i18n", ROOT / "skills/core/docs-governor/scripts/docs_i18n.py")
 doc_model = load_module("doc_model", ROOT / "skills/core/docs-governor/scripts/doc_model.py")
 docs_governor = load_module("docs_governor", ROOT / "skills/core/docs-governor/scripts/docs_governor.py")
+workflow_contract = load_module("workflow_contract", ROOT / "skills/core/delivery-runner/scripts/workflow_contract.py")
 render_design_templates = load_module("render_design_templates", ROOT / "skills/templates/design-doc-templates/scripts/render_design_templates.py")
 
 
@@ -855,6 +856,41 @@ def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
         assert str(repo_root) in (artifact_dir / "architecture_design.json").read_text(encoding="utf-8")
 
 
+def test_sync_preserves_canonical_artifact_lineage_while_sanitizing_projections() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        doc_id = "REQ-CANONICAL-LINEAGE"
+        spec = {
+            "schema": "codex-spec-v1",
+            "doc_id": doc_id,
+            "title": "Lineage",
+            "repo_root": str(repo_root),
+            "decision": "ready_for_design",
+            "acceptance_criteria": [{"id": "AC-1", "criteria": "canonical digest remains valid", "type": "positive"}],
+        }
+        spec["artifact_digest"] = workflow_contract.canonical_digest(spec)
+        write_json(artifact_dir / "spec.json", spec)
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Lineage")
+
+        canonical_spec = json.loads((docs_root / "deliveries" / doc_id / "artifacts/spec.json").read_text(encoding="utf-8"))
+        raw_spec = json.loads((docs_root / "machine/raw" / doc_id / "spec.json").read_text(encoding="utf-8"))
+        machine_spec = json.loads((docs_root / "machine/specs" / f"{doc_id}.spec.json").read_text(encoding="utf-8"))
+        assert result["decision"] == "pass"
+        assert canonical_spec == spec
+        assert canonical_spec["artifact_digest"] == workflow_contract.canonical_digest(canonical_spec)
+        assert str(repo_root) in json.dumps(canonical_spec, ensure_ascii=False)
+        assert str(repo_root) not in json.dumps(raw_spec, ensure_ascii=False)
+        assert str(repo_root) not in json.dumps(machine_spec, ensure_ascii=False)
+
+
 def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -866,6 +902,8 @@ def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> 
         write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
         write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
         write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+        (artifact_dir / "runtime").mkdir()
+        (artifact_dir / "runtime/events.jsonl").write_text('{"event":"created"}\n', encoding="utf-8")
         (artifact_dir / "requirement.normalized.txt").write_text("Canonical requirement\n", encoding="utf-8")
 
         result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Canonical")
@@ -884,6 +922,7 @@ def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> 
         assert machine["source_digest"] == digest
         assert f"codex:projection-source-digest:{digest}" in human
         assert (docs_root / "deliveries" / doc_id / "input/requirement.normalized.txt").exists()
+        assert (docs_root / "deliveries" / doc_id / "runtime/events.jsonl").read_text(encoding="utf-8").strip()
         assert docs_governor.validate(docs_root, doc_id)["decision"] == "pass"
 
 

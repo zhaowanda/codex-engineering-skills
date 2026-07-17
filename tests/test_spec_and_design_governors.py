@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -621,6 +622,39 @@ def test_technical_design_adds_expert_data_mq_cache_and_sequence_sections() -> N
     assert {"logs", "metrics", "traces", "alerts"}.issubset(tech["observability_design"])
 
 
+def test_technical_design_models_feishu_approval_callback_as_system_sequence() -> None:
+    spec = spec_governor.normalize(
+        "REQ-FEISHU-APPROVAL",
+        "飞书审批能力接入",
+        "\n".join([
+            "业务目标：物联网卡即将到期且命中续费条件时，系统先创建飞书审批流。",
+            "业务流程：系统按批次发起飞书审批实例。",
+            "业务流程：飞书将审批结果回调给后端。",
+            "业务流程：审批通过后由飞书回调链路自动创建结算单。",
+            "当前手动触发接口：`POST /api/iot/anomaly/snapshot/syncCurrent`",
+            "验收标准：审批拒绝后不创建结算单。",
+            "验收标准：页面展示审批状态、失败原因和重试入口。",
+        ]),
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        project = Path(tmp)
+        write_json(project / "evidence_bundle.json", {"project": "sigreal-operate-platform", "confirmed_anchors": []})
+        write_json(project / "source_location_evidence.json", {"decision": "pass", "confirmed_contracts": []})
+        tech = technical_design.render(spec, technical_design.load_project_understanding(project))
+    arch = architecture_design.render(spec, tech)
+    design_blob = json.dumps({"technical": tech, "architecture": arch}, ensure_ascii=False).lower()
+
+    assert tech["system_interaction_sequence"]["applicable"] is True
+    assert "Feishu Approval" in tech["system_interaction_sequence"]["participants"]
+    assert any(step.get("mode") == "callback" for step in tech["system_interaction_sequence"]["sequence"])
+    assert "```mermaid" in tech["system_sequence_diagram"]
+    assert any(item.get("contract") == "POST /api/iot/anomaly/snapshot/syncCurrent" for item in tech["api_contracts"])
+    assert "no api impact confirmed yet" not in design_blob
+    assert "existing producer" not in design_blob
+    assert "existing entrypoint to be confirmed" not in design_blob
+
+
 def test_specialized_ui_ue_design_review_and_frontend_plan() -> None:
     # Coverage references for skill-health: ui-ue-design-governor, ui-ue-reviewer,
     # frontend-implementation-planner.
@@ -831,6 +865,23 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
         assert status["can_implement"] is True
         assert status["next_stage"] == "implementation"
         assert status["next_action_type"] == "ready_to_implement"
+
+
+def test_delivery_runner_reads_docs_canonical_sibling_runtime() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        delivery_root = root / "deliveries/REQ-1"
+        artifact_dir = delivery_root / "artifacts"
+        artifact_dir.mkdir(parents=True)
+        write_ready_small_feature(artifact_dir, docs_root)
+        shutil.move(str(artifact_dir / "runtime"), str(delivery_root / "runtime"))
+        write_json(artifact_dir / "runtime/checkpoints/intake.json", {"schema": "stale-runtime"})
+
+        status = delivery_runner.inspect(artifact_dir, profile_name="small_feature")
+
+        assert status["can_implement"] is True
+        assert not any(str(item["source"]).startswith("runtime") for item in status["blockers"])
 
 
 def test_delivery_runner_requires_delivery_plan_review_before_git_edit() -> None:

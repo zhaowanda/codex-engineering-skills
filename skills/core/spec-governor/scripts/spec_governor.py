@@ -809,6 +809,7 @@ def structured_flow_step(flow_text: str, actor: str, entrypoint: str, step: int)
 def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[str, Any]], project_items: list[dict[str, Any]] | None = None) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     lower = text.lower()
+    mq_negated = bool(re.search(r"(无|不引入|不新增|not\s+use|no)\s*(mq|topic|queue|消息)", lower, flags=re.I))
 
     def add(kind: str, trigger: str, evidence: str, confidence: str = "medium") -> None:
         key = (kind, trigger)
@@ -827,7 +828,7 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
         add("frontend_operation", "user triggers UI operation", "inferred from UI terms")
     if any(term in lower or term in text for term in ["api", "接口", "endpoint", "route"]):
         add("backend_api", "caller invokes API endpoint", "inferred from API terms")
-    if any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "订阅消息", "message consumer"]):
+    if not mq_negated and any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "订阅消息", "message consumer"]):
         add("mq_consumer", "consumer receives message", "inferred from MQ terms")
     if any(term in lower or term in text for term in ["定时", "cron", "scheduled", "scheduler", "job"]):
         add("scheduled_job", "scheduled task fires", "inferred from schedule terms")
@@ -1027,14 +1028,16 @@ def business_closure_model(
 def state_machine_model(lines: list[str], text: str, transitions: list[dict[str, str]], project_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     lower = text.lower()
     retry_policy = extract_prefixed(lines, ("retry", "retry policy", "重试", "重试策略"))
-    idempotency = extract_prefixed(lines, ("idempotency", "idempotency key", "幂等", "幂等键"))
-    compensation = extract_prefixed(lines, ("compensation", "compensation rule", "补偿", "补偿规则"))
+    idempotency = extract_prefixed(lines, ("idempotency", "idempotency key", "idempotency_key", "幂等", "幂等键"))
+    compensation = extract_prefixed(lines, ("compensation", "compensation rule", "compensation_rule", "补偿", "补偿规则"))
     timeout = extract_prefixed(lines, ("timeout", "超时", "超时规则"))
-    invalid_transitions = extract_prefixed(lines, ("invalid transition", "非法流转", "禁止流转"))
+    invalid_transitions = extract_prefixed(lines, ("invalid transition", "invalid transitions", "invalid_transition_rules", "非法流转", "禁止流转"))
     if not retry_policy:
         retry_policy = collect_section_items(text, ("重试策略",))
     if not idempotency:
         idempotency = [item for item in collect_section_items(text, ("幂等与补偿",)) if "幂等" in item or "重复" in item]
+    if not idempotency:
+        idempotency = [line.strip(" -") for line in lines if any(term in line for term in ["幂等", "重复", "同一审批实例重复回调", "不能重复建单"])]
     if not compensation:
         compensation = collect_section_items(text, ("幂等与补偿",))
     if not invalid_transitions:
@@ -1099,7 +1102,7 @@ def state_machine_model(lines: list[str], text: str, transitions: list[dict[str,
 
 
 def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[str, str]], repo_impact: dict[str, Any], project_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    dependencies = extract_prefixed(lines, ("dependency", "depends on", "upstream", "downstream", "caller", "consumer", "producer", "依赖", "上游", "下游", "调用方", "消费方", "生产方"))
+    dependencies = extract_prefixed(lines, ("dependency", "depends on", "upstream", "downstream", "mq_upstream_downstream", "caller", "consumer", "producer", "依赖", "上游", "下游", "调用方", "消费方", "生产方"))
     chain: list[dict[str, Any]] = []
     for item in dependencies:
         parts = [part.strip() for part in re.split(r"\s*(?:->|→)\s*", item) if part.strip()]
@@ -1109,7 +1112,8 @@ def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[s
         else:
             chain.append({"order": len(chain) + 1, "dependency": item, "source_evidence": "input"})
     lower = text.lower()
-    requires_chain = bool(chain) or bool(repo_impact.get("multi_repo_required")) or any(term in lower or term in text for term in ["调用", "上下游", "mq", "consumer", "topic", "api", "接口", "多系统"])
+    mq_negated = bool(re.search(r"(无|不引入|不新增|not\s+use|no)\s*(mq|topic|queue|消息)", lower, flags=re.I))
+    requires_chain = bool(chain) or bool(repo_impact.get("multi_repo_required")) or any(term in lower or term in text for term in ["调用", "上下游", "consumer", "api", "接口", "多系统"]) or (not mq_negated and any(term in lower for term in ["mq", "topic", "queue"]))
     if not chain:
         for entry in entrypoints:
             if isinstance(entry, dict) and entry.get("confidence") == "high":
@@ -1120,7 +1124,7 @@ def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[s
     missing = []
     if requires_chain and len(chain) < 2 and bool(repo_impact.get("multi_repo_required")):
         missing.append("multi_repo_dependency_order")
-    if requires_chain and any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"]) and not any("mq" in item["dependency"].lower() or "topic" in item["dependency"].lower() or "消息" in item["dependency"] for item in chain):
+    if requires_chain and not mq_negated and any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"]) and not any("mq" in item["dependency"].lower() or "topic" in item["dependency"].lower() or "消息" in item["dependency"] for item in chain):
         missing.append("mq_upstream_downstream")
     return {"required": requires_chain, "chain": chain, "missing": missing, "ready": not missing}
 
@@ -1427,12 +1431,27 @@ def classify_data(text: str) -> dict[str, Any]:
 
 def extract_prefixed(lines: list[str], prefixes: tuple[str, ...]) -> list[str]:
     ordered = sorted(prefixes, key=len, reverse=True)
-    pattern = re.compile(rf"^({'|'.join(re.escape(item) for item in ordered)})(?:[:：\s-]+)(.+)$", re.I)
+    prefix_pattern = "|".join(re.escape(item) for item in ordered)
+    pattern = re.compile(rf"^({prefix_pattern})(?:[:：\s-]+)(.*)$", re.I)
+    any_prefix = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]*[:：]\s*$|^[\u4e00-\u9fffA-Za-z0-9_ -]{2,30}[:：]\s*$")
     result: list[str] = []
+    active_block = False
     for line in lines:
         match = pattern.match(line)
         if match:
-            result.append(match.group(2).strip())
+            value = match.group(2).strip()
+            if value:
+                result.append(value)
+                active_block = False
+            else:
+                active_block = True
+            continue
+        if active_block:
+            if pattern.match(line) or is_section_heading(line) or any_prefix.match(line):
+                active_block = False
+                continue
+            if line:
+                result.append(line.strip())
     return result
 
 

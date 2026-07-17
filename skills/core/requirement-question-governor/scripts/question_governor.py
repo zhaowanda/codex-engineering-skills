@@ -233,6 +233,16 @@ def add_question(questions: list[dict[str, Any]], question: str, owner: str, req
     questions.append(row)
 
 
+def spec_blocks_design(spec: dict[str, Any]) -> bool:
+    understanding = as_dict(spec.get("requirements_understanding"))
+    if spec.get("design_allowed") is False or understanding.get("design_allowed") is False:
+        return True
+    decision = str(spec.get("decision") or understanding.get("decision") or "").lower()
+    if "design_allowed" not in spec and "requirements_understanding" not in spec and decision not in {"ready_for_design", "pass"}:
+        return True
+    return decision in {"blocked", "block", "needs_clarification", "insufficient_context"}
+
+
 def impact_areas(spec: dict[str, Any]) -> set[str]:
     return {str(item.get("area")) for item in as_list(spec.get("impact_surface")) if isinstance(item, dict) and item.get("area")}
 
@@ -350,6 +360,7 @@ def merge_existing_answers(
 
 def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
     questions: list[dict[str, Any]] = []
+    design_blocked = spec_blocks_design(spec)
     for item in as_list(spec.get("open_questions")):
         if isinstance(item, dict):
             raw_question = str(item.get("question") or "")
@@ -416,7 +427,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
     for dimension in sorted({str(item) for item in weak_dimensions if item}):
         question_text = score_questions.get(dimension, "")
         if question_text:
-            add_question(questions, question_text, "product/engineering", True, f"requirements_understanding.{dimension}", "understanding_score")
+            add_question(questions, question_text, "product/engineering", design_blocked, f"requirements_understanding.{dimension}", "understanding_score")
     for advisory in as_list(as_dict(spec.get("business_goal_quality")).get("advisories")):
         if isinstance(advisory, dict) and advisory.get("source") == "measurable_metric":
             add_question(questions, "What quantitative success threshold should be observed for this requirement?", "product/engineering", False, "business_goal_quality.measurable_metric", "success_metric")
@@ -437,7 +448,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             questions,
             "What state transitions, retry policy, idempotency key, timeout rule, compensation rule, and invalid transitions are required?",
             "product/engineering",
-            True,
+            design_blocked,
             "state_machine.missing",
             "state_machine",
         )
@@ -447,7 +458,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
                 questions,
                 business_closure_question(spec),
             "engineering/product",
-            True,
+            design_blocked,
             "business_closure_model.missing_nodes",
             "business_closure",
         )
@@ -457,7 +468,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             questions,
             "What ordered upstream/downstream dependency chain, message topics, API contracts, and repository ownership must be followed?",
             "engineering",
-            True,
+            design_blocked,
             "dependency_chain.missing",
             "dependency_chain",
         )
@@ -467,7 +478,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             questions,
             "Which repositories and services are owner, upstream, downstream, or confirm-only dependencies for this requirement?",
             "engineering",
-            True,
+            design_blocked,
             "repo_impact_map.missing_repo_evidence",
             "repo_impact",
         )
@@ -483,20 +494,20 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             area = str(constraint.get("area") or "")
             if area and not is_area_applicable(spec, area):
                 continue
-            add_question(questions, str(constraint["question"]), "product/engineering", True, f"implicit.{constraint.get('area', 'constraint')}", str(constraint.get("area") or "implicit_constraint"))
+            add_question(questions, str(constraint["question"]), "product/engineering", design_blocked, f"implicit.{constraint.get('area', 'constraint')}", str(constraint.get("area") or "implicit_constraint"))
     areas = applicable_impact_areas(spec)
     if "permission" in areas and not as_list(spec.get("negative_acceptance_criteria")):
-        add_question(questions, "Which unauthorized roles, tenant/data-scope cases, and negative permission tests must fail?", "product/security", True, "impact.permission", "permission")
+        add_question(questions, "Which unauthorized roles, tenant/data-scope cases, and negative permission tests must fail?", "product/security", design_blocked, "impact.permission", "permission")
     if "data" in areas and not as_list(spec.get("data_fields")):
-        add_question(questions, "Which data fields, definitions, filters, null/default rules, and export ordering are required?", "product/data-owner", True, "impact.data", "data_rule")
+        add_question(questions, "Which data fields, definitions, filters, null/default rules, and export ordering are required?", "product/data-owner", design_blocked, "impact.data", "data_rule")
     if "api" in areas:
-        add_question(questions, "Which endpoint, request/response fields, error codes, compatibility rules, and old consumers are in scope?", "engineering", True, "impact.api", "api_contract")
+        add_question(questions, "Which endpoint, request/response fields, error codes, compatibility rules, and old consumers are in scope?", "engineering", design_blocked, "impact.api", "api_contract")
     if "performance" in areas:
-        add_question(questions, "What latency, throughput, batch size, export volume, and performance evidence thresholds are required?", "product/engineering", True, "impact.performance", "performance")
+        add_question(questions, "What latency, throughput, batch size, export volume, and performance evidence thresholds are required?", "product/engineering", design_blocked, "impact.performance", "performance")
     if "security" in areas:
-        add_question(questions, "Which sensitive fields require masking, authorization checks, audit logs, retention limits, or privacy review?", "security/product", True, "impact.security", "security")
+        add_question(questions, "Which sensitive fields require masking, authorization checks, audit logs, retention limits, or privacy review?", "security/product", design_blocked, "impact.security", "security")
     if "config" in areas:
-        add_question(questions, "What are the configuration defaults, environment overrides, rollout scope, and rollback behavior?", "engineering/release", True, "impact.config", "configuration")
+        add_question(questions, "What are the configuration defaults, environment overrides, rollout scope, and rollback behavior?", "engineering/release", design_blocked, "impact.config", "configuration")
     for question in questions:
         if isinstance(question, dict):
             question["question"] = localize_question(
