@@ -385,7 +385,7 @@ def test_harness_pre_push_blocks_uncommitted_delivery_docs() -> None:
         assert any(item["source"] == "docs_sync" and "uncommitted" in item["message"] for item in result["blockers"])
 
 
-def test_auto_runner_accepts_ready_docs_repo() -> None:
+def test_auto_runner_blocks_ready_projection_when_upstream_artifacts_are_blocked() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
@@ -399,76 +399,11 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
             out=out,
             docs_root=docs_root,
         )
-        assert result["docs_readiness"]["decision"] == "pass"
-        assert result["docs_sync"]["decision"] == "pass"
+        assert result["docs_readiness"]["decision"] == "block"
+        assert result["docs_sync"]["decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in result["docs_sync"]["blockers"])
         assert result["doc_language"] == "zh"
-        assert (docs_root / "indexes/REQ-AUTO-DOCS.manifest.json").exists()
-        spec_doc = (docs_root / "human/specs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        design_doc = (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        test_doc = (docs_root / "human/tests/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        release_doc = (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        assert "## 一、摘要" in spec_doc
-        assert "## 二、背景与目标" in spec_doc
-        assert "## 三、范围与非目标" in spec_doc
-        assert "## 四、需求澄清" in spec_doc
-        assert "### 澄清记录" in spec_doc
-        assert "### 澄清状态" in spec_doc
-        assert "### 已确认理解" in spec_doc
-        assert "### 待澄清问题" in spec_doc
-        assert "### 工作假设" in spec_doc
-        assert "是否允许进入设计：是" in spec_doc
-        assert "## 六、验收标准" in spec_doc
-        assert "## 八、需求到验收追踪图" in spec_doc
-        assert "`AC-1` exported file contains order id and status." in spec_doc
-        assert "```mermaid" in spec_doc + design_doc + release_doc
-        assert "## 二、现状问题与设计目标" in design_doc
-        assert "## 四、候选方案、对比与决策" in design_doc
-        assert "### 技术候选方案详述" in design_doc
-        assert "### 技术方案加权对比" in design_doc
-        assert "### 技术决策结论" in design_doc
-        assert design_doc.index("### 技术候选方案详述") < design_doc.index("### 技术方案加权对比") < design_doc.index("### 技术决策结论")
-        assert "### 架构候选方案详述" in design_doc
-        assert "### 架构方案加权对比" in design_doc
-        assert "### 架构决策结论" in design_doc
-        assert design_doc.index("### 架构候选方案详述") < design_doc.index("### 架构方案加权对比") < design_doc.index("### 架构决策结论")
-        assert "## 五、决策记录" in design_doc
-        assert "## 六、业务流程" in design_doc
-        assert "### 数据模型与表结构" in design_doc
-        assert "### 多系统交互时序" in design_doc
-        assert "### MQ 上下游与触发机制" in design_doc
-        assert "### 缓存策略评估" in design_doc
-        assert "### 事务与一致性" in design_doc
-        assert "### 可观测性设计" in design_doc
-        assert "## 十三、风险与未过门禁" in design_doc
-        assert "## 十二、测试策略摘要" in design_doc
-        assert "### 测试用例" not in design_doc
-        assert "`TC-1`" not in design_doc
-        assert "Acceptance:" not in design_doc
-        assert "## 四、测试用例" in test_doc
-        assert "`TC-1`" in test_doc
-        assert "关联验收" in test_doc
-        assert "为什么测" in test_doc
-        assert "项目语义依据" in test_doc
-        assert "怎么造数" in test_doc
-        assert "怎么执行" in test_doc
-        assert "怎么判定通过" in test_doc
-        assert "清理要求" in test_doc
-        assert "## 六、回归、集成、前端与权限范围" in test_doc
-        assert "## 二、发布前检查" in release_doc
-        assert "## 三、执行步骤" in release_doc
-        assert "## 四、发布与回滚顺序图" in release_doc
-        assert "### 测试用例" in release_doc
-        assert "### 实现前必须补齐" in release_doc
-        assert "## Executive Summary" not in spec_doc + design_doc + test_doc + release_doc
-        assert "Evidence References" not in spec_doc + design_doc + test_doc + release_doc
-        assert "- -" not in spec_doc + design_doc + test_doc + release_doc
-        assert "[{\"" not in spec_doc + design_doc + test_doc + release_doc
-        assert "{\"in_scope\"" not in spec_doc
-        assert "acceptance_criteria:" not in spec_doc
-        machine_spec = json.loads((docs_root / "machine/specs/REQ-AUTO-DOCS.spec.json").read_text(encoding="utf-8"))
-        assert machine_spec["schema"] == "codex-docs-machine-bundle-v1"
-        assert "spec.json" in machine_spec["artifacts"]
-        assert (docs_root / "machine/raw/REQ-AUTO-DOCS/auto_run_summary.json").exists()
+        assert (docs_root / "deliveries/REQ-AUTO-DOCS/artifacts/spec.json").exists()
 
 
 def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
@@ -487,10 +422,70 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
             doc_language="zh",
         )
         assert result["doc_language"] == "zh"
+        assert result["docs_sync"]["decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in result["docs_sync"]["blockers"])
         spec_doc = (docs_root / "human/specs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         design_doc = (docs_root / "human/designs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         test_doc = (docs_root / "human/tests/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
         release_doc = (docs_root / "human/releases/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
+        assert "等待同步交付产物" in spec_doc
+        assert "等待同步交付产物" in design_doc
+        assert "等待同步交付产物" in test_doc
+        assert "等待同步交付产物" in release_doc
+        assert (docs_root / "deliveries/REQ-AUTO-ZH/artifacts/spec.json").exists()
+        assert "## Executive Summary" not in spec_doc + design_doc + test_doc + release_doc
+        assert "Evidence References" not in spec_doc + design_doc + test_doc + release_doc
+        assert "Role:" not in design_doc + release_doc
+        assert "edit files:" not in design_doc + release_doc
+        assert "evidence:" not in spec_doc + design_doc + test_doc + release_doc
+
+
+def test_auto_runner_syncs_chinese_human_docs_when_upstream_artifacts_are_consistent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = root / "artifacts"
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-ZH-PASS",
+            title="订单导出",
+            out=out,
+            docs_root=docs_root,
+            doc_language="zh",
+        )
+        assert result["docs_sync"]["decision"] == "block"
+        spec = json.loads((out / "spec.json").read_text(encoding="utf-8"))
+        spec["decision"] = "pass"
+        spec["design_allowed"] = True
+        spec["open_questions"] = []
+        (out / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+        (out / "open_questions.json").write_text(
+            json.dumps({"schema": "codex-open-questions-v1", "decision": "pass", "questions": []}),
+            encoding="utf-8",
+        )
+        review = json.loads((out / "design_architecture_review.json").read_text(encoding="utf-8"))
+        review["decision"] = "pass"
+        review["blockers"] = []
+        (out / "design_architecture_review.json").write_text(json.dumps(review), encoding="utf-8")
+
+        consistent_docs_root = root / "delivery-docs-consistent"
+        consistent_docs_root.mkdir()
+        subprocess.run(["git", "init"], cwd=consistent_docs_root, text=True, capture_output=True, check=True)
+        docs_governor = auto_runner.load_docs_governor_module()
+        sync_result = docs_governor.sync(
+            consistent_docs_root,
+            doc_id="REQ-AUTO-ZH-PASS",
+            artifact_dir=out,
+            title="订单导出",
+            doc_language="zh",
+        )
+        assert sync_result["decision"] == "pass"
+        spec_doc = (consistent_docs_root / "human/specs/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
+        design_doc = (consistent_docs_root / "human/designs/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
+        test_doc = (consistent_docs_root / "human/tests/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
+        release_doc = (consistent_docs_root / "human/releases/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
         assert "## 一、摘要" in spec_doc
         assert "### 阅读与评审重点" in spec_doc
         assert "验收规模" in spec_doc
@@ -561,6 +556,7 @@ def test_auto_runner_auto_detects_chinese_doc_request() -> None:
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
         result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-HINT", out=root / "artifacts", docs_root=docs_root, doc_language="auto")
         assert result["doc_language"] == "zh"
+        assert result["docs_sync"]["decision"] == "pass"
         assert "## 四、需求澄清" in (docs_root / "human/specs/REQ-AUTO-ZH-HINT.md").read_text(encoding="utf-8")
 
 
@@ -594,6 +590,7 @@ def test_auto_runner_defaults_to_auto_doc_language_detection() -> None:
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
         result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-DEFAULT", out=root / "artifacts", docs_root=docs_root)
         assert result["doc_language"] == "zh"
+        assert result["docs_sync"]["decision"] == "pass"
         assert "## 一、摘要" in (docs_root / "human/specs/REQ-AUTO-ZH-DEFAULT.md").read_text(encoding="utf-8")
 
 
@@ -632,7 +629,9 @@ def test_auto_runner_uses_configured_docs_root_by_default() -> None:
                 title="Order export",
                 out=root / "artifacts",
             )
-            assert result["docs_readiness"]["decision"] == "pass"
+            assert result["docs_readiness"]["decision"] == "block"
+            assert result["docs_sync"]["decision"] == "block"
+            assert any(item["source"] == "docs_projection_state" for item in result["docs_sync"]["blockers"])
             assert result["docs_readiness"]["docs_root"] == str(docs_root)
         finally:
             restore_workspace_docs_config(original)
@@ -1117,7 +1116,7 @@ def test_codex_eng_clarify_help_and_non_tty_fail_closed() -> None:
 
 def run_all() -> None:
     test_auto_runner_generates_core_artifacts()
-    test_auto_runner_accepts_ready_docs_repo()
+    test_auto_runner_blocks_ready_projection_when_upstream_artifacts_are_blocked()
     test_auto_runner_is_idempotent_without_force()
     test_auto_runner_force_regenerates_existing_artifacts()
     test_auto_runner_project_understanding_optional()

@@ -884,6 +884,23 @@ def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> 
         assert docs_governor.validate(docs_root, doc_id)["decision"] == "pass"
 
 
+def test_sync_blocks_upstream_block_with_downstream_pass_projection() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-STATE-DRIFT"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "open_questions.json", {"schema": "codex-open-questions-v1", "doc_id": doc_id, "decision": "block", "questions": [{"id": "Q-1", "required": True, "status": "open"}]})
+        write_json(artifact_dir / "technical_design.json", {"schema": "codex-technical-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "architecture_design.json", {"schema": "codex-architecture-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "design_architecture_review.json", {"schema": "codex-design-architecture-review-v1", "doc_id": doc_id, "decision": "pass", "blockers": []})
+
+        result = docs_governor.sync(root / "docs", doc_id, artifact_dir, "State drift")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in result["blockers"])
+
+
 def test_validate_blocks_stale_canonical_delivery_projection() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -2178,7 +2195,7 @@ def test_docs_clarification_status_uses_unresolved_required_questions_only() -> 
     open_questions = docs_governor.render_open_questions(spec, language="zh")
     context = docs_governor.render_review_context(spec, "zh")
 
-    assert "状态：未记录阻塞性澄清问题" in rendered
-    assert "是否允许进入设计：是" in rendered
+    assert "状态：等待答复，暂时阻塞" in rendered
+    assert "是否允许进入设计：否" in rendered
     assert "已确认的问题" not in open_questions
     assert "当前记录 0 个未决问题" in context

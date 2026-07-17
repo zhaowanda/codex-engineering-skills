@@ -350,6 +350,40 @@ def extract_source_literals(spec: dict[str, Any]) -> list[dict[str, Any]]:
     return result[:80]
 
 
+def constraint_values(spec: dict[str, Any], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        for item in as_list(spec.get(key)):
+            if isinstance(item, dict):
+                value = item.get("pattern") or item.get("value") or item.get("path") or item.get("contract") or item.get("behavior") or item.get("summary") or item.get("name")
+                if value:
+                    values.append(str(value))
+            elif item:
+                values.append(str(item))
+    return [value for value in values if value.strip()]
+
+
+def generic_constraint_model(spec: dict[str, Any]) -> dict[str, Any]:
+    scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
+    scope_model = spec.get("scope_model") if isinstance(spec.get("scope_model"), dict) else {}
+    out_of_scope = [str(item) for item in as_list(scope.get("out_of_scope")) + as_list(scope.get("non_goals")) if str(item).strip()]
+    out_of_scope.extend(str(item) for item in as_list(scope_model.get("out_of_scope")) if str(item).strip())
+    forbidden = {
+        "forbidden_reuse_paths": constraint_values(spec, "forbidden_reuse_paths", "forbidden_paths"),
+        "forbidden_modules": constraint_values(spec, "forbidden_modules"),
+        "forbidden_contracts": constraint_values(spec, "forbidden_contracts"),
+        "forbidden_behaviors": constraint_values(spec, "forbidden_behaviors"),
+        "out_of_scope_patterns": constraint_values(spec, "out_of_scope_patterns") + out_of_scope,
+    }
+    return {
+        "schema": "codex-generic-constraint-model-v1",
+        "source": "spec",
+        **forbidden,
+        "has_constraints": any(values for values in forbidden.values()),
+        "rule": "These constraints are requirement-provided guardrails. Generic skills only propagate and validate them; they do not define domain-specific business rules.",
+    }
+
+
 def rank_files_for_subject(subject: str, ctx: dict[str, Any]) -> list[dict[str, Any]]:
     tokens = tokenize_requirement(subject)
     candidates: list[dict[str, Any]] = []
@@ -1299,6 +1333,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     for contract in confirmed_contracts:
         if contract not in known_literals:
             source_literals.append({"literal": contract, "source": "source_location_evidence.confirmed_contracts", "required_binding": True})
+    constraint_model = generic_constraint_model(spec)
     return {
         "schema": "codex-technical-design-v1",
         "decision": "pass" if design_allowed else "block",
@@ -1315,6 +1350,12 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         },
         "source_location_evidence": location_evidence,
         "source_literals": source_literals,
+        "constraint_model": constraint_model,
+        "forbidden_reuse_paths": constraint_model["forbidden_reuse_paths"],
+        "forbidden_modules": constraint_model["forbidden_modules"],
+        "forbidden_contracts": constraint_model["forbidden_contracts"],
+        "forbidden_behaviors": constraint_model["forbidden_behaviors"],
+        "out_of_scope_patterns": constraint_model["out_of_scope_patterns"],
         "design_scope": spec.get("scope") or {"in_scope": [summary], "out_of_scope": [], "assumptions": [], "non_goals": []},
         "impact_applicability": as_list(spec.get("impact_applicability")),
         "scope_model": spec.get("scope_model") or {},

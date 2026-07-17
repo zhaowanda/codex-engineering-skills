@@ -207,6 +207,43 @@ def sync_canonical_delivery(
     }
 
 
+def artifact_decision(data: dict[str, Any]) -> str:
+    return str(data.get("decision") or data.get("status") or "").lower()
+
+
+def docs_projection_state_blockers(artifact_dir: Path) -> list[dict[str, Any]]:
+    artifacts = {
+        name: read_json(artifact_dir / filename)
+        for name, filename in {
+            "spec": "spec.json",
+            "open_questions": "open_questions.json",
+            "technical_design": "technical_design.json",
+            "architecture_design": "architecture_design.json",
+            "design_review": "design_architecture_review.json",
+        }.items()
+        if (artifact_dir / filename).exists()
+    }
+    blockers: list[dict[str, Any]] = []
+    upstream_blocks = {
+        name: artifact_decision(data)
+        for name, data in artifacts.items()
+        if artifact_decision(data) in {"block", "blocked", "needs_clarification", "needs_revision", "failed", "fail"}
+    }
+    downstream_pass = {
+        name: artifact_decision(data)
+        for name, data in artifacts.items()
+        if name not in {"spec", "open_questions"} and artifact_decision(data) in {"pass", "ready", "approved", "expert_ready"}
+    }
+    if upstream_blocks and downstream_pass:
+        blockers.append({
+            "source": "docs_projection_state",
+            "message": "upstream blocking artifact conflicts with downstream pass artifact",
+            "upstream_blocks": upstream_blocks,
+            "downstream_pass": downstream_pass,
+        })
+    return blockers
+
+
 def sanitize_unmatched_local_path(value: str) -> str:
     if value.startswith(("/private/var/", "/var/folders/", "/tmp/")):
         return "<tmp>"
@@ -1048,7 +1085,13 @@ def render_requirement_clarification(spec: dict[str, Any]) -> str:
             questions.append(text(item))
 
     understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
-    blocked = bool(questions) or str(understanding.get("decision") or "") == "needs_clarification"
+    spec_decision = str(spec.get("decision") or "").lower()
+    blocked = (
+        bool(questions)
+        or str(understanding.get("decision") or "").lower() in {"needs_clarification", "block", "blocked"}
+        or spec_decision in {"blocked", "block", "needs_clarification"}
+        or spec.get("design_allowed") is False
+    )
     return (
         "### Clarification Status\n\n"
         f"- Status: {'blocked pending answer' if blocked else 'no blocking clarification recorded'}\n"
@@ -5530,13 +5573,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
         for item in as_list(spec.get("business_objectives"))
         if isinstance(item, dict)
     ] + [text(item) for item in as_list(spec.get("business_objectives")) if not isinstance(item, dict)]
-    unresolved_required_questions = [
-        item for item in as_list(spec.get("open_questions"))
-        if not isinstance(item, dict) or (item.get("required", True) is not False and str(item.get("status") or "open").lower() != "closed")
-    ]
     spec_decision_display = spec.get("decision")
-    if not unresolved_required_questions and str(spec_decision_display or "") in {"blocked", "needs_clarification"}:
-        spec_decision_display = "ready_for_design"
     return {
         "spec": (
             f"# {heading} 需求说明\n\n"
@@ -5961,6 +5998,14 @@ def sync(
             "blockers": canonical.get("blockers", []),
         }
     render_artifact_dir = Path(str(canonical.get("canonical_artifact_dir"))) if canonical else artifact_dir
+    projection_blockers = docs_projection_state_blockers(render_artifact_dir) if human_section == "all" else []
+    if projection_blockers:
+        return {
+            "schema": "codex-docs-governor-sync-v1",
+            "decision": "block",
+            "doc_id": doc_id,
+            "blockers": projection_blockers,
+        }
     human_docs = render_synced_human_docs_zh(doc_id, title, render_artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, render_artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],

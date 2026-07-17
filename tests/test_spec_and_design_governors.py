@@ -486,6 +486,33 @@ def test_technical_design_prefers_confirmed_source_anchor_over_broad_index() -> 
     assert "playback" in tech["system_sequence_diagram"].lower()
 
 
+def test_technical_design_propagates_requirement_provided_constraints() -> None:
+    spec = spec_governor.normalize(
+        "REQ-CONSTRAINT",
+        "Constrained change",
+        "\n".join([
+            "业务目的: 更新现有功能。",
+            "流程: 用户触发功能后系统返回结果。",
+            "入口: 功能按钮。",
+            "Req: Update the existing feature.",
+            "AC: Existing feature returns the new result.",
+        ]),
+    )
+    spec["forbidden_modules"] = ["src/legacy/LegacyFeature.ts"]
+    spec["forbidden_contracts"] = ["/legacy/feature"]
+    spec["forbidden_behaviors"] = ["legacy fallback"]
+    spec["scope"] = {"in_scope": ["existing feature"], "out_of_scope": ["batch import"]}
+
+    tech = technical_design.render(spec)
+
+    assert tech["constraint_model"]["schema"] == "codex-generic-constraint-model-v1"
+    assert tech["constraint_model"]["has_constraints"] is True
+    assert "src/legacy/LegacyFeature.ts" in tech["forbidden_modules"]
+    assert "/legacy/feature" in tech["forbidden_contracts"]
+    assert "legacy fallback" in tech["forbidden_behaviors"]
+    assert "batch import" in tech["out_of_scope_patterns"]
+
+
 def test_contract_selection_uses_breakdown_action_semantics() -> None:
     contracts = [
         "/operate/api/dualCamera/playbackStreamStart",
@@ -1000,6 +1027,28 @@ def test_requirement_questions_can_depend_on_blocked_spec_draft_without_unlockin
             item["source"] == "requirement_questions" and item.get("missing_dependencies") == ["spec"]
             for item in status["blockers"]
         )
+
+
+def test_delivery_runner_blocks_downstream_pass_when_open_questions_block() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        questions = json.loads((root / "open_questions.json").read_text(encoding="utf-8"))
+        questions["decision"] = "block"
+        questions["questions"] = [{"id": "Q-1", "required": True, "status": "open", "question": "What must be clarified?"}]
+        write_json(root / "open_questions.json", questions)
+        delivery_runner.CONTRACT.bind_lineage(
+            root / "open_questions.json",
+            "test-fixture",
+            [root / "spec.json"],
+            command=["test-fixture", "open_questions"],
+        )
+
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+
+        assert status["can_implement"] is False
+        assert any(item["source"] in {"requirement_questions", "profile_gate.open_questions.json"} for item in status["blockers"])
 
 
 def test_delivery_runner_rejects_placeholder_release_chain() -> None:

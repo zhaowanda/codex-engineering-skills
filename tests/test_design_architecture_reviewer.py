@@ -305,6 +305,29 @@ def test_api_contract_without_source_binding_needs_revision() -> None:
     assert "generic list/page route" in messages
 
 
+def test_requirement_provided_forbidden_constraints_block_implementation_surface() -> None:
+    technical, architecture = complete_design()
+    technical["constraint_model"] = {
+        "schema": "codex-generic-constraint-model-v1",
+        "forbidden_modules": ["src/legacy/LegacyCheckout.tsx"],
+        "forbidden_contracts": ["/legacy/pricing"],
+        "forbidden_behaviors": ["legacy calculation"],
+        "out_of_scope_patterns": ["payment capture"],
+    }
+    technical["module_decomposition"].append({
+        **technical["module_decomposition"][0],
+        "module": "src/legacy/LegacyCheckout.tsx",
+        "responsibility": "legacy calculation",
+    })
+
+    result = design_arch_review.review(technical, architecture)
+
+    messages = json_dumps(result)
+    assert result["decision"] == "block"
+    assert "forbidden or out-of-scope constraints" in messages
+    assert "src/legacy/LegacyCheckout.tsx" in messages
+
+
 def test_integration_sequence_rewritten_from_acceptance_needs_revision() -> None:
     technical, architecture = complete_design()
     architecture["integration_sequence"] = [{

@@ -237,6 +237,72 @@ def review_acceptance_literal_guard(technical: dict[str, Any], architecture: dic
         ))
 
 
+def collect_constraint_patterns(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, list[str]]:
+    result = {
+        "forbidden_reuse_paths": [],
+        "forbidden_modules": [],
+        "forbidden_contracts": [],
+        "forbidden_behaviors": [],
+        "out_of_scope_patterns": [],
+    }
+    for source in [technical, architecture]:
+        model = source.get("constraint_model") if isinstance(source.get("constraint_model"), dict) else {}
+        for key in result:
+            values = [*as_list(source.get(key)), *as_list(model.get(key))]
+            for value in values:
+                if isinstance(value, dict):
+                    candidate = value.get("pattern") or value.get("value") or value.get("path") or value.get("contract") or value.get("behavior") or value.get("summary") or value.get("name")
+                else:
+                    candidate = value
+                text = str(candidate or "").strip()
+                if text and text not in result[key]:
+                    result[key].append(text)
+    return result
+
+
+def implementation_surface_for_constraint_review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "module_decomposition": technical.get("module_decomposition"),
+        "api_contracts": technical.get("api_contracts"),
+        "logical_data_flow": technical.get("logical_data_flow"),
+        "system_interaction_sequence": technical.get("system_interaction_sequence"),
+        "selected_solution": technical.get("selected_solution"),
+        "solution_options": technical.get("solution_options"),
+        "data_design": technical.get("data_design"),
+        "ui_ue_design": technical.get("ui_ue_design"),
+        "module_topology": architecture.get("module_topology"),
+        "repo_responsibilities": architecture.get("repo_responsibilities"),
+        "cross_repo_contracts": architecture.get("cross_repo_contracts"),
+        "integration_sequence": architecture.get("integration_sequence"),
+        "data_flow": architecture.get("data_flow"),
+        "deployment_topology": architecture.get("deployment_topology"),
+        "rollback_strategy": architecture.get("rollback_strategy"),
+        "selected_architecture": architecture.get("selected_architecture"),
+        "architecture_options": architecture.get("architecture_options"),
+    }
+
+
+def review_generic_constraints(technical: dict[str, Any], architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    patterns_by_key = collect_constraint_patterns(technical, architecture)
+    surface_blob = text_of(implementation_surface_for_constraint_review(technical, architecture))
+    violations: list[dict[str, str]] = []
+    for key, patterns in patterns_by_key.items():
+        for pattern in patterns:
+            normalized = normalized_text(pattern)
+            if len(normalized) < 3:
+                continue
+            if normalized in surface_blob:
+                violations.append({"constraint_type": key, "pattern": pattern})
+    if violations:
+        findings.append(finding(
+            "requirement_coverage",
+            "blocker",
+            "implementation-facing design violates requirement-provided forbidden or out-of-scope constraints",
+            violations[:30],
+            "Remove forbidden/out-of-scope modules, paths, contracts, or behaviors from implementation-facing sections, or update the requirement constraint model with explicit approval.",
+        ))
+
+
 def artifact_digest(data: dict[str, Any]) -> str:
     def strip_volatile(value: Any) -> Any:
         if isinstance(value, dict):
@@ -899,6 +965,7 @@ def review(
     elif any(isinstance(item, dict) and not (item.get("technical_enforcement") and item.get("source_of_truth")) for item in business_rules):
         findings.append(finding("technical_design_quality", "high", "business rule mapping lacks enforcement or source of truth", business_rules, "Each rule needs technical_enforcement and source_of_truth."))
     review_acceptance_literal_guard(technical, architecture, findings)
+    review_generic_constraints(technical, architecture, findings)
 
     review_process_flow(process_flow, findings)
     review_process_flow_diagram(process_flow, process_flow_diagram, findings)
