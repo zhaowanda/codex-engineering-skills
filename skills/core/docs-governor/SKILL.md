@@ -30,6 +30,7 @@ delivery docs repository setup
 - Require stable doc ids for requirement-specific folders.
 - `init` must materialize non-empty requirement-scoped human docs and machine placeholders; empty `human/` or `machine/` directories are not sufficient.
 - `sync` must copy generated delivery artifacts into the docs repository by `doc_id` so docs follow the requirement, not just the workspace.
+- All JSON writes must be atomic: serialize, parse, write a temporary file, parse again, then replace the target. A sync result must never leave concatenated or partially overwritten JSON.
 - Reject artifacts whose embedded `doc_id` differs from the target delivery, sanitize local paths before canonical storage, and remove only stale files previously managed by docs-governor.
 - `validate` must reject missing canonical directories, missing managed files, changed canonical digests, stale human/machine projections, and cross-document manifests.
 - `validate --require-git-sync` must reject uncommitted changes for the target doc id, missing upstream configuration, and docs commits that are ahead of or behind upstream.

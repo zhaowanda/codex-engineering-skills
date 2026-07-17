@@ -87,6 +87,7 @@ WEAK_ACCEPTANCE_TERMS = {
     "works",
     "as expected",
 }
+TEMPLATE_LEAK_TERMS = {"需求标题", "requirement title"}
 EMPTY_ENUM_PATTERNS = [
     re.compile(r"(至少包括|include at least)[:：]\s*$", re.I),
 ]
@@ -1579,6 +1580,17 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     }
 
 
+def walk_spec_values(value: Any, path: str = "") -> list[tuple[str, Any]]:
+    rows = [(path, value)]
+    if isinstance(value, dict):
+        for key, child in value.items():
+            rows.extend(walk_spec_values(child, f"{path}.{key}" if path else str(key)))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            rows.extend(walk_spec_values(child, f"{path}[{index}]"))
+    return rows
+
+
 def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -1593,6 +1605,17 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
         blockers.append({"source": "requirements", "message": "at least one requirement is required"})
     if not as_list(spec.get("acceptance_criteria")):
         blockers.append({"source": "acceptance_criteria", "message": "acceptance criteria are required"})
+    for key in ["requirement_summary", "business_problem", "expected_business_outcome"]:
+        value = str(spec.get(key) or "").strip()
+        if value and any(term.lower() in value.lower() for term in TEMPLATE_LEAK_TERMS):
+            blockers.append({"source": key, "message": "template heading text is not a valid requirement summary or business fact", "value": value})
+    semantic_leaks: list[str] = []
+    for path, value in walk_spec_values(spec):
+        if isinstance(value, str) and any(term.lower() in value.lower() for term in TEMPLATE_LEAK_TERMS):
+            if not path.endswith(("source_text", "raw_text", "text", "source_lines")):
+                semantic_leaks.append(path)
+    if semantic_leaks:
+        blockers.append({"source": "semantic_quality", "message": "template heading text leaked into semantic fields", "fields": semantic_leaks[:20], "count": len(semantic_leaks)})
     scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
     if not as_list(scope.get("in_scope")):
         blockers.append({"source": "scope.in_scope", "message": "in_scope is required"})

@@ -264,6 +264,18 @@ def project_skill_index_requirements(artifact_dir: Path, candidates: list[dict[s
                 {"source": "project_skill_index_sync", "message": item.get("message", "invalid waiver")}
                 for item in waiver_validation.get("blockers", [])
             )
+    elif not evidence:
+        evidence = {
+            "schema": "codex-project-skill-index-sync-v1",
+            "doc_id": doc_id,
+            "decision": "not_required",
+            "required": False,
+            "reason": "No reusable project skill/index update candidates were detected from the changed files.",
+            "updated_index_paths": [],
+            "blockers": [],
+        }
+        write_json(evidence_path, evidence)
+        evidence_decision = "not_required"
 
     return {
         "required": required,

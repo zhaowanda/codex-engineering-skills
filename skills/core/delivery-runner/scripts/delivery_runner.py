@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -21,6 +20,18 @@ def load_contract_module() -> Any:
 
 
 CONTRACT = load_contract_module()
+
+
+def load_consistency_module() -> Any:
+    path = Path(__file__).with_name("delivery_consistency.py")
+    spec = importlib.util.spec_from_file_location("delivery_final_consistency", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+CONSISTENCY = load_consistency_module()
 FALLBACK_ORDER = [
     ("spec", "spec.json"),
     ("technical_design", "technical_design.json"),
@@ -389,6 +400,9 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     if not release_only and git_status.get("decision") != "ready":
         blockers.extend(git_status.get("blockers", []))
     blockers.extend(profile_gate_blockers(profile, artifact_dir))
+    consistency = CONSISTENCY.validate(artifact_dir)
+    if consistency.get("decision") != "pass":
+        blockers.extend(consistency.get("blockers", []))
     next_required_actions = profile_next_actions(profile, artifact_dir)
 
     next_stage = "done"
@@ -423,6 +437,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "detected_impacts": sorted(impacts),
         "docs_readiness": docs_status,
         "git_edit_readiness": git_status,
+        "final_consistency": consistency,
         "profile_missing_artifacts": profile_missing,
         "stage_registry": "config/workflow-stages.example.yaml",
         "next_profile_command": profile.get("next_safe_command", ""),

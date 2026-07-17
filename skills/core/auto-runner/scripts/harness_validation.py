@@ -31,6 +31,7 @@ GENERIC_RELEVANCE_TERMS = {
     "api", "http", "true", "false", "query", "list", "detail", "paging",
     "修改", "功能", "优化", "页面", "设备", "需求", "用户", "接口", "查询",
 }
+TEMPLATE_LEAK_TERMS = {"需求标题", "requirement title"}
 
 
 def load_agent_runtime_module() -> Any:
@@ -207,6 +208,29 @@ def nested_policy(policy: dict[str, Any], key: str) -> dict[str, Any]:
 
 def add_blocker(blockers: list[dict[str, Any]], source: str, message: str, **details: Any) -> None:
     blockers.append({"source": source, "message": message, **details})
+
+
+def walk_values(value: Any, path: str = "") -> list[tuple[str, Any]]:
+    rows = [(path, value)]
+    if isinstance(value, dict):
+        for key, child in value.items():
+            rows.extend(walk_values(child, f"{path}.{key}" if path else str(key)))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            rows.extend(walk_values(child, f"{path}[{index}]"))
+    return rows
+
+
+def template_leak_paths(data: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for path, value in walk_values(data):
+        if not isinstance(value, str):
+            continue
+        if path.endswith(("source_text", "raw_text", "text", "source_lines")):
+            continue
+        if any(term.lower() in value.lower() for term in TEMPLATE_LEAK_TERMS):
+            paths.append(path)
+    return paths
 
 
 def requirement_context(artifact_dir: Path) -> str:
@@ -394,6 +418,16 @@ def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[
     if not bundle_path.exists():
         bundle_path = artifact_dir / "evidence_bundle.json"
     bundle = read_json(bundle_path)
+    for artifact_name, data in [
+        ("spec.json", spec),
+        ("technical_design.json", technical),
+        ("architecture_design.json", architecture),
+        ("delivery_plan.json", plan),
+        ("test_design.json", read_json(artifact_dir / "test_design.json")),
+    ]:
+        leaked = template_leak_paths(data)
+        if leaked:
+            add_blocker(blockers, "semantic_quality", "template heading text leaked into semantic artifact fields", artifact=artifact_name, fields=leaked[:20], count=len(leaked))
     scope_model = spec.get("scope_model") if isinstance(spec.get("scope_model"), dict) else {}
     scoped_modify = {normalize_path(str(item)) for item in scope_model.get("modify", []) if str(item).strip()}
     scoped_references = {normalize_path(str(item)) for item in scope_model.get("reference_only", []) if str(item).strip()}

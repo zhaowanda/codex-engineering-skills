@@ -118,11 +118,18 @@ def write_preimplementation_happy_evidence(out_dir: Path) -> None:
         "test_design.json": {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [], "evidence_required": []},
         "test_data_plan.json": {"schema": "codex-test-data-plan-v1", "decision": "pass", "datasets": [], "case_data_matrix": []},
         "traceability_matrix.json": {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": []},
-        "docs_quality.json": {"schema": "codex-docs-quality-aggregate-v1", "decision": "pass", "blockers": []},
+        "docs_quality.json": {
+            "schema": "codex-docs-quality-aggregate-v1",
+            "decision": "pass",
+            "blockers": [],
+            "reviews": [{"artifact": "delivery-docs", "decision": "pass", "evidence": "synthetic docs manifest and artifact mirror are present"}],
+        },
     }
     for artifact, fallback in defaults.items():
         current = json.loads((out_dir / artifact).read_text(encoding="utf-8")) if (out_dir / artifact).exists() else fallback
         current.update({key: value for key, value in fallback.items() if key not in current or key in {"decision", "blockers"}})
+        if artifact == "docs_quality.json" and not current.get("reviews"):
+            current["reviews"] = fallback["reviews"]
         write_json(out_dir / artifact, current)
     technical = json.loads((out_dir / "technical_design.json").read_text(encoding="utf-8"))
     architecture = json.loads((out_dir / "architecture_design.json").read_text(encoding="utf-8"))
@@ -243,6 +250,15 @@ def write_frontend_happy_evidence(out_dir: Path) -> None:
 
 def write_release_happy_evidence(out_dir: Path) -> None:
     AGENT_RUNTIME.start(out_dir, "REQ-SYN-RELEASE", "release_readiness")
+    write_json(out_dir / "spec.json", {
+        "schema": "codex-spec-v1",
+        "doc_id": "REQ-SYN-RELEASE",
+        "decision": "pass",
+        "requirement_summary": "Release synthetic implementation after all review and test gates pass.",
+        "acceptance_criteria": [{"id": "AC-REL-1", "criteria": "release gate returns go after implementation, review, test, environment, UAT, and change evidence are complete"}],
+        "open_questions": [],
+        "blockers": [],
+    })
     write_json(out_dir / "delivery_plan.json", {
         "decision": "pass",
         "repo_tasks": [{"repo": "synthetic", "role": "modify", "allowed_files": ["synthetic.py"]}],
@@ -268,7 +284,7 @@ def write_release_happy_evidence(out_dir: Path) -> None:
     )
     write_json(out_dir / "write_guard_audit.json", {"schema": "codex-write-guard-audit-v1", "decision": "ready", "blockers": [], "changed_files": ["synthetic.py"], "snapshot": {"artifact": "write_guard_snapshot.json", "verified": True}})
     write_json(out_dir / "diff_impact.json", {"schema": "codex-diff-impact-v1", "decision": "pass", "impact_areas": ["code"], "changed_files": ["synthetic.py"], "blockers": []})
-    write_json(out_dir / "post_implementation_traceability_matrix.json", {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": [], "coverage": {"acceptance_covered": True}, "acceptance_trace": [{"acceptance": "synthetic behavior", "status": "covered"}], "task_trace": [{"task": "synthetic.py", "status": "implemented"}]})
+    write_json(out_dir / "post_implementation_traceability_matrix.json", {"schema": "codex-traceability-matrix-v1", "decision": "pass", "blockers": [], "coverage": {"acceptance_covered": True}, "acceptance_trace": [{"acceptance": "AC-REL-1", "status": "covered"}], "task_trace": [{"task": "synthetic.py", "acceptance": "AC-REL-1", "status": "implemented"}]})
     write_json(out_dir / "change_risk.json", {"schema": "codex-change-risk-v1", "decision": "pass", "risk_level": "low", "blockers": []})
     write_json(out_dir / "evidence_gap_summary.json", {"schema": "codex-evidence-gap-summary-v1", "decision": "pass", "required_evidence": ["tests"], "found_evidence": ["tests:test_execution_evidence.json"], "command_logs": [{"command": "pytest", "status": "passed"}], "missing_evidence": [], "blockers": []})
     write_json(out_dir / "code_design_quality.json", {"schema": "codex-code-design-quality-review-v1", "decision": "pass", "changed_files": ["synthetic.py"], "findings": [], "blockers": []})

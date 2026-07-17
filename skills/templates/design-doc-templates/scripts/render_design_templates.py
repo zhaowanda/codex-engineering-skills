@@ -106,6 +106,73 @@ def empty_architecture(doc_id: str, title: str) -> dict[str, Any]:
     }
 
 
+CHECKOUT_PROCESS_FLOW_DIAGRAM = """```mermaid
+flowchart TD
+    Buyer["buyer open checkout"]
+    Web["web-app checkout page loads pricing"]
+    Pricing["pricing-service returns totals and discounts[]"]
+    Render["web-app renders discount rows"]
+    Buyer --> Web --> Pricing --> Render
+```"""
+
+CHECKOUT_SYSTEM_SEQUENCE_DIAGRAM = """```mermaid
+sequenceDiagram
+    participant Buyer as buyer browser
+    participant Web as web-app checkout page
+    participant Pricing as pricing-service
+    Buyer->>Web: open /checkout and trigger usePricing
+    Web->>Pricing: GET /api/pricing?cartId={cartId}
+    Pricing-->>Web: return subtotal, total, and discounts[]
+    Web-->>Buyer: render discount rows without recalculating prices
+```"""
+
+CHECKOUT_INTEGRATION_SEQUENCE_DIAGRAM = """```mermaid
+sequenceDiagram
+    participant Web as web-app
+    participant Pricing as pricing-service
+    Web->>Pricing: load pricing
+    Pricing-->>Web: discounts[] remains provider-owned
+```"""
+
+NOTIFICATION_PROCESS_FLOW_DIAGRAM = """```mermaid
+flowchart TD
+    User["customer save notification preference"]
+    Monolith["monolith adapter checks traffic flag"]
+    Service["notification-service validates and writes preference"]
+    Audit["consent audit recorded"]
+    User --> Monolith --> Service --> Audit
+```"""
+
+NOTIFICATION_SYSTEM_SEQUENCE_DIAGRAM = """```mermaid
+sequenceDiagram
+    participant User as customer browser
+    participant Account as account frontend
+    participant Mono as monolith account adapter
+    participant Notify as notification-service
+    participant Identity as identity-service
+    participant DB as notification database
+    User->>Account: save notification preference
+    Account->>Mono: save notification preference
+    Mono->>Notify: POST /api/notification/preferences
+    Notify->>Identity: validate user id and tenant scope
+    Identity-->>Notify: validation result
+    Notify->>DB: write preference and consent audit
+    Notify-->>Mono: saved preference and audit id
+    Mono-->>Account: success state
+    Account-->>User: success state
+```"""
+
+NOTIFICATION_INTEGRATION_SEQUENCE_DIAGRAM = """```mermaid
+sequenceDiagram
+    participant Mono as monolith
+    participant Notify as notification-service
+    participant Identity as identity-service
+    Mono->>Notify: call notification-service preference API
+    Notify->>Identity: validate user through identity-service and write preference
+    Notify-->>Mono: preference response
+```"""
+
+
 def checkout_architecture_framing(doc_id: str, title: str) -> dict[str, Any]:
     return {
         "schema": "codex-architecture-framing-v1",
@@ -270,10 +337,11 @@ def example_technical(doc_id: str, title: str) -> dict[str, Any]:
         "requirement_trace": [{"requirement_id": "REQ-1", "summary": "show discount breakdown on checkout page"}],
         "business_rule_mapping": [{"requirement_id": "REQ-1", "technical_enforcement": "web page renders server discount fields", "source_of_truth": "pricing API response"}],
         "process_flow": [{"flow_name": "checkout review", "actors": ["buyer"], "steps": [{"step": 1, "actor": "buyer", "action": "open checkout", "input": "cart", "output": "discount breakdown", "exception": "pricing error shows existing fallback"}], "success_end_state": "discount is visible before submit", "failure_end_states": ["pricing unavailable"]}],
+        "process_flow_diagram": CHECKOUT_PROCESS_FLOW_DIAGRAM,
         "module_decomposition": [{"module": "src/checkout/CheckoutSummary.tsx", "responsibility": "render discount rows", "input": "pricing response", "output": "summary UI", "dependencies": ["pricing API"], "cohesion_reason": "presentation-only module", "coupling_control": "no pricing calculation in UI"}],
         "logical_data_flow": [{"source": "pricing API", "transform": "format discount rows", "destination": "checkout summary", "owner": "pricing-service", "data_security": "no sensitive personal data"}],
         "target_behavior": [{"requirement_id": "REQ-1", "behavior": "buyer sees discount breakdown before order submission"}],
-        "api_contracts": [{"contract": "discounts[] field unchanged", "compatibility": "additive rendering only", "old_consumer_impact": "none"}],
+        "api_contracts": [{"contract": "GET /api/pricing returns discounts[] field unchanged", "compatibility": "additive rendering only", "old_consumer_impact": "none", "source_evidence": "checkout_architecture_framing.provider_consumer", "frontend_proxy_path": "src/checkout/usePricing.ts"}],
         "interface_examples": [{"name": "pricing response", "request": "GET /api/pricing?cartId={cartId}", "response": "{\"discounts\":[{\"label\":\"Coupon\",\"amount\":-500}]}", "error_response": "{\"error\":\"pricing unavailable\"}"}],
         "compatibility_strategy": [{"old_consumer": "checkout page", "old_data": "orders without discounts", "rollback": "hide rows", "behavior": "empty discounts render nothing"}],
         "compatibility_matrix": [{"consumer": "checkout page", "old_behavior": "subtotal and total only", "new_behavior": "discount rows displayed when present", "compatibility": "additive", "rollback_behavior": "discount rows hidden"}],
@@ -286,15 +354,16 @@ def example_technical(doc_id: str, title: str) -> dict[str, Any]:
             "applicable": True,
             "participants": ["buyer browser", "web-app checkout page", "pricing-service"],
             "sequence": [
-                {"step": 1, "from": "buyer browser", "to": "web-app checkout page", "action": "open /checkout and trigger usePricing"},
-                {"step": 2, "from": "web-app checkout page", "to": "pricing-service", "action": "GET /api/pricing?cartId={cartId}"},
-                {"step": 3, "from": "pricing-service", "to": "web-app checkout page", "action": "return subtotal, total, and discounts[]"},
-                {"step": 4, "from": "web-app checkout page", "to": "buyer browser", "action": "render discount rows without recalculating prices"},
+                {"step": 1, "from": "buyer browser", "to": "web-app checkout page", "action": "open /checkout and trigger usePricing", "success": "checkout summary load starts", "failure": "existing route error is shown", "state_transition": "cart review -> pricing loading", "source_evidence": "runtime_entrypoints.frontend_action"},
+                {"step": 2, "from": "web-app checkout page", "to": "pricing-service", "action": "GET /api/pricing?cartId={cartId}", "success": "pricing response is received", "failure": "existing pricing error handling runs", "state_transition": "pricing loading -> response received", "source_evidence": "provider_consumer.pricing-service"},
+                {"step": 3, "from": "pricing-service", "to": "web-app checkout page", "action": "return subtotal, total, and discounts[]", "success": "discount fields are available for rendering", "failure": "discounts missing is treated as empty list", "state_transition": "response received -> summary model ready", "source_evidence": "api_contracts.discounts[]"},
+                {"step": 4, "from": "web-app checkout page", "to": "buyer browser", "action": "render discount rows without recalculating prices", "success": "buyer sees discount breakdown", "failure": "subtotal and total remain visible", "state_transition": "summary model ready -> checkout review visible", "source_evidence": "ui_ue_design.checkout summary"},
             ],
             "timeout_retry": "Preserve existing usePricing timeout and retry behavior; no new retry loop is introduced for discount rendering.",
             "idempotency": "Read-only pricing query remains idempotent and the UI render has no side effect.",
             "consistency": "Discount display uses the same pricing response snapshot as subtotal and total, so rows cannot drift from the displayed total.",
         },
+        "system_sequence_diagram": CHECKOUT_SYSTEM_SEQUENCE_DIAGRAM,
         "mq_interactions": [
             {
                 "applicable": False,
@@ -362,7 +431,8 @@ def example_architecture(doc_id: str, title: str) -> dict[str, Any]:
         "cross_repo_dependency_graph": [{"from": "pricing-service", "to": "web-app", "contract": "pricing response discounts[]", "change": "confirm only"}],
         "data_flow": [{"source": "pricing-service", "target": "web-app", "rule": "display only"}],
         "data_ownership": [{"business_object": "discount", "owner_repo": "pricing-service", "write_authority": "pricing-service", "consistency_rule": "web read only"}],
-        "integration_sequence": [{"step": 1, "actor": "web-app", "action": "load pricing", "failure_handling": "show existing error"}],
+        "integration_sequence": [{"step": 1, "from": "web-app", "to": "pricing-service", "owner_repo": "web-app", "contract": "GET /api/pricing?cartId={cartId}", "data": "subtotal, total, discounts[]", "action": "load pricing", "failure_handling": "show existing error"}],
+        "integration_sequence_diagram": CHECKOUT_INTEGRATION_SEQUENCE_DIAGRAM,
         "failure_isolation": [{"failure": "pricing response omits discounts", "isolation": "checkout summary renders subtotal only", "user_impact": "no checkout block"}],
         "security_and_permission": [{"control": "cart ownership enforced by API", "impact": "no new permission"}],
         "observability": [{"signal": "frontend error log", "owner": "web team"}],
@@ -405,6 +475,7 @@ def new_service_example_technical(doc_id: str, title: str) -> dict[str, Any]:
     data["requirement_trace"] = [{"requirement_id": "REQ-NEW-SVC", "summary": "create notification-service for customer notification preferences"}]
     data["business_rule_mapping"] = [{"requirement_id": "REQ-NEW-SVC", "technical_enforcement": "notification-service owns preference write APIs and consent audit", "source_of_truth": "notification-service preference store"}]
     data["process_flow"] = [{"flow_name": "preference update", "actors": ["customer", "account frontend", "notification-service"], "steps": [{"step": 1, "actor": "customer", "action": "save notification preference", "input": "channel consent", "output": "updated preference", "exception": "invalid channel returns validation error"}], "success_end_state": "preference and audit record are persisted", "failure_end_states": ["identity lookup failed", "validation failed"]}]
+    data["process_flow_diagram"] = NOTIFICATION_PROCESS_FLOW_DIAGRAM
     data["module_decomposition"] = [
         {"module": "notification-service/src/main/java/com/example/notification/api/PreferenceController.java", "responsibility": "own preference REST API", "input": "preference request DTO", "output": "preference response DTO", "dependencies": ["PreferenceService", "identity-service client"], "cohesion_reason": "API layer only maps HTTP contract", "coupling_control": "business rules stay in service/domain layer"},
         {"module": "notification-service/src/main/java/com/example/notification/domain/PreferenceService.java", "responsibility": "validate channel consent and write audit trail", "input": "user id and channel preference", "output": "stored preference", "dependencies": ["PreferenceRepository", "ConsentAuditRepository"], "cohesion_reason": "single owner for preference lifecycle", "coupling_control": "identity-service is read-only dependency"},
@@ -412,8 +483,8 @@ def new_service_example_technical(doc_id: str, title: str) -> dict[str, Any]:
     data["logical_data_flow"] = [{"source": "account frontend", "transform": "validate user id and channel preference", "destination": "notification-service preference store", "owner": "notification-service", "data_security": "tenant/user scope and consent audit required"}]
     data["target_behavior"] = [{"requirement_id": "REQ-NEW-SVC", "behavior": "customers and monolith compatibility adapter use notification-service APIs for preference reads and writes"}]
     data["api_contracts"] = [
-        {"endpoint": "POST /api/notification/preferences", "request": "PreferenceUpdateRequest", "response": "PreferenceResponse", "compatibility": "new additive provider API", "old_consumer_impact": "monolith migrates through adapter without account UI contract break"},
-        {"endpoint": "GET /api/notification/preferences/{userId}", "request": "userId path parameter", "response": "PreferenceResponse", "compatibility": "new read API for downstream senders", "old_consumer_impact": "none for first release"},
+        {"endpoint": "POST /api/notification/preferences", "request": "PreferenceUpdateRequest", "response": "PreferenceResponse", "compatibility": "new additive provider API", "old_consumer_impact": "monolith migrates through adapter without account UI contract break", "source_evidence": "notification_service_architecture_framing.provider_consumer", "controller_file": "notification-service/src/main/java/.../PreferenceController.java"},
+        {"endpoint": "GET /api/notification/preferences/{userId}", "request": "userId path parameter", "response": "PreferenceResponse", "compatibility": "new read API for downstream senders", "old_consumer_impact": "none for first release", "source_evidence": "notification_service_architecture_framing.provider_consumer", "controller_file": "notification-service/src/main/java/.../PreferenceController.java"},
     ]
     data["interface_examples"] = [{"name": "update preference", "request": "POST /api/notification/preferences {\"userId\":\"u-1\",\"channel\":\"SMS\",\"enabled\":true}", "response": "{\"userId\":\"u-1\",\"preferences\":[{\"channel\":\"SMS\",\"enabled\":true}]}", "error_response": "{\"code\":\"INVALID_CHANNEL\"}"}]
     data["compatibility_strategy"] = [{"old_consumer": "monolith account settings", "old_data": "existing account preference fields", "rollback": "route account settings back to monolith fields", "behavior": "adapter reads new service only after cutover flag"}]
@@ -433,15 +504,16 @@ def new_service_example_technical(doc_id: str, title: str) -> dict[str, Any]:
         "applicable": True,
         "participants": ["account frontend", "monolith account adapter", "notification-service", "identity-service", "notification database"],
         "sequence": [
-            {"step": 1, "from": "account frontend", "to": "monolith account adapter", "action": "save notification preference"},
-            {"step": 2, "from": "monolith account adapter", "to": "notification-service", "action": "POST /api/notification/preferences"},
-            {"step": 3, "from": "notification-service", "to": "identity-service", "action": "validate user id and tenant scope"},
-            {"step": 4, "from": "notification-service", "to": "notification database", "action": "write preference and consent audit"},
+            {"step": 1, "from": "account frontend", "to": "monolith account adapter", "action": "save notification preference", "success": "adapter receives scoped request", "failure": "existing account validation error is returned", "state_transition": "form editing -> submit pending", "source_evidence": "runtime_entrypoints.account preferences"},
+            {"step": 2, "from": "monolith account adapter", "to": "notification-service", "action": "POST /api/notification/preferences", "success": "provider accepts preference update", "failure": "adapter uses flag fallback before cutover", "state_transition": "submit pending -> provider write pending", "source_evidence": "api_contracts.POST preference"},
+            {"step": 3, "from": "notification-service", "to": "identity-service", "action": "validate user id and tenant scope", "success": "tenant/user ownership is confirmed", "failure": "dependency unavailable and no write occurs", "state_transition": "provider write pending -> identity validated", "source_evidence": "provider_consumer.identity-service"},
+            {"step": 4, "from": "notification-service", "to": "notification database", "action": "write preference and consent audit", "success": "preference and audit commit in one transaction", "failure": "transaction rolls back", "state_transition": "identity validated -> preference persisted", "source_evidence": "data_model_design.read_write_rules"},
         ],
         "timeout_retry": "monolith adapter uses existing API timeout; write retries require idempotency key",
         "idempotency": "preference update idempotency key is user_id + channel + request_id",
         "consistency": "preference and consent audit are committed in one notification-service transaction",
     }
+    data["system_sequence_diagram"] = NOTIFICATION_SYSTEM_SEQUENCE_DIAGRAM
     data["transaction_consistency"] = {"applicable": True, "boundary": "notification-service writes preference and audit record in one local transaction", "idempotency": "request_id per update", "compensation": "manual replay from audit request log if downstream adapter times out after commit", "rollback": "disable adapter traffic and keep committed preferences as dormant data"}
     data["permission_model"] = [{"role": "customer", "rule": "may update only own preferences within tenant scope", "negative_case": "cross-tenant user id is rejected"}]
     data["exception_and_edge_cases"] = [{"case": "identity-service unavailable", "handling": "return dependency unavailable and do not write preference"}, {"case": "duplicate request_id", "handling": "return previous successful result"}]
@@ -490,7 +562,11 @@ def new_service_example_architecture(doc_id: str, title: str) -> dict[str, Any]:
     data["cross_repo_dependency_graph"] = [{"from": "notification-service", "to": "monolith", "contract": "preference API", "change": "provider before consumer flag"}, {"from": "identity-service", "to": "notification-service", "contract": "user validation read API", "change": "confirm only"}]
     data["data_flow"] = [{"source": "monolith adapter", "target": "notification-service", "rule": "tenant/user scoped preference update"}, {"source": "notification-service", "target": "notification database", "rule": "write preference and audit"}]
     data["data_ownership"] = [{"business_object": "notification preference", "owner_repo": "notification-service", "write_authority": "notification-service", "consistency_rule": "preference and audit written in one local transaction"}]
-    data["integration_sequence"] = [{"step": 1, "actor": "monolith adapter", "action": "call notification-service preference API", "failure_handling": "flag fallback to monolith until cutover"}, {"step": 2, "actor": "notification-service", "action": "validate user through identity-service and write preference", "failure_handling": "return dependency unavailable without partial write"}]
+    data["integration_sequence"] = [
+        {"step": 1, "from": "monolith adapter", "to": "notification-service", "owner_repo": "monolith", "contract": "POST/GET /api/notification/preferences", "data": "tenant/user scoped preference request", "action": "call notification-service preference API", "failure_handling": "flag fallback to monolith until cutover"},
+        {"step": 2, "from": "notification-service", "to": "identity-service", "owner_repo": "notification-service", "contract": "identity-service user validation API", "data": "tenant_id and user_id validation request plus preference write", "action": "validate user through identity-service and write preference", "failure_handling": "return dependency unavailable without partial write"},
+    ]
+    data["integration_sequence_diagram"] = NOTIFICATION_INTEGRATION_SEQUENCE_DIAGRAM
     data["failure_isolation"] = [{"failure": "notification-service unavailable", "isolation": "monolith adapter flag can route back to legacy path", "user_impact": "temporary legacy behavior"}]
     data["security_and_permission"] = [{"control": "service validates auth token, tenant scope, user ownership, and writes consent audit", "impact": "new service must enforce tenant/user data scope"}]
     data["observability"] = [{"signal": "preference_update_success/error", "owner": "notification team"}, {"signal": "identity_validation_latency", "owner": "notification team"}]
