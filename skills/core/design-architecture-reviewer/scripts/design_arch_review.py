@@ -176,6 +176,34 @@ def literal_value(item: Any) -> str:
     return str(item or "")
 
 
+def literal_mapping_notes(*sources: dict[str, Any]) -> list[dict[str, Any]]:
+    notes: list[dict[str, Any]] = []
+    for source in sources:
+        for key in ("source_literal_mapping_notes", "literal_mappings", "literal_mapping_notes", "status_literal_mappings"):
+            for item in as_list(source.get(key)):
+                if isinstance(item, dict):
+                    notes.append(item)
+    return notes
+
+
+def mapping_covers_variant(literal: str, variant: str, mappings: list[dict[str, Any]]) -> bool:
+    literal_upper = literal.upper()
+    variant_upper = variant.upper()
+    for item in mappings:
+        source_literal = str(item.get("source_literal") or item.get("literal") or item.get("from") or "").upper()
+        variants = [str(value).upper() for value in as_list(item.get("design_variants") or item.get("variants") or item.get("to"))]
+        mapping_rule = str(item.get("mapping_rule") or item.get("rule") or item.get("reason") or item.get("not_same_reason") or "")
+        rule_upper = mapping_rule.upper()
+        if source_literal != literal_upper:
+            continue
+        variant_covered = variant_upper in variants or variant_upper in rule_upper
+        literal_covered = literal_upper in rule_upper or source_literal == literal_upper
+        explicit_boundary = any(term in mapping_rule for term in ("不是同一", "不允许混用", "禁止混用", "不同状态", "different", "not the same", "do not mix", "separate"))
+        if variant_covered and literal_covered and (mapping_rule.strip() or explicit_boundary):
+            return True
+    return False
+
+
 def critical_source_literals(technical: dict[str, Any]) -> list[str]:
     literals = [literal_value(item).strip() for item in as_list(technical.get("source_literals"))]
     if not literals:
@@ -207,6 +235,7 @@ def review_acceptance_literal_guard(technical: dict[str, Any], architecture: dic
         "acceptance_mapping": technical.get("acceptance_mapping"),
         "api_contracts": technical.get("api_contracts"),
     }, ensure_ascii=False)
+    explicit_mappings = literal_mapping_notes(technical, architecture)
     mapped_upper_literals = set(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", raw_mappings_blob.upper()))
     missing = []
     drifted = []
@@ -217,8 +246,12 @@ def review_acceptance_literal_guard(technical: dict[str, Any], architecture: dic
             continue
         if re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", literal):
             related = [match for match in re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", raw_design_blob) if literal in match and match != literal]
-            if related and literal not in mapped_upper_literals:
-                drifted.append({"source_literal": literal, "design_variants": sorted(set(related))[:5]})
+            unmapped_related = [
+                match for match in sorted(set(related))
+                if not mapping_covers_variant(literal, match, explicit_mappings)
+            ]
+            if unmapped_related and literal not in mapped_upper_literals:
+                drifted.append({"source_literal": literal, "design_variants": unmapped_related[:5]})
     if missing:
         findings.append(finding(
             "requirement_coverage",
@@ -870,6 +903,7 @@ def review(
     architecture: dict[str, Any],
     ui_ue_artifact: dict[str, Any] | None = None,
     specialty_artifacts: dict[str, dict[str, Any]] | None = None,
+    architecture_framing_artifact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     specialty_artifacts = specialty_artifacts or {}
@@ -911,7 +945,15 @@ def review(
     interface_examples = as_list(technical.get("interface_examples"))
     compatibility_matrix = as_list(technical.get("compatibility_matrix"))
     project_context = technical.get("project_context") if isinstance(technical.get("project_context"), dict) else {}
-    architecture_framing = technical.get("architecture_framing") if isinstance(technical.get("architecture_framing"), dict) else {}
+    architecture_framing = (
+        architecture_framing_artifact
+        if isinstance(architecture_framing_artifact, dict) and architecture_framing_artifact
+        else technical.get("architecture_framing")
+        if isinstance(technical.get("architecture_framing"), dict)
+        else architecture.get("architecture_framing")
+        if isinstance(architecture.get("architecture_framing"), dict)
+        else {}
+    )
     applicability = {
         str(item.get("area", "")).lower(): str(item.get("status", "")).lower()
         for item in as_list(technical.get("impact_applicability"))
@@ -1370,6 +1412,7 @@ def review(
         "input_digests": {
             "technical_design.json": artifact_digest(technical),
             "architecture_design.json": artifact_digest(architecture),
+            **({"architecture_framing.json": artifact_digest(architecture_framing)} if architecture_framing else {}),
             **{name: artifact_digest(data) for name, data in specialty_artifacts.items() if data},
         },
         "specialty_review_summary": specialty_summary,
@@ -1434,6 +1477,7 @@ def main() -> int:
     p_review = sub.add_parser("review")
     p_review.add_argument("--technical-design", required=True)
     p_review.add_argument("--architecture-design", required=True)
+    p_review.add_argument("--architecture-framing")
     p_review.add_argument("--ui-ue-design")
     p_review.add_argument("--ui-ue-review")
     p_review.add_argument("--api-contract-design")
@@ -1466,6 +1510,7 @@ def main() -> int:
             read_json(args.architecture_design),
             read_json(args.ui_ue_design) if args.ui_ue_design else None,
             {name: read_json(path) for name, path in specialty_paths.items() if path},
+            read_json(args.architecture_framing) if args.architecture_framing else None,
         )
         if args.out:
             Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

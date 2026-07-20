@@ -54,6 +54,8 @@ spec
 - Require security, performance, rollback, observability, and test strategy to be executable, not generic.
 - Treat placeholders such as `TBD`, `unknown`, `todo`, and `confirm later` as findings unless they are inside an explicitly controlled gate.
 - Consume every applicable specialty artifact rather than treating it as advisory prose: UI/UE review, API contract design, data model design, observability design, configuration readiness, data security review, performance review, and cross-repo readiness.
+- Consume `architecture_framing.json` explicitly when supplied; a design must not be marked as lacking pre-technical framing merely because the framing is stored as a sibling artifact rather than embedded in technical or architecture design.
+- Treat source literal rewrites as findings only when no explicit mapping exists. Mapping notes such as `source_literal_mapping_notes` may distinguish separate state machines or enums and must be honored when they clearly cover the source literal and derived/design variant.
 - Promote blocking specialty decisions or explicit blockers into the total-design blockers. `applicable=false`, `not_applicable`, and evidence-pending specialty decisions without blockers are carried as follow-up evidence, not design blockers by themselves.
 - Record `input_digests` for technical design, architecture design, and every supplied specialty artifact so orchestration can detect a stale aggregate review.
 - When cross-repo readiness is produced after the first delivery plan, rerun the aggregate review and then refresh downstream plan/traceability evidence as needed before implementation.
@@ -67,6 +69,7 @@ python3 scripts/design_arch_review.py \
   review \
   --technical-design artifacts/technical_design.json \
   --architecture-design artifacts/architecture_design.json \
+  --architecture-framing artifacts/architecture_framing.json \
   --ui-ue-review artifacts/ui_ue_review.json \
   --api-contract-design artifacts/api_contract_design.json \
   --data-model-design artifacts/data_model_design.json \

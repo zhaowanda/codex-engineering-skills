@@ -1813,6 +1813,9 @@ def run(
         "--out",
         str(design_review),
     ]
+    architecture_framing_artifact = out / "architecture_framing.json"
+    if architecture_framing_artifact.exists():
+        design_review_command.extend(["--architecture-framing", str(architecture_framing_artifact)])
     for argument, artifact_name in [
         ("--ui-ue-design", "ui_ue_design.json"),
         ("--ui-ue-review", "ui_ue_review.json"),

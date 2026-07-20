@@ -293,6 +293,39 @@ def test_source_literal_drift_blocks_design_review() -> None:
     assert "source literals appear rewritten without an explicit mapping" in json_dumps(result)
 
 
+def test_source_literal_mapping_notes_prevent_false_drift() -> None:
+    technical, architecture = complete_design()
+    technical["source_literals"] = [{"literal": "PENDING", "source": "source.requirement", "required_binding": True}]
+    technical["business_rule_mapping"][0]["technical_enforcement"] = "approval state PENDING must remain separate from settlement status"
+    technical["target_behavior"][0]["behavior"] = "approval PENDING is not SETTLEMENT_STATUS_PENDING_RECEIPT"
+    mapping = {
+        "source_literal": "PENDING",
+        "design_variants": ["SETTLEMENT_STATUS_PENDING_RECEIPT"],
+        "mapping_rule": "PENDING is the approval state; SETTLEMENT_STATUS_PENDING_RECEIPT is a different settlement-order state and must not be mixed.",
+    }
+    technical["source_literal_mapping_notes"] = [mapping]
+    architecture["source_literal_mapping_notes"] = [mapping]
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "pass"
+    assert "source literals appear rewritten without an explicit mapping" not in json_dumps(result)
+
+
+def test_external_architecture_framing_satisfies_complex_design_gate() -> None:
+    technical, architecture = complete_design()
+    external_framing = technical.pop("architecture_framing")
+    technical.pop("architecture_framing_ref", None)
+    architecture.pop("architecture_framing", None)
+    architecture.pop("architecture_framing_ref", None)
+
+    result = design_arch_review.review(technical, architecture, architecture_framing_artifact=external_framing)
+
+    assert result["decision"] == "pass"
+    assert "complex design lacks pre-technical architecture framing" not in json_dumps(result)
+    assert "architecture_framing.json" in result["input_digests"]
+
+
 def test_api_contract_without_source_binding_needs_revision() -> None:
     technical, architecture = complete_design()
     technical["api_contracts"] = [{"contract": "/list", "compatibility": "unknown", "old_consumer_impact": "unknown"}]
@@ -706,6 +739,9 @@ def run_all() -> None:
     test_generic_design_phrasing_needs_revision()
     test_template_problem_analysis_needs_revision()
     test_template_option_decision_needs_revision()
+    test_source_literal_drift_blocks_design_review()
+    test_source_literal_mapping_notes_prevent_false_drift()
+    test_external_architecture_framing_satisfies_complex_design_gate()
     test_selected_option_must_match_highest_score()
     test_low_confidence_generic_entrypoint_needs_revision()
     test_complex_breakdown_flattened_to_one_module_needs_revision()
