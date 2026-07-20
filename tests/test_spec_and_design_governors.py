@@ -944,6 +944,31 @@ def test_delivery_runner_requires_docs_and_fresh_git_before_implementation() -> 
         assert any("pull --ff-only evidence is missing" in item["message"] for item in status["blockers"])
 
 
+def test_delivery_runner_infers_docs_root_when_summary_is_sanitized() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        artifact_dir = docs_root / "deliveries/REQ-1/artifacts"
+        artifact_dir.mkdir(parents=True)
+        write_json(
+            artifact_dir / "auto_run_summary.json",
+            {
+                "doc_id": "REQ-1",
+                "docs_readiness": {
+                    "decision": "pass",
+                    "docs_root": "<docs-root>",
+                    "manifest": "<docs-root>/indexes/REQ-1.manifest.json",
+                },
+            },
+        )
+
+        status = delivery_runner.docs_readiness(artifact_dir)
+
+        assert status["decision"] == "pass"
+        assert status["docs_root"] == str(docs_root)
+        assert status["manifest"] == str(docs_root / "indexes/REQ-1.manifest.json")
+
+
 def test_delivery_runner_blocks_when_docs_quality_not_pass() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

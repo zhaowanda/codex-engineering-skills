@@ -857,7 +857,7 @@ def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
         assert str(repo_root) in (artifact_dir / "architecture_design.json").read_text(encoding="utf-8")
 
 
-def test_sync_preserves_canonical_artifact_lineage_while_sanitizing_projections() -> None:
+def test_sync_sanitizes_canonical_artifacts_and_refreshes_digest() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "docs"
@@ -885,11 +885,45 @@ def test_sync_preserves_canonical_artifact_lineage_while_sanitizing_projections(
         raw_spec = json.loads((docs_root / "machine/raw" / doc_id / "spec.json").read_text(encoding="utf-8"))
         machine_spec = json.loads((docs_root / "machine/specs" / f"{doc_id}.spec.json").read_text(encoding="utf-8"))
         assert result["decision"] == "pass"
-        assert canonical_spec == spec
+        assert canonical_spec != spec
         assert canonical_spec["artifact_digest"] == workflow_contract.canonical_digest(canonical_spec)
-        assert str(repo_root) in json.dumps(canonical_spec, ensure_ascii=False)
+        assert str(repo_root) not in json.dumps(canonical_spec, ensure_ascii=False)
         assert str(repo_root) not in json.dumps(raw_spec, ensure_ascii=False)
         assert str(repo_root) not in json.dumps(machine_spec, ensure_ascii=False)
+        assert result["sanitized_artifacts"]
+
+
+def test_sync_sanitizes_active_canonical_artifacts_without_staging_block() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        doc_id = "REQ-CANONICAL-SANITIZE"
+        artifact_dir = docs_root / "deliveries" / doc_id / "artifacts"
+        repo_root = root / "repo"
+        spec = {
+            "schema": "codex-spec-v1",
+            "doc_id": doc_id,
+            "title": "Canonical sanitize",
+            "repo_root": str(repo_root),
+            "decision": "ready_for_design",
+            "acceptance_criteria": [{"id": "AC-1", "criteria": "canonical docs sanitize local paths", "type": "positive"}],
+        }
+        spec["artifact_digest"] = workflow_contract.canonical_digest(spec)
+        write_json(artifact_dir / "spec.json", spec)
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Canonical sanitize")
+
+        canonical_spec = json.loads((artifact_dir / "spec.json").read_text(encoding="utf-8"))
+        combined = json.dumps(result, ensure_ascii=False) + "\n" + json.dumps(canonical_spec, ensure_ascii=False)
+        assert result["decision"] == "pass"
+        assert not any(item.get("source") == "privacy" for item in result.get("blockers", []))
+        assert str(repo_root) not in combined
+        assert canonical_spec["artifact_digest"] == workflow_contract.canonical_digest(canonical_spec)
+        assert "spec.json" in result["sanitized_artifacts"]
 
 
 def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> None:
@@ -978,7 +1012,7 @@ def test_sync_blocks_artifacts_bound_to_another_doc_id() -> None:
         assert any("does not match" in item["message"] for item in result["blockers"])
 
 
-def test_sync_blocks_active_canonical_artifacts_with_local_paths() -> None:
+def test_sync_sanitizes_active_canonical_artifacts_with_local_paths() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         docs_root = Path(tmp) / "docs"
         doc_id = "REQ-CANONICAL-PRIVACY"
@@ -988,8 +1022,10 @@ def test_sync_blocks_active_canonical_artifacts_with_local_paths() -> None:
 
         result = docs_governor.sync(docs_root, doc_id, canonical, "Privacy")
 
-        assert result["decision"] == "block"
-        assert any(item["source"] == "privacy" for item in result["blockers"])
+        canonical_spec = json.loads((canonical / "spec.json").read_text(encoding="utf-8"))
+        assert result["decision"] == "pass"
+        assert canonical_spec["repo_root"] == "<user-home>"
+        assert "spec.json" in result["sanitized_artifacts"]
 
 
 def test_validate_git_sync_blocks_uncommitted_and_unpushed_delivery_docs() -> None:

@@ -46,6 +46,14 @@ CHECKPOINT_INPUTS = {
     "close": ["post_release_observation.json"],
 }
 RELEASE_PROVIDER_TYPES = {"ci", "change_management", "deployment", "observability"}
+LOCAL_PATH_PATTERNS = [
+    re.compile(r"/private/var/folders/[^\s\"']+"),
+    re.compile(r"/var/folders/[^\s\"']+"),
+    re.compile(r"/tmp/[^\s\"']+"),
+    re.compile(r"/home/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"/" + r"Users/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"[A-Za-z]:\\[^\s\"']+"),
+]
 
 
 def load_governance_contract() -> Any:
@@ -86,6 +94,31 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def sanitize_unmatched_local_path(value: str) -> str:
+    if value.startswith(("/private/var/", "/var/folders/", "/tmp/")):
+        return "<tmp>"
+    if value.startswith(("/" + "Users/", "/home/")):
+        return "<user-home>"
+    if re.match(r"^[A-Za-z]:\\", value):
+        return "<local-path>"
+    return value
+
+
+def sanitize_local_paths(value: str) -> str:
+    result = value
+    root = Path(__file__).resolve().parents[4]
+    replacements = [
+        (str(root), "<skills-root>"),
+        (str(Path.home()), "<user-home>"),
+    ]
+    for source, target in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        if source:
+            result = result.replace(source, target)
+    for pattern in LOCAL_PATH_PATTERNS:
+        result = pattern.sub(lambda match: sanitize_unmatched_local_path(match.group(0)), result)
+    return result
+
+
 def sanitize(value: Any, key: str = "") -> Any:
     if any(term in key.lower() for term in SENSITIVE_KEYS):
         return "[REDACTED]"
@@ -96,7 +129,7 @@ def sanitize(value: Any, key: str = "") -> Any:
     if isinstance(value, str):
         value = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[REDACTED]", value)
         value = re.sub(r"(?i)(password|secret|token)=([^\s&]+)", r"\1=[REDACTED]", value)
-        return value[:2000]
+        return sanitize_local_paths(value)[:2000]
     return value
 
 

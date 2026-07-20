@@ -143,6 +143,10 @@ def prepare(repo: Path, branch: str, remote: str = "origin", base_branch: str = 
         return evidence
     code, _, err = run_git(Path(evidence["repo"]), ["checkout", "-b", branch])
     evidence["created_branch"] = code == 0
+    if code != 0 and "already exists" in err:
+        code, _, err = run_git(Path(evidence["repo"]), ["checkout", branch])
+        evidence["created_branch"] = False
+        evidence["reused_branch"] = code == 0
     if code != 0:
         evidence["blockers"].append(f"create branch failed: {err}")
         evidence["decision"] = "blocked"

@@ -14,6 +14,14 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[4]
 SCHEMA = "codex-auto-runner-summary-v1"
 PROFILE_REGISTRY = ROOT / "config/workflow-profiles.example.yaml"
+LOCAL_PATH_PATTERNS = [
+    re.compile(r"/private/var/folders/[^\s\"']+"),
+    re.compile(r"/var/folders/[^\s\"']+"),
+    re.compile(r"/tmp/[^\s\"']+"),
+    re.compile(r"/home/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"/" + r"Users/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"[A-Za-z]:\\[^\s\"']+"),
+]
 
 
 def load_workflow_contract_module() -> Any:
@@ -71,9 +79,57 @@ def default_out(doc_id: str) -> Path:
     return Path("/tmp/codex-auto") / doc_id
 
 
+def sanitize_unmatched_local_path(value: str) -> str:
+    if value.startswith(("/private/var/", "/var/folders/", "/tmp/")):
+        return "<tmp>"
+    if value.startswith(("/" + "Users/", "/home/")):
+        return "<user-home>"
+    if re.match(r"^[A-Za-z]:\\", value):
+        return "<local-path>"
+    return value
+
+
+def sanitize_local_paths(value: str, artifact_dir: Path | None = None, docs_root: Path | None = None) -> str:
+    result = value
+    replacements: list[tuple[str, str]] = []
+    if artifact_dir:
+        replacements.append((str(artifact_dir), "<artifact-dir>"))
+        replacements.append((str(artifact_dir).replace(str(Path.home()), "<user-home>"), "<artifact-dir>"))
+    if docs_root:
+        replacements.append((str(docs_root), "<docs-root>"))
+        replacements.append((str(docs_root).replace(str(Path.home()), "<user-home>"), "<docs-root>"))
+        if docs_root.parent:
+            replacements.append((str(docs_root.parent), "<workspace>"))
+            replacements.append((str(docs_root.parent).replace(str(Path.home()), "<user-home>"), "<workspace>"))
+    replacements.append((str(ROOT), "<skills-root>"))
+    replacements.append((str(Path.home()), "<user-home>"))
+    for source, target in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        if source:
+            result = result.replace(source, target)
+    for pattern in LOCAL_PATH_PATTERNS:
+        result = pattern.sub(lambda match: sanitize_unmatched_local_path(match.group(0)), result)
+    return result
+
+
+def sanitize_for_artifact(value: Any, artifact_dir: Path | None = None, docs_root: Path | None = None) -> Any:
+    if isinstance(value, str):
+        return sanitize_local_paths(value, artifact_dir, docs_root)
+    if isinstance(value, list):
+        return [sanitize_for_artifact(item, artifact_dir, docs_root) for item in value]
+    if isinstance(value, dict):
+        return {str(key): sanitize_for_artifact(item, artifact_dir, docs_root) for key, item in value.items()}
+    return value
+
+
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifact_dir = path.parent if path.name == "auto_run_summary.json" else None
+    docs_root = None
+    if path.parent.name == "artifacts" and path.parent.parent.parent.name == "deliveries":
+        artifact_dir = path.parent
+        docs_root = path.parent.parent.parent.parent
+    payload = sanitize_for_artifact(data, artifact_dir=artifact_dir, docs_root=docs_root) if artifact_dir or docs_root else data
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def read_json(path: Path) -> dict[str, Any]:

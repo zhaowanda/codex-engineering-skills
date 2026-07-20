@@ -24,6 +24,18 @@ MACHINE_ARTIFACTS = {
 EXPERT_SUPPLEMENTAL_ARTIFACTS = [
     "runtime_sequence_evidence.json",
 ]
+VOLATILE_DIGEST_KEYS = {
+    "artifact_digest",
+    "command_digest",
+    "generated_at",
+    "generated_from_branch",
+    "generated_from_commit",
+    "input_digests",
+    "lineage_schema",
+    "permit_id",
+    "producer",
+    "producer_version",
+}
 LOCAL_PATH_PATTERNS = [
     re.compile(r"/private/var/folders/[^\s\"']+"),
     re.compile(r"/var/folders/[^\s\"']+"),
@@ -84,6 +96,22 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def canonical_artifact_digest(data: Any) -> str:
+    def strip_volatile(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: strip_volatile(item)
+                for key, item in sorted(value.items())
+                if key not in VOLATILE_DIGEST_KEYS
+            }
+        if isinstance(value, list):
+            return [strip_volatile(item) for item in value]
+        return value
+
+    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def delivery_paths(docs_root: Path, doc_id: str) -> dict[str, Path]:
     root = docs_root / "deliveries" / doc_id
     return {"root": root, **{name: root / name for name in DELIVERY_DIRS}, "manifest": root / "delivery.json"}
@@ -110,15 +138,18 @@ def write_sanitized_copy(source: Path, target: Path, docs_root: Path, artifact_d
         except Exception:
             target.write_text(sanitize_local_paths(source.read_text(encoding="utf-8", errors="ignore"), docs_root, artifact_dir), encoding="utf-8")
             return
-        write_json(target, sanitize_for_docs(payload, docs_root, artifact_dir))
+        sanitized_payload = sanitize_for_docs(payload, docs_root, artifact_dir)
+        if isinstance(sanitized_payload, dict) and "artifact_digest" in sanitized_payload:
+            sanitized_payload["artifact_digest"] = canonical_artifact_digest(sanitized_payload)
+        write_json(target, sanitized_payload)
         return
     text = source.read_text(encoding="utf-8", errors="ignore")
     target.write_text(sanitize_local_paths(text, docs_root, artifact_dir), encoding="utf-8")
 
 
-def write_canonical_copy(source: Path, target: Path) -> None:
+def write_canonical_copy(source: Path, target: Path, docs_root: Path, artifact_dir: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+    write_sanitized_copy(source, target, docs_root, artifact_dir)
 
 
 def artifact_doc_id_blockers(artifact_dir: Path, doc_id: str) -> list[dict[str, str]]:
@@ -151,16 +182,9 @@ def sync_canonical_delivery(
     previous_managed = [str(item) for item in as_list(previous.get("managed_files"))]
     managed: list[str] = []
     source_is_canonical = artifact_dir == paths["artifacts"]
+    sanitized_artifacts: list[str] = []
     if source_is_canonical:
-        local_path_files = sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
-        if local_path_files:
-            return {
-                "decision": "block",
-                "blockers": [{
-                    "source": "privacy",
-                    "message": "active canonical artifacts contain local paths; sync from external staging so the canonical copy can be sanitized without changing active evidence",
-                }],
-            }
+        sanitized_artifacts = sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=True)
         managed.extend(
             str(path.relative_to(paths["root"]))
             for path in sorted(paths["artifacts"].rglob("*"))
@@ -177,17 +201,17 @@ def sync_canonical_delivery(
                 target = paths["evidence"].joinpath(*relative.parts[1:])
             else:
                 target = paths["artifacts"] / relative
-            write_canonical_copy(source, target)
+            write_canonical_copy(source, target, docs_root, artifact_dir)
             managed.append(str(target.relative_to(paths["root"])))
 
     normalized = paths["artifacts"] / "requirement.normalized.txt"
     if normalized.exists():
         input_target = paths["input"] / "requirement.normalized.txt"
-        write_canonical_copy(normalized, input_target)
+        write_canonical_copy(normalized, input_target, docs_root, artifact_dir)
         managed.append(str(input_target.relative_to(paths["root"])))
     if input_file and input_file.is_file():
         input_target = paths["input"] / ("requirement" + input_file.suffix.lower())
-        write_canonical_copy(input_file, input_target)
+        write_canonical_copy(input_file, input_target, docs_root, artifact_dir)
         managed.append(str(input_target.relative_to(paths["root"])))
     for relative in sorted(set(previous_managed) - set(managed)):
         stale = paths["root"] / relative
@@ -220,6 +244,7 @@ def sync_canonical_delivery(
         "canonical_artifact_dir": str(paths["artifacts"]),
         "artifact_digest": digest,
         "managed_files": delivery["managed_files"],
+        "sanitized_artifacts": sanitized_artifacts,
         "blockers": [],
     }
 
@@ -295,8 +320,10 @@ def sanitize_local_paths(value: str, docs_root: Path | None = None, artifact_dir
         replacements.append((str(artifact_dir), "<artifact-dir>"))
     if docs_root:
         replacements.append((str(docs_root), "<docs-root>"))
+        replacements.append((str(docs_root).replace(str(Path.home()), "<user-home>"), "<docs-root>"))
         if docs_root.parent:
             replacements.append((str(docs_root.parent), "<workspace>"))
+            replacements.append((str(docs_root.parent).replace(str(Path.home()), "<user-home>"), "<workspace>"))
     replacements.append((str(Path.home()), "<user-home>"))
     for source, target in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
         if source:
@@ -334,7 +361,10 @@ def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path, muta
             except Exception:
                 updated = sanitize_local_paths(original, docs_root, artifact_dir)
             else:
-                updated = json.dumps(sanitize_for_docs(payload, docs_root, artifact_dir), ensure_ascii=False, indent=2) + "\n"
+                sanitized_payload = sanitize_for_docs(payload, docs_root, artifact_dir)
+                if isinstance(sanitized_payload, dict) and "artifact_digest" in sanitized_payload:
+                    sanitized_payload["artifact_digest"] = canonical_artifact_digest(sanitized_payload)
+                updated = json.dumps(sanitized_payload, ensure_ascii=False, indent=2) + "\n"
         else:
             updated = sanitize_local_paths(original, docs_root, artifact_dir)
         if updated != original:
@@ -6235,6 +6265,12 @@ def sync(
             "doc_id": doc_id,
             "blockers": canonical.get("blockers", []),
         }
+    if canonical.get("sanitized_artifacts"):
+        sanitized_artifacts = [
+            str(item)
+            for item in as_list(canonical.get("sanitized_artifacts"))
+            if str(item)
+        ]
     render_artifact_dir = Path(str(canonical.get("canonical_artifact_dir"))) if canonical else artifact_dir
     projection_blockers = docs_projection_state_blockers(render_artifact_dir) if human_section == "all" else []
     if projection_blockers:

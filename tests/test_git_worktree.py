@@ -56,6 +56,20 @@ class GitWorktreeTests(unittest.TestCase):
             evidence = json.loads((artifact_dir / "git_baseline_evidence.json").read_text(encoding="utf-8"))
             self.assertEqual(evidence["schema"], "codex-git-baseline-evidence-v1")
 
+    def test_prepare_reuses_existing_feature_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _, repo = make_repo(Path(tmp))
+            first = git_worktree.prepare(repo, "feature/req-1", base_branch="main")
+            run(["git", "checkout", "main"], repo)
+
+            second = git_worktree.prepare(repo, "feature/req-1", base_branch="main")
+
+            self.assertEqual(first["decision"], "ready")
+            self.assertEqual(second["decision"], "ready")
+            self.assertFalse(second["created_branch"])
+            self.assertTrue(second["reused_branch"])
+            self.assertEqual(second["current_branch"], "feature/req-1")
+
     def test_assert_ready_blocks_default_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             _, repo = make_repo(Path(tmp))

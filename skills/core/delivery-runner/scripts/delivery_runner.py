@@ -82,18 +82,38 @@ def stage_is_pass(stage: dict[str, Any], data: dict[str, Any]) -> bool:
     return not CONTRACT.validate_artifact_contract(stage, data)
 
 
+def infer_docs_root_from_artifact_dir(artifact_dir: Path, doc_id: str = "") -> Path | None:
+    if artifact_dir.name != "artifacts":
+        return None
+    delivery_root = artifact_dir.parent
+    if doc_id and delivery_root.name != doc_id:
+        return None
+    deliveries = delivery_root.parent
+    if deliveries.name != "deliveries":
+        return None
+    return deliveries.parent
+
+
 def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
     auto_summary = load_json(artifact_dir / "auto_run_summary.json")
     status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
     doc_id = str(auto_summary.get("doc_id") or load_json(artifact_dir / "delivery_plan.json").get("doc_id") or "")
     docs_root_value = str(status.get("docs_root") or "")
+    if docs_root_value in {"<docs-root>", "<workspace>", "<user-home>", ""}:
+        inferred = infer_docs_root_from_artifact_dir(artifact_dir, doc_id)
+        if inferred is not None:
+            docs_root_value = str(inferred)
     blockers: list[dict[str, str]] = []
     if not docs_root_value:
         blockers.append({"source": "docs_root", "message": "delivery docs repository root is required before implementation"})
     manifest = ""
     if docs_root_value:
         docs_root = Path(docs_root_value)
-        manifest = str(status.get("manifest") or docs_root / "indexes" / f"{doc_id}.manifest.json")
+        manifest_value = str(status.get("manifest") or "")
+        if not manifest_value or "<" in manifest_value:
+            manifest = str(docs_root / "indexes" / f"{doc_id}.manifest.json")
+        else:
+            manifest = manifest_value
         if not docs_root.exists():
             blockers.append({"source": "docs_root", "message": "delivery docs repository root does not exist"})
         if doc_id and not Path(manifest).exists():
