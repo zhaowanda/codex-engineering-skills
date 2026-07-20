@@ -92,7 +92,14 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
         modules = sorted({str(Path(str(item["path"])).parent) for item in anchors})
         routes = [{"method": "", "route": str(contract), "file": "evidence_bundle.json"} for contract in as_list(bundle.get("contracts"))]
     tests = [str(item) for item in as_list(deps.get("test_command_hints"))] or [str(item) for item in as_list(repo.get("test_hints"))]
-    return {"project": project, "repo_path": repo_path, "modules": modules, "routes": routes, "tests": tests}
+    return {
+        "project": project,
+        "repo_path": repo_path,
+        "modules": modules,
+        "routes": routes,
+        "tests": tests,
+        "local_project_binding": bundle.get("local_project_binding") if isinstance(bundle.get("local_project_binding"), dict) else {},
+    }
 
 
 def option_score_summary(options: list[dict[str, Any]], matrix: list[dict[str, Any]]) -> dict[str, Any]:
@@ -548,6 +555,7 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             "upstream_downstream": [f"{route_contract or 'No additional upstream producer for this design'} -> {owner_repo}"],
             "constraints": ["keep owner boundary narrow", "preserve backward compatibility", "support rollback by reverting owner repo"],
         },
+        "local_project_binding": technical.get("local_project_binding") or ctx["local_project_binding"],
         "requirement_breakdown": breakdown,
         "code_entrypoint_confidence": entrypoint_confidence,
         "source_location_evidence": technical.get("source_location_evidence") or {},

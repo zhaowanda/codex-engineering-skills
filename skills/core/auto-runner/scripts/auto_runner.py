@@ -1579,8 +1579,7 @@ def run(
             "--bundle-out",
             str(project_out / "evidence_bundle.json"),
         ]
-        if project_skill_dir.is_dir():
-            source_location_command.extend(["--project-skill-dir", str(project_skill_dir)])
+        source_location_command.extend(["--project-skill-dir", str(project_skill_dir)])
         run_if_needed(
             "source_location_evidence",
             project_out / "source_location_evidence.json",

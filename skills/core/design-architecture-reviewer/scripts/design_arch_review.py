@@ -416,6 +416,50 @@ def review_requirements_understanding_gate(technical: dict[str, Any], architectu
         ))
 
 
+def review_local_project_binding(technical: dict[str, Any], architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    technical_binding = technical.get("local_project_binding")
+    if not isinstance(technical_binding, dict):
+        technical_binding = (technical.get("project_context") or {}).get("local_project_binding") if isinstance(technical.get("project_context"), dict) else {}
+    architecture_binding = architecture.get("local_project_binding") if isinstance(architecture.get("local_project_binding"), dict) else {}
+    binding = technical_binding if isinstance(technical_binding, dict) and technical_binding else architecture_binding
+    if not binding:
+        return
+
+    if binding.get("project_skill_required") and not binding.get("project_skill_loaded"):
+        findings.append(finding(
+            "architecture_boundary_review",
+            "blocker",
+            "design did not load the local project skill overlay",
+            binding,
+            "Load the installed company project skill and regenerate source-location evidence before technical or architecture design.",
+        ))
+    git = binding.get("git") if isinstance(binding.get("git"), dict) else {}
+    if binding.get("repo_root") and git.get("status") != "ready":
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "design is not bound to a Git worktree",
+            binding,
+            "Run repository-backed intake from the real local repo and capture Git branch/head before design.",
+        ))
+    if binding.get("repo_root") and not (git.get("branch") and git.get("head")):
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "design lacks current Git branch or HEAD binding",
+            binding,
+            "Regenerate project understanding/source-location evidence so design records the current branch and commit.",
+        ))
+    if technical_binding and architecture_binding and technical_binding != architecture_binding:
+        findings.append(finding(
+            "architecture_boundary_review",
+            "blocker",
+            "technical and architecture design use different local project bindings",
+            {"technical": technical_binding, "architecture": architecture_binding},
+            "Regenerate architecture design from the current technical design and project evidence instead of mixing stale artifacts.",
+        ))
+
+
 def review_process_flow(process_flow: list[Any], findings: list[dict[str, Any]]) -> None:
     if not process_flow:
         findings.append(finding("technical_design_quality", "high", "process flow is missing", "process_flow empty", "Describe actors, ordered steps, success end state, and failure states."))
@@ -864,6 +908,7 @@ def review(
     framing_signal = system_signal or data_signal or mq_signal or new_service_signal(technical, architecture)
 
     review_requirements_understanding_gate(technical, architecture, findings)
+    review_local_project_binding(technical, architecture, findings)
     if framing_signal:
         if not architecture_framing and not technical.get("architecture_framing_ref") and not architecture.get("architecture_framing_ref"):
             findings.append(finding("architecture_boundary_review", "high", "complex design lacks pre-technical architecture framing", "architecture_framing.json missing", "Generate architecture_framing.json before detailed technical design for API/data/MQ/cross-system/new-service requirements."))

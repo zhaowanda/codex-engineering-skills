@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,14 @@ def digest_bytes(value: bytes) -> str:
 
 def overlay_reference_evidence(skill_dir: Path | None, requirement: str, max_files: int = 8, max_hits: int = 24) -> dict[str, Any]:
     if not skill_dir or not skill_dir.is_dir():
-        return {"skill_dir": "", "references": [], "reference_digests": {}, "consumed_rules": [], "stale_references": []}
+        return {
+            "skill_dir": str(skill_dir) if skill_dir else "",
+            "loaded": False,
+            "references": [],
+            "reference_digests": {},
+            "consumed_rules": [],
+            "stale_references": [],
+        }
     references_dir = skill_dir / "references"
     terms = [term for term in query_terms(requirement) if term not in GENERIC_TERMS and len(term) >= 3]
     rows: list[dict[str, Any]] = []
@@ -61,10 +69,28 @@ def overlay_reference_evidence(skill_dir: Path | None, requirement: str, max_fil
             break
     return {
         "skill_dir": str(skill_dir),
+        "loaded": True,
         "references": rows,
         "reference_digests": digests,
         "consumed_rules": consumed[:max_hits],
         "stale_references": [],
+    }
+
+
+def git_context(repo_root: str) -> dict[str, str]:
+    repo = Path(repo_root) if repo_root else None
+    if not repo or not repo.exists():
+        return {"head": "", "branch": "", "status": "missing_repo"}
+
+    def run(*args: str) -> str:
+        result = subprocess.run(["git", "-C", str(repo), *args], text=True, capture_output=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    inside = run("rev-parse", "--is-inside-work-tree")
+    return {
+        "head": run("rev-parse", "HEAD"),
+        "branch": run("branch", "--show-current"),
+        "status": "ready" if inside == "true" else "not_git",
     }
 
 
@@ -255,6 +281,15 @@ def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12
         "project": source_location.get("project", ""),
         "repo_root": source_location.get("repo_root", ""),
         "decision": "pass" if modify else "block",
+        "local_project_binding": {
+            "project": source_location.get("project", ""),
+            "repo_root": source_location.get("repo_root", ""),
+            "git": git_context(str(source_location.get("repo_root", ""))),
+            "project_skill_dir": overlay.get("skill_dir", ""),
+            "project_skill_loaded": bool(overlay.get("loaded")),
+            "project_skill_required": bool(overlay.get("skill_dir")),
+            "binding_rule": "Repository-backed design must use the local project skill overlay and the Git branch/head captured with source evidence.",
+        },
         "confirmed_anchors": [
             {**item, "role": "reference_only" if item["role"] == "confirmed_reference" else "modify_candidate"}
             for item in normalized
@@ -266,7 +301,7 @@ def build_evidence_bundle(source_location: dict[str, Any], max_anchors: int = 12
         "reference_digests": overlay.get("reference_digests", {}),
         "consumed_rules": overlay.get("consumed_rules", []),
         "stale_references": overlay.get("stale_references", []),
-        "provenance": {"project_skill_dir": overlay.get("skill_dir", "")},
+        "provenance": {"project_skill_dir": overlay.get("skill_dir", ""), "project_skill_loaded": bool(overlay.get("loaded"))},
         "budgets": {"max_anchors": max_anchors, "max_rejected": max_rejected},
         "blockers": [] if modify else [{"source": "evidence_bundle", "message": "no confirmed modify anchor"}],
     }

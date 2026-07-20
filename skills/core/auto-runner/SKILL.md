@@ -38,6 +38,7 @@ user requirement
 - Run project understanding only when both `--repo` and `--project` are provided.
 - For repository-backed runs, generate requirement-specific source-location evidence after project understanding and before spec/design.
 - When `--project` resolves an installed company project skill, consume relevant reference excerpts into Evidence Bundle with file digests and provenance; do not copy full private references.
+- For repository-backed runs, record `local_project_binding` in Evidence Bundle with repo root, Git branch/head, expected project skill path, and whether the local project skill overlay was loaded; design review must block missing or inconsistent bindings.
 - Propagate the canonical scope model through design, planning, edit readiness, post-change checks, and acceptance evidence.
 - Stop after spec and requirement questions when requirement understanding or source-location confirmation blocks design. Do not emit pass-looking design, test, or plan artifacts.
 - Do not stop for optional clarification/advisory questions when `spec.design_allowed=true` and `open_questions.json.decision=pass`; carry those advisories into design context instead of forcing another Spec round.

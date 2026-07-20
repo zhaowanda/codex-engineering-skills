@@ -605,6 +605,49 @@ def test_new_service_design_requires_bootstrap_operations_and_ownership() -> Non
     assert "new service creation reason is too shallow" in messages
 
 
+def test_local_project_binding_blocks_missing_project_skill_or_branch() -> None:
+    technical, architecture = complete_design()
+    binding = {
+        "project": "web-app",
+        "repo_root": "/workspace/web-app",
+        "git": {"status": "ready", "branch": "", "head": "abc123"},
+        "project_skill_dir": "/Users/test/.codex/skills/company/web-app",
+        "project_skill_required": True,
+        "project_skill_loaded": False,
+    }
+    technical["local_project_binding"] = binding
+    technical.setdefault("project_context", {})["local_project_binding"] = binding
+    architecture["local_project_binding"] = binding
+
+    result = design_arch_review.review(technical, architecture)
+    messages = json_dumps(result)
+
+    assert result["decision"] == "block"
+    assert "design did not load the local project skill overlay" in messages
+    assert "design lacks current Git branch or HEAD binding" in messages
+
+
+def test_local_project_binding_blocks_stale_architecture_binding() -> None:
+    technical, architecture = complete_design()
+    technical["local_project_binding"] = {
+        "project": "web-app",
+        "repo_root": "/workspace/web-app",
+        "git": {"status": "ready", "branch": "feature/current", "head": "abc123"},
+        "project_skill_dir": "/Users/test/.codex/skills/company/web-app",
+        "project_skill_required": True,
+        "project_skill_loaded": True,
+    }
+    architecture["local_project_binding"] = {
+        **technical["local_project_binding"],
+        "git": {"status": "ready", "branch": "feature/old", "head": "def456"},
+    }
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "technical and architecture design use different local project bindings" in json_dumps(result)
+
+
 def json_dumps(value: dict) -> str:
     import json
 
@@ -626,6 +669,8 @@ def run_all() -> None:
     test_complex_breakdown_with_confident_entrypoint_passes()
     test_new_service_signal_requires_new_service_design()
     test_new_service_design_requires_bootstrap_operations_and_ownership()
+    test_local_project_binding_blocks_missing_project_skill_or_branch()
+    test_local_project_binding_blocks_stale_architecture_binding()
 
 
 if __name__ == "__main__":

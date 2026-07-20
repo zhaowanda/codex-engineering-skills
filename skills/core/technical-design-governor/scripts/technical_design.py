@@ -975,6 +975,7 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
     return {
         "project": project,
         "repo_root": repo_root,
+        "local_project_binding": bundle.get("local_project_binding") if isinstance(bundle.get("local_project_binding"), dict) else {},
         "entrypoints": entrypoints,
         "modules": modules,
         "file_items": file_items,
@@ -1405,12 +1406,14 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "project_context": {
             "project": ctx["project"],
             "repo_root": ctx["repo_root"],
+            "local_project_binding": ctx["local_project_binding"],
             "framework_hints": ctx["framework_hints"],
             "read_first": read_first,
             "test_command_hints": ctx["test_hints"],
             "test_file_hints": ctx["test_file_hints"],
         },
         "source_location_evidence": location_evidence,
+        "local_project_binding": ctx["local_project_binding"],
         "source_literals": source_literals,
         "constraint_model": constraint_model,
         "forbidden_reuse_paths": constraint_model["forbidden_reuse_paths"],

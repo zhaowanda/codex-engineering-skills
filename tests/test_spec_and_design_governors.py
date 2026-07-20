@@ -34,6 +34,7 @@ observability_design = load_module("observability_design", ROOT / "skills/core/o
 agent_runtime = load_module("agent_runtime_spec_tests", ROOT / "skills/core/auto-runner/scripts/agent_runtime.py")
 harness_validation = load_module("harness_validation_spec_tests", ROOT / "skills/core/auto-runner/scripts/harness_validation.py")
 requirement_ingestor = load_module("requirement_ingestor_spec_tests", ROOT / "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py")
+source_location_evidence = load_module("source_location_evidence_spec_tests", ROOT / "skills/core/code-index-lookup/scripts/source_location_evidence.py")
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -1128,6 +1129,38 @@ def test_delivery_runner_rejects_placeholder_release_chain() -> None:
         assert any("contract" in item["message"] for item in status["blockers"])
 
 
+def test_evidence_bundle_records_local_project_skill_and_git_binding() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        repo.mkdir()
+        (repo / "src").mkdir()
+        (repo / "src/app.py").write_text("def handle_export():\n    return True\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "binding@example.com"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Binding Test"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, text=True, capture_output=True, check=True)
+
+        source_location = {
+            "project": "demo-project",
+            "repo_root": str(repo),
+            "confirmed_anchors": [{"path": "src/app.py", "confidence": "high"}],
+            "confirmed_contracts": [],
+            "rejected_candidates": [],
+        }
+        overlay = source_location_evidence.overlay_reference_evidence(root / "missing-skill", "export orders")
+
+        bundle = source_location_evidence.build_evidence_bundle(source_location, overlay=overlay)
+
+        binding = bundle["local_project_binding"]
+        assert binding["project_skill_required"] is True
+        assert binding["project_skill_loaded"] is False
+        assert binding["git"]["status"] == "ready"
+        assert binding["git"]["branch"] == "main"
+        assert binding["git"]["head"]
+
+
 def run_all() -> None:
     test_spec_normalize_ready_for_design()
     test_spec_blocks_open_questions()
@@ -1151,6 +1184,7 @@ def run_all() -> None:
     test_delivery_runner_requires_docs_and_fresh_git_before_implementation()
     test_delivery_runner_blocks_when_docs_quality_not_pass()
     test_delivery_runner_skips_conditional_cross_repo_stage_for_small_feature()
+    test_evidence_bundle_records_local_project_skill_and_git_binding()
 
 
 if __name__ == "__main__":
