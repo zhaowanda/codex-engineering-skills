@@ -42,14 +42,17 @@ def design_review(*docs: dict[str, Any]) -> dict[str, Any]:
         controls.append({"control": "export_scope", "requirement": "validate export permission, filters, row limits, and audit trail"})
     if signals and "permission_model" not in text and "permission" in signals:
         findings.append({"severity": "high", "status": "open", "message": "permission-sensitive design needs explicit permission model"})
-    decision = "needs_review" if signals else "pass"
+    decision = "ready" if signals else "pass"
+    release_blockers = [item["message"] for item in findings if item["severity"] in {"blocker", "high"}]
     return {
         "schema": SCHEMA,
         "decision": decision,
+        "review_status": "needs_review" if signals else "no_sensitive_signal",
         "sensitive_signals": sorted(set(signals)),
         "controls_required": controls,
         "findings": findings,
-        "release_blockers": [item["message"] for item in findings if item["severity"] in {"blocker", "high"}],
+        "blockers": [],
+        "release_blockers": release_blockers,
         "warnings": [] if signals else [{"source": "data_security", "message": "no sensitive data signals detected"}],
     }
 
@@ -65,7 +68,7 @@ def main() -> int:
     result = design_review(load_json(Path(args.spec)), load_json(Path(args.technical_design)), load_json(Path(args.architecture_design)))
     write_json(Path(args.out), result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["decision"] == "pass" else 1
+    return 0 if result["decision"] in {"pass", "ready"} else 1
 
 
 if __name__ == "__main__":

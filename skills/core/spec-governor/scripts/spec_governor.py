@@ -273,7 +273,7 @@ def extract_requirements(lines: list[str], raw_text: str = "", requirement_ir: d
             result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(summary), "source_evidence": evidence_by_summary.get(summary, "input section: requirements")})
     if not result:
         for idx, line in enumerate(lines, start=1):
-            if skip_pattern.match(line) or "?" in line or "？" in line:
+            if is_section_heading(line) or skip_pattern.match(line) or "?" in line or "？" in line:
                 continue
             result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(line), "source_evidence": f"input line {idx}"})
             if len(result) >= 3:
@@ -284,6 +284,8 @@ def extract_requirements(lines: list[str], raw_text: str = "", requirement_ir: d
 def extract_rules(lines: list[str]) -> list[dict[str, str]]:
     rules: list[dict[str, str]] = []
     for line in lines:
+        if is_section_heading(line):
+            continue
         lower = line.lower()
         if any(term in lower for term in ["must", "should", "rule", "when", "if ", "only", "can", "allow", "不能", "必须", "规则", "如果", "当", "允许", "可以"]):
             rules.append({"id": f"BR-{len(rules) + 1}", "rule": line, "source_evidence": "input"})

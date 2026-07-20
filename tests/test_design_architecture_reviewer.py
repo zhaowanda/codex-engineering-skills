@@ -611,7 +611,7 @@ def test_local_project_binding_blocks_missing_project_skill_or_branch() -> None:
         "project": "web-app",
         "repo_root": "/workspace/web-app",
         "git": {"status": "ready", "branch": "", "head": "abc123"},
-        "project_skill_dir": "/Users/test/.codex/skills/company/web-app",
+        "project_skill_dir": "/workspace/.codex/skills/company/web-app",
         "project_skill_required": True,
         "project_skill_loaded": False,
     }
@@ -633,7 +633,7 @@ def test_local_project_binding_blocks_stale_architecture_binding() -> None:
         "project": "web-app",
         "repo_root": "/workspace/web-app",
         "git": {"status": "ready", "branch": "feature/current", "head": "abc123"},
-        "project_skill_dir": "/Users/test/.codex/skills/company/web-app",
+        "project_skill_dir": "/workspace/.codex/skills/company/web-app",
         "project_skill_required": True,
         "project_skill_loaded": True,
     }
@@ -646,6 +646,49 @@ def test_local_project_binding_blocks_stale_architecture_binding() -> None:
 
     assert result["decision"] == "block"
     assert "technical and architecture design use different local project bindings" in json_dumps(result)
+
+
+def test_repository_design_without_binding_or_repo_path_cannot_pass() -> None:
+    technical, architecture = complete_design()
+    technical["project_context"] = {"repo_root": "/workspace/web-app"}
+    technical.pop("local_project_binding", None)
+    architecture.pop("local_project_binding", None)
+    architecture["repo_responsibilities"][0]["repo_path"] = ""
+    architecture["architecture_risks"] = [{"risk": "owner repo not yet routed", "mitigation": "fill repo_path"}]
+    architecture["architecture_decision_confidence"] = {
+        "level": "medium",
+        "confidence_reducers": [{"source": "repo_path", "message": "owner repo path is not routed"}],
+    }
+
+    result = design_arch_review.review(technical, architecture)
+    messages = json_dumps(result)
+
+    assert result["decision"] == "block"
+    assert "repository-backed design lacks local project binding" in messages
+    assert "modify repo lacks concrete repo_path" in messages
+    assert "architecture says owner repo path is not routed" in messages
+
+
+def test_specialty_not_applicable_and_evidence_pending_do_not_block_design() -> None:
+    technical, architecture = complete_design()
+
+    result = design_arch_review.review(
+        technical,
+        architecture,
+        specialty_artifacts={
+            "cross_repo_readiness.json": {"schema": "codex-cross-repo-readiness-v1", "decision": "pass", "applicable": False, "blockers": []},
+            "configuration_readiness.json": {"schema": "codex-configuration-readiness-v1", "decision": "ready", "applicable": False, "blockers": []},
+            "data_security_review.json": {"schema": "codex-data-security-review-v1", "decision": "ready", "review_status": "needs_review", "blockers": []},
+            "performance_review.json": {"schema": "codex-performance-review-v1", "decision": "ready", "evidence_status": "needs_evidence", "blockers": []},
+        },
+    )
+
+    messages = json_dumps(result)
+    assert result["decision"] == "pass"
+    assert result["readiness_gate"]["implementation_allowed"] is True
+    assert "specialty design gate cross_repo_readiness.json is not approved" not in messages
+    assert "specialty design gate data_security_review.json is not approved" not in messages
+    assert result["blockers"] == []
 
 
 def json_dumps(value: dict) -> str:
@@ -671,6 +714,8 @@ def run_all() -> None:
     test_new_service_design_requires_bootstrap_operations_and_ownership()
     test_local_project_binding_blocks_missing_project_skill_or_branch()
     test_local_project_binding_blocks_stale_architecture_binding()
+    test_repository_design_without_binding_or_repo_path_cannot_pass()
+    test_specialty_not_applicable_and_evidence_pending_do_not_block_design()
 
 
 if __name__ == "__main__":

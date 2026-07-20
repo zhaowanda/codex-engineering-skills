@@ -599,7 +599,7 @@ def run(out_dir: Path) -> dict[str, Any]:
         "passed": (
             data_summary.get("decision") in {"pass", "block"}
             and data_summary.get("can_implement") is False
-            and any(gap.get("artifact") in {"open_questions.json", "configuration_readiness.json", "data_security_review.json", "performance_review.json"} for gap in data_summary.get("profile_gate_gaps", []))
+            and any(gap.get("artifact") in {"open_questions.json", "data_model_design.json", "configuration_readiness.json", "data_security_review.json", "performance_review.json"} for gap in data_summary.get("profile_gate_gaps", []))
         ),
         "decision": data_summary.get("decision", ""),
         "reason": "data migration blocks on unresolved requirements and design-time configuration, security, or performance evidence rather than a post-implementation release gate",

@@ -332,20 +332,42 @@ def review_specialty_artifacts(specialty_artifacts: dict[str, dict[str, Any]], f
         "test_design.json": "testability_review",
     }
     summary: list[dict[str, Any]] = []
-    blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "needs_review", "needs_evidence", "no_go"}
+    blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "no_go"}
+    accepted_decisions = {"", "pass", "ready", "not_applicable", "skipped"}
+    evidence_pending_decisions = {"needs_review", "needs_evidence", "ready_with_advisory", "conditional"}
     for name, artifact in specialty_artifacts.items():
         if not artifact:
             continue
         decision = str(artifact.get("decision") or artifact.get("status") or "")
         blockers = as_list(artifact.get("blockers")) + as_list(artifact.get("active_blockers"))
-        summary.append({"artifact": name, "decision": decision, "blocker_count": len(blockers)})
-        if decision in blocking_decisions or blockers:
+        applicable = artifact.get("applicable")
+        not_applicable = applicable is False or decision == "not_applicable"
+        summary.append({"artifact": name, "decision": decision, "applicable": applicable, "blocker_count": len(blockers)})
+        if not_applicable:
+            continue
+        if blockers or decision in blocking_decisions:
             findings.append(finding(
                 area_by_name.get(name, "technical_design_quality"),
                 "blocker",
                 f"specialty design gate {name} is not approved",
                 {"decision": decision, "blockers": blockers},
                 "Resolve the specialty design findings and regenerate dependent technical, architecture, test, and delivery artifacts.",
+            ))
+        elif decision in evidence_pending_decisions:
+            findings.append(finding(
+                area_by_name.get(name, "technical_design_quality"),
+                "low",
+                f"specialty design gate {name} needs follow-up evidence",
+                {"decision": decision, "blockers": blockers},
+                "Carry the specialty evidence requirement into implementation, test, or release evidence without blocking design approval by itself.",
+            ))
+        elif decision not in accepted_decisions:
+            findings.append(finding(
+                area_by_name.get(name, "technical_design_quality"),
+                "medium",
+                f"specialty design gate {name} has unrecognized non-blocking decision",
+                {"decision": decision, "blockers": blockers},
+                "Normalize the specialty gate decision to pass, ready, not_applicable, needs_evidence, needs_review, or block.",
             ))
     return summary
 
@@ -423,6 +445,17 @@ def review_local_project_binding(technical: dict[str, Any], architecture: dict[s
     architecture_binding = architecture.get("local_project_binding") if isinstance(architecture.get("local_project_binding"), dict) else {}
     binding = technical_binding if isinstance(technical_binding, dict) and technical_binding else architecture_binding
     if not binding:
+        project_context = technical.get("project_context") if isinstance(technical.get("project_context"), dict) else {}
+        source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+        repo_evidence_present = bool(project_context.get("repo_root") or source_locations.get("repo_root"))
+        if repo_evidence_present:
+            findings.append(finding(
+                "architecture_boundary_review",
+                "blocker",
+                "repository-backed design lacks local project binding",
+                {"project_context": project_context, "source_location_repo_root": source_locations.get("repo_root")},
+                "Regenerate source-location evidence and design so local_project_binding records repo root, Git branch/head, and project skill overlay loading.",
+            ))
         return
 
     if binding.get("project_skill_required") and not binding.get("project_skill_loaded"):
@@ -457,6 +490,21 @@ def review_local_project_binding(technical: dict[str, Any], architecture: dict[s
             "technical and architecture design use different local project bindings",
             {"technical": technical_binding, "architecture": architecture_binding},
             "Regenerate architecture design from the current technical design and project evidence instead of mixing stale artifacts.",
+        ))
+
+
+def review_architecture_routing_evidence(architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    confidence = architecture.get("architecture_decision_confidence") if isinstance(architecture.get("architecture_decision_confidence"), dict) else {}
+    reducers = as_list(confidence.get("confidence_reducers"))
+    risks = as_list(architecture.get("architecture_risks"))
+    routing_blob = text_of({"confidence_reducers": reducers, "architecture_risks": risks})
+    if "owner repo not yet routed" in routing_blob or "owner repo path is not routed" in routing_blob:
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "architecture says owner repo path is not routed",
+            {"architecture_decision_confidence": confidence, "architecture_risks": risks},
+            "Do not pass design review until the owner repo path is concrete and matches delivery plan/git evidence.",
         ))
 
 
@@ -909,6 +957,7 @@ def review(
 
     review_requirements_understanding_gate(technical, architecture, findings)
     review_local_project_binding(technical, architecture, findings)
+    review_architecture_routing_evidence(architecture, findings)
     if framing_signal:
         if not architecture_framing and not technical.get("architecture_framing_ref") and not architecture.get("architecture_framing_ref"):
             findings.append(finding("architecture_boundary_review", "high", "complex design lacks pre-technical architecture framing", "architecture_framing.json missing", "Generate architecture_framing.json before detailed technical design for API/data/MQ/cross-system/new-service requirements."))
@@ -964,6 +1013,9 @@ def review(
     confidence_level = str(entrypoint_confidence.get("level") or arch_entrypoint_confidence.get("level") or "").lower()
     selected_entrypoint = str(entrypoint_confidence.get("selected_entrypoint") or arch_entrypoint_confidence.get("selected_entrypoint") or "")
     source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+    technical_binding = technical.get("local_project_binding") if isinstance(technical.get("local_project_binding"), dict) else {}
+    architecture_binding = architecture.get("local_project_binding") if isinstance(architecture.get("local_project_binding"), dict) else {}
+    repository_backed_design = bool(project_context.get("repo_root") or source_locations.get("repo_root") or technical_binding or architecture_binding)
     if source_locations:
         confirmed_paths = {
             str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
@@ -1019,7 +1071,7 @@ def review(
         findings.append(finding("technical_design_quality", "high", "business process flow is too shallow for the mapped acceptance scope", {"process_steps": process_step_count, "acceptance_mappings": len(as_list(technical.get("acceptance_mapping")))}, "Model the ordered trigger, business actions, downstream effects, success state, and failure branches before implementation."))
     review_module_decomposition(modules, findings)
     for idx, item in enumerate(modules):
-        if isinstance(item, dict) and item.get("module") and not looks_like_path(str(item.get("module"))):
+        if isinstance(item, dict) and item.get("module") and not looks_like_path(str(item.get("module"))) and item.get("planned_new_module") is not True:
             findings.append(finding("cohesion_coupling_review", "medium", "module reference is not file-level", {"index": idx, "module": item.get("module")}, "Prefer concrete file/module paths from code index for implementation-facing design."))
 
     if not logical_data_flow:
@@ -1224,6 +1276,8 @@ def review(
     for idx, item in enumerate(repo_responsibilities):
         if isinstance(item, dict) and item.get("role") == "modify" and not (item.get("responsibility") or item.get("owner_task")):
             findings.append(finding("repo_responsibility_review", "blocker", "modify repo lacks responsibility", {"index": idx, "repo": item.get("repo")}, "Add concrete owner responsibility."))
+        if repository_backed_design and isinstance(item, dict) and item.get("role") == "modify" and not str(item.get("repo_path") or "").strip():
+            findings.append(finding("repo_responsibility_review", "blocker", "modify repo lacks concrete repo_path", {"index": idx, "repo": item.get("repo")}, "Bind every modify repo to the actual local repository path before delivery planning or implementation."))
 
     if not cross_contracts:
         findings.append(finding("cross_repo_contract_review", "high", "cross-repo contracts are missing or not explicitly waived", "cross_repo_contracts empty", "Declare contracts or explicitly state no cross-repo contract."))

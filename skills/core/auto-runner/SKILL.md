@@ -49,6 +49,7 @@ user requirement
 - Return non-zero when the top-level decision is blocked (`2`) or the runner fails (`3`).
 - Run the source-location Harness after repository evidence and before Spec so stale indexes, missing files, weak anchors, and source-digest drift stop guessed code locations.
 - Run the design Harness after plan review and before docs/Git readiness. Enforce artifact budgets, confirmed modify targets, business process flow, applicable system sequence, architecture integration sequence, and state-machine coverage.
+- Treat default design artifact budgets as a soft governance signal for mild `technical_design.json` overage; require splitting verbose evidence into supplemental artifacts, but do not block the design checkpoint unless policy supplies explicit strict budgets or the artifact exceeds the hard overage threshold.
 - Use the post-implementation Harness to bind actual changed files to delivery-plan scope.
 - Use the pre-push Harness to require accepted post-change, traceability, test, review, project-skill-index, and current-commit evidence.
 - Load defaults from `config/harness-policy.example.yaml`; keep organization/provider policy in a private overlay.

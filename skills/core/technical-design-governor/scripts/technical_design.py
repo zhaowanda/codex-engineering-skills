@@ -412,6 +412,34 @@ def generic_constraint_model(spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def explicit_planned_new_modules(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    modules: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    source = "\n".join(source_lines(spec))
+    patterns = [
+        r"(?:新增|独立).{0,24}模块.{0,16}至少包含(?P<items>[^。\n]+)",
+        r"(?:至少包含|must include|includes at least)(?P<items>[^。\n]+)",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, source, flags=re.I):
+            raw_items = match.group("items")
+            for item in re.split(r"[、,，;；]", raw_items):
+                clean = item.strip(" `。.\t\n")
+                clean = re.sub(r"^(和|及|以及|包含)\s*", "", clean)
+                if len(clean) < 3 or clean.lower() in seen:
+                    continue
+                seen.add(clean.lower())
+                modules.append({
+                    "module": f"planned-new-module:{clean}",
+                    "label": clean,
+                    "responsibility": clean,
+                    "source_evidence": "spec.explicit_new_module_requirement",
+                    "planned_new_module": True,
+                    "confirmation_required": True,
+                })
+    return modules[:20]
+
+
 def rank_files_for_subject(subject: str, ctx: dict[str, Any]) -> list[dict[str, Any]]:
     tokens = tokenize_requirement(subject)
     candidates: list[dict[str, Any]] = []
@@ -1367,6 +1395,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     data_model_design = render_data_model_design(signals, spec, breakdown, owner_file)
     process_flow = render_process_flow(spec, breakdown, actors, summary)
     system_interaction_sequence = render_system_interaction_sequence(signals, route_refs, owner_file, summary, [str(item) for item in as_list(entrypoint_confidence.get("confirmed_anchors"))])
+    planned_new_modules = explicit_planned_new_modules(spec)
     module_decomposition = [{
         "module": owner_file,
         "responsibility": str(item.get("summary") or summary),
@@ -1378,6 +1407,21 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "requirement_breakdown_id": item.get("id"),
         "entrypoint_confidence": entrypoint_confidence.get("level"),
     } for item in breakdown]
+    for planned in planned_new_modules:
+        module_decomposition.append({
+            "module": planned["module"],
+            "responsibility": planned["responsibility"],
+            "input": "business request or callback data defined by the requirement",
+            "output": "new capability behavior defined by the requirement",
+            "dependencies": [owner_file] if owner_file else ["existing owner entrypoint"],
+            "cohesion_reason": "Requirement explicitly requires this as part of a new independent module boundary.",
+            "coupling_control": "Keep new-module responsibilities separate from existing source anchors; use existing anchors only as callers or integration points.",
+            "requirement_breakdown_id": breakdown[0].get("id") if breakdown else "BRK-1",
+            "entrypoint_confidence": "planned_new_module",
+            "planned_new_module": True,
+            "source_evidence": planned["source_evidence"],
+            "confirmation_required": planned["confirmation_required"],
+        })
     for path in as_list(entrypoint_confidence.get("confirmed_anchors")):
         if path and path != owner_file:
             module_decomposition.append({
@@ -1447,6 +1491,7 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "process_flow": process_flow,
         "process_flow_diagram": render_process_flow_diagram(process_flow),
         "module_decomposition": module_decomposition,
+        "planned_new_modules": planned_new_modules,
         "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": str(item.get("summary") or summary), "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
         "api_contracts": [api_contract_for_breakdown(route_refs, item) for item in breakdown],

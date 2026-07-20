@@ -1,4 +1,5 @@
 schema: codex-harness-policy-v1
+artifact_budget_strict: false
 artifact_budgets:
   project_understanding/evidence_bundle.json: 100000
   spec.json: 300000

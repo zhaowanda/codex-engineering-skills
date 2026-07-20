@@ -124,6 +124,18 @@ def test_harness_validation_blocks_oversized_artifact() -> None:
         assert result["artifact_sizes"][0]["within_budget"] is False
 
 
+def test_harness_default_budget_soft_allows_mild_technical_design_overage() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "technical_design.json").write_text(json.dumps({"value": "x" * 333_000}), encoding="utf-8")
+        blockers, sizes = harness_validation.artifact_budget_checkpoint(root, harness_validation.DEFAULT_BUDGETS, strict=False)
+        tech_size = next(item for item in sizes if item["artifact"] == "technical_design.json")
+        assert blockers == []
+        assert tech_size["within_budget"] is False
+        assert tech_size["soft_overage"] is True
+        assert "supplemental" in tech_size["recommendation"]
+
+
 def test_harness_source_location_blocks_stale_source_digest() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

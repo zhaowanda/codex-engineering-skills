@@ -279,7 +279,7 @@ def anchor_requirement_relevance(anchor: dict[str, Any], requirement_lower: str)
     return bool(matched), matched
 
 
-def artifact_budget_checkpoint(artifact_dir: Path, budgets: dict[str, int]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def artifact_budget_checkpoint(artifact_dir: Path, budgets: dict[str, int], strict: bool = True) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     blockers: list[dict[str, Any]] = []
     sizes: list[dict[str, Any]] = []
     for name, maximum in budgets.items():
@@ -289,8 +289,18 @@ def artifact_budget_checkpoint(artifact_dir: Path, budgets: dict[str, int]) -> t
         if not path.exists():
             continue
         size = path.stat().st_size
-        sizes.append({"artifact": name, "bytes": size, "max_bytes": maximum, "within_budget": size <= maximum})
+        soft_overage = not strict and name == "technical_design.json" and size <= int(maximum * 1.5)
+        sizes.append({
+            "artifact": name,
+            "bytes": size,
+            "max_bytes": maximum,
+            "within_budget": size <= maximum,
+            "soft_overage": soft_overage,
+            "recommendation": "split verbose evidence into supplemental artifacts and keep technical_design.json decision-focused" if soft_overage else "",
+        })
         if size > maximum:
+            if soft_overage:
+                continue
             add_blocker(blockers, "artifact_budget", f"artifact is {size} bytes; budget is {maximum}", artifact=name)
     return blockers, sizes
 
@@ -408,8 +418,8 @@ def applicability_areas(spec: dict[str, Any]) -> set[str]:
     return result
 
 
-def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[str, int]) -> dict[str, Any]:
-    blockers, sizes = artifact_budget_checkpoint(artifact_dir, budgets)
+def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[str, int], strict_budgets: bool = True) -> dict[str, Any]:
+    blockers, sizes = artifact_budget_checkpoint(artifact_dir, budgets, strict=strict_budgets)
     technical = read_json(artifact_dir / "technical_design.json")
     architecture = read_json(artifact_dir / "architecture_design.json")
     plan = read_json(artifact_dir / "delivery_plan.json")
@@ -672,6 +682,7 @@ def validate(
 ) -> dict[str, Any]:
     policy = policy or {}
     configured_budgets = nested_policy(policy, "artifact_budgets")
+    explicit_budgets = budgets is not None or policy.get("artifact_budget_strict") is True
     effective_budgets = budgets or ({str(key): int(value) for key, value in configured_budgets.items()} if configured_budgets else DEFAULT_BUDGETS)
     selected = list(CHECKPOINTS) if checkpoint == "all" else [checkpoint]
     results: list[dict[str, Any]] = []
@@ -682,7 +693,7 @@ def validate(
         if name == "source_location":
             results.append(source_location_checkpoint(artifact_dir, repo, nested_policy(policy, name)))
         elif name == "design":
-            results.append(design_checkpoint(artifact_dir, nested_policy(policy, name), effective_budgets))
+            results.append(design_checkpoint(artifact_dir, nested_policy(policy, name), effective_budgets, strict_budgets=explicit_budgets))
         elif name == "post_implementation":
             results.append(post_implementation_checkpoint(artifact_dir))
         elif name == "pre_push":

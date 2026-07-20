@@ -580,6 +580,8 @@ def test_spec_accepts_markdown_key_blocks_and_negated_mq_for_feishu_approval() -
     assert spec["dependency_chain"]["ready"] is True
     assert "mq_upstream_downstream" not in spec["dependency_chain"]["missing"]
     assert any("重复回调" in item or "重复建单" in item for item in spec["state_machine"]["idempotency_key"])
+    assert not any(item.get("summary") in {"状态", "规则", "验收标准"} for item in spec["requirements"])
+    assert not any(item.get("rule") in {"状态:", "规则", "验收标准"} for item in spec["business_rules"])
 
 
 def test_spec_uses_project_understanding_evidence_for_current_state() -> None:

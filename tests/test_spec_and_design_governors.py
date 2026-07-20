@@ -633,6 +633,7 @@ def test_technical_design_models_feishu_approval_callback_as_system_sequence() -
             "业务流程：飞书将审批结果回调给后端。",
             "业务流程：审批通过后由飞书回调链路自动创建结算单。",
             "当前手动触发接口：`POST /api/iot/anomaly/snapshot/syncCurrent`",
+            "规则：审批能力需要新增独立模块，至少包含审批服务接口、审批服务实现、飞书审批客户端封装、飞书回调控制器、审批主表 mapper、审批历史表 mapper。",
             "验收标准：审批拒绝后不创建结算单。",
             "验收标准：页面展示审批状态、失败原因和重试入口。",
         ]),
@@ -654,6 +655,9 @@ def test_technical_design_models_feishu_approval_callback_as_system_sequence() -
     assert "no api impact confirmed yet" not in design_blob
     assert "existing producer" not in design_blob
     assert "existing entrypoint to be confirmed" not in design_blob
+    planned_labels = {item.get("label") for item in tech["planned_new_modules"]}
+    assert {"审批服务接口", "审批服务实现", "飞书审批客户端封装", "飞书回调控制器", "审批主表 mapper", "审批历史表 mapper"}.issubset(planned_labels)
+    assert any(item.get("planned_new_module") for item in arch["module_topology"])
 
 
 def test_specialized_ui_ue_design_review_and_frontend_plan() -> None:

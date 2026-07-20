@@ -318,21 +318,41 @@ def test_test_data_governor_blocks_sensitive_or_incomplete_data() -> None:
     assert "sensitive" in messages or "production" in messages
 
 
-def test_configuration_detects_payment_email_database_and_blocks_missing_owners() -> None:
+def test_configuration_ignores_business_terms_without_runtime_config_context() -> None:
     spec, technical, architecture = sample_docs()
     result = configuration.analyze(spec, technical, architecture)
     assert result["schema"] == "codex-configuration-readiness-v1"
+    assert result["applicable"] is False
+    assert result["configuration_items"] == []
+    assert result["decision"] == "ready"
+    assert result["blockers"] == []
+
+
+def test_configuration_blocks_incomplete_explicit_runtime_config() -> None:
+    result = configuration.analyze(
+        {"doc_id": "REQ-CONFIG"},
+        {
+            "configuration_items": [
+                {"key": "feishu_callback_url", "type": "callback", "required": True, "default_strategy": "disabled until configured"}
+            ]
+        },
+        {},
+    )
+    assert result["applicable"] is True
     kinds = {item["type"] for item in result["configuration_items"]}
-    assert {"payment", "email", "database"}.issubset(kinds)
+    assert kinds == {"callback"}
     assert result["decision"] == "blocked"
-    assert result["blockers"]
+    messages = {item["message"] for item in result["blockers"]}
+    assert "owner is required" in messages
+    assert "rollback_strategy is required" in messages
 
 
 def test_performance_requires_evidence_for_api_database_export_ui() -> None:
     spec, technical, architecture = sample_docs()
     result = performance.design_review(spec, technical, architecture)
     assert result["schema"] == "codex-performance-review-v1"
-    assert result["decision"] == "needs_evidence"
+    assert result["decision"] == "ready"
+    assert result["evidence_status"] == "needs_evidence"
     areas = {item["area"] for item in result["evidence_plan"]}
     assert "api" in areas
     assert "database" in areas
@@ -344,7 +364,8 @@ def test_data_security_detects_sensitive_signals() -> None:
     spec, technical, architecture = sample_docs()
     result = data_security.design_review(spec, technical, architecture)
     assert result["schema"] == "codex-data-security-review-v1"
-    assert result["decision"] == "needs_review"
+    assert result["decision"] == "ready"
+    assert result["review_status"] == "needs_review"
     assert "payment" in result["sensitive_signals"]
     assert result["controls_required"]
 
@@ -360,7 +381,8 @@ def run_all() -> None:
     test_test_data_governor_blocks_when_source_test_design_is_blocked()
     test_test_data_governor_uses_case_data_setup_strategy()
     test_test_data_governor_blocks_sensitive_or_incomplete_data()
-    test_configuration_detects_payment_email_database_and_blocks_missing_owners()
+    test_configuration_ignores_business_terms_without_runtime_config_context()
+    test_configuration_blocks_incomplete_explicit_runtime_config()
     test_performance_requires_evidence_for_api_database_export_ui()
     test_data_security_detects_sensitive_signals()
 

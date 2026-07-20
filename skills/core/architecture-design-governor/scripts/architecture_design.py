@@ -530,10 +530,12 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "module": str(item.get("module")),
         "responsibility": str(item.get("responsibility") or summary),
         "depends_on": as_list(item.get("dependencies")) or ["existing API/config dependencies"],
-        "boundary_rule": "keep change inside confirmed source modules unless reviewed evidence expands scope",
-        "change_type": "modify",
+        "boundary_rule": "new planned modules are allowed only when explicitly required by the spec; otherwise keep change inside confirmed source modules unless reviewed evidence expands scope",
+        "change_type": "add" if item.get("planned_new_module") is True else "modify",
         "requirement_breakdown_id": item.get("requirement_breakdown_id"),
         "entrypoint_confidence": entrypoint_confidence.get("level"),
+        "planned_new_module": bool(item.get("planned_new_module")),
+        "source_evidence": item.get("source_evidence") or "technical_design.module_decomposition",
     } for item in technical_modules]
     result = {
         "schema": "codex-architecture-design-v1",
