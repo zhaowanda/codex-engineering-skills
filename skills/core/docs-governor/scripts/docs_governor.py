@@ -3997,6 +3997,135 @@ def runtime_contract_by_api(runtime_evidence: dict[str, Any], language: str = "e
     return contracts
 
 
+def technical_breakdown_by_id(technical: dict[str, Any], language: str = "en") -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(as_list(technical.get("requirement_breakdown")), start=1):
+        if not isinstance(item, dict):
+            continue
+        brk = human_value(item.get("id"), language, f"BRK-{index}")
+        if brk:
+            result[brk] = item
+    return result
+
+
+def technical_contracts_by_brk(technical: dict[str, Any], language: str = "en") -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for item in as_list(technical.get("api_contracts")):
+        if not isinstance(item, dict):
+            continue
+        brk = human_value(item.get("requirement_breakdown_id"), language, "")
+        if brk:
+            result.setdefault(brk, []).append(item)
+    return result
+
+
+def contract_label(contract: dict[str, Any], language: str = "en") -> str:
+    raw = human_value(contract.get("contract") or contract.get("endpoint") or contract.get("path") or contract.get("api"), language, "")
+    method = human_value(contract.get("method"), language, "").upper()
+    endpoint = human_value(contract.get("endpoint") or contract.get("path"), language, "")
+    if method and endpoint:
+        return f"{method} {endpoint}"
+    method_from_raw, path_from_raw = parse_contract_method_path(raw)
+    if method_from_raw and path_from_raw:
+        return f"{method_from_raw} {path_from_raw}"
+    return raw
+
+
+def contract_is_external_reference(label: str) -> bool:
+    value = label.strip().lower()
+    return value.startswith("//") or value.startswith("http://") or value.startswith("https://")
+
+
+def brk_api_applicability(
+    brk_id: str,
+    breakdown: dict[str, Any],
+    contracts: list[dict[str, Any]],
+    runtime_items: list[dict[str, Any]],
+    language: str = "en",
+) -> dict[str, Any]:
+    api_impact = human_value(breakdown.get("api_impact"), language, "")
+    impact_lower = api_impact.lower()
+    contract_labels: list[str] = []
+    evidence_refs: list[str] = []
+    for contract in contracts:
+        label = contract_label(contract, language)
+        if label and label not in contract_labels:
+            contract_labels.append(label)
+        evidence = human_value(contract.get("source_evidence") or contract.get("controller_file") or contract.get("binding_rule"), language, "")
+        if evidence and evidence not in evidence_refs:
+            evidence_refs.append(evidence)
+    for item in runtime_items:
+        api = runtime_item_api(item, language)
+        if api and api not in contract_labels:
+            contract_labels.append(api)
+        entrypoint = item.get("entrypoint") if isinstance(item.get("entrypoint"), dict) else {}
+        evidence = human_value(entrypoint.get("source_file") or item.get("source_evidence"), language, "")
+        if evidence and evidence not in evidence_refs:
+            evidence_refs.append(evidence)
+
+    no_api_change = any(term in impact_lower for term in ("no api change", "no api", "not_applicable", "excluded", "不涉及", "无接口", "不修改接口"))
+    confirm_only = "confirm existing" in impact_lower or "确认" in api_impact
+    concrete_internal = [label for label in contract_labels if label and not contract_is_external_reference(label)]
+    external_refs = [label for label in contract_labels if contract_is_external_reference(label)]
+    if concrete_internal and not no_api_change:
+        status = "required" if not confirm_only else "confirm_existing"
+        reason = api_impact or "contract is bound to this BRK"
+    elif no_api_change:
+        status = "not_applicable"
+        reason = api_impact or "no API path, field, or response-shape change is required for this BRK"
+    elif external_refs:
+        status = "external_reference"
+        reason = "external/provider documentation reference; not a local API contract to implement"
+    else:
+        status = "needs_confirmation"
+        reason = api_impact or "no concrete API contract was bound to this BRK"
+    return {
+        "brk_id": brk_id,
+        "status": status,
+        "reason": reason,
+        "contracts": concrete_internal,
+        "external_references": external_refs,
+        "evidence_refs": evidence_refs,
+    }
+
+
+def render_brk_api_binding(binding: dict[str, Any], language: str = "en") -> str:
+    status = text(binding.get("status"), "")
+    reason = human_value(binding.get("reason"), language, "")
+    contracts = [human_value(value, language, "") for value in as_list(binding.get("contracts")) if human_value(value, language, "")]
+    external_refs = [human_value(value, language, "") for value in as_list(binding.get("external_references")) if human_value(value, language, "")]
+    evidence_refs = [human_value(value, language, "") for value in as_list(binding.get("evidence_refs")) if human_value(value, language, "")]
+    if language == "zh":
+        status_label = {
+            "required": "required",
+            "confirm_existing": "confirm_existing",
+            "not_applicable": "不适用/not_applicable",
+            "external_reference": "external_reference",
+            "needs_confirmation": "needs_confirmation",
+        }.get(status, status or "needs_confirmation")
+        lines = [f"- API 适用性：{status_label}；原因：{reason or '未同步原因'}。"]
+        if contracts:
+            lines.append("- BRK 绑定契约：" + "、".join(f"`{item}`" for item in contracts[:6]) + "。")
+        elif external_refs:
+            lines.append("- 外部参考契约：" + "、".join(f"`{item}`" for item in external_refs[:4]) + "；该链接只作为 provider 接入参考，不等同于本地待实现 API；本子需求不修改 API 路径、请求字段或响应字段。")
+        else:
+            lines.append("- BRK 绑定契约：`not_applicable`；本子需求不修改 API 路径、请求字段或响应字段。")
+        if evidence_refs:
+            lines.append("- 契约证据：" + "；".join(f"`{item}`" for item in evidence_refs[:4]) + "。")
+        return "\n".join(lines)
+    status_text = "excluded (`not_applicable`)" if status == "not_applicable" else status or "needs_confirmation"
+    lines = [f"- API applicability: {status_text}; reason: {reason or 'not synced'}."]
+    if contracts:
+        lines.append("- BRK-bound contracts: " + ", ".join(f"`{item}`" for item in contracts[:6]) + ".")
+    elif external_refs:
+        lines.append("- External contract reference: " + ", ".join(f"`{item}`" for item in external_refs[:4]) + "; this is provider onboarding reference, not a local API to implement; local API path, request fields, and response fields remain unchanged for this BRK.")
+    else:
+        lines.append("- BRK-bound contracts: `not_applicable`; this slice does not change API path, request fields, or response fields.")
+    if evidence_refs:
+        lines.append("- Contract evidence: " + "; ".join(f"`{item}`" for item in evidence_refs[:4]) + ".")
+    return "\n".join(lines)
+
+
 def runtime_model_field_names(models: list[dict[str, Any]], language: str = "en") -> list[str]:
     names: list[str] = []
     for model in models:
@@ -4209,8 +4338,14 @@ def runtime_related_for_acceptance(related: list[dict[str, Any]], ac_id: str, la
     return matched or related
 
 
-def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence: dict[str, Any], language: str = "en") -> str:
+def render_runtime_subrequirement_design(
+    spec: dict[str, Any],
+    runtime_evidence: dict[str, Any],
+    language: str = "en",
+    technical: dict[str, Any] | None = None,
+) -> str:
     runtime_evidence = runtime_evidence if isinstance(runtime_evidence, dict) else {}
+    technical = technical if isinstance(technical, dict) else {}
     interactions = [item for item in as_list(runtime_evidence.get("interactions")) if isinstance(item, dict)]
     if not interactions:
         return ""
@@ -4243,6 +4378,8 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         if part
     )
     contract_map = runtime_contract_by_api(runtime_evidence, language)
+    breakdown_by_id = technical_breakdown_by_id(technical, language)
+    contracts_by_brk = technical_contracts_by_brk(technical, language)
     api_excluded = runtime_area_excluded(runtime_evidence, "api")
     data_excluded = runtime_area_excluded(runtime_evidence, "data")
     if language == "zh":
@@ -4276,7 +4413,23 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
             ac_ids = ac_map.get(brk_id, [])
             ac_text = "；".join(f"{ac_id}: {ac_by_id.get(ac_id, '')}" for ac_id in ac_ids if ac_by_id.get(ac_id))
             representative = items[0]
-            api_text = ", ".join(f"`{api}`" for api in apis) if apis else "未同步接口"
+            api_binding = brk_api_applicability(
+                brk_id,
+                breakdown_by_id.get(brk_id, {}),
+                contracts_by_brk.get(brk_id, []),
+                items,
+                language,
+            )
+            bound_contracts = [human_value(value, language, "") for value in as_list(api_binding.get("contracts")) if human_value(value, language, "")]
+            external_refs = [human_value(value, language, "") for value in as_list(api_binding.get("external_references")) if human_value(value, language, "")]
+            if bound_contracts:
+                api_text = ", ".join(f"`{api}`" for api in bound_contracts)
+            elif apis:
+                api_text = ", ".join(f"`{api}`" for api in apis)
+            elif external_refs:
+                api_text = "外部参考：" + "、".join(f"`{api}`" for api in external_refs[:3])
+            else:
+                api_text = "`not_applicable`"
             contract_names = []
             for api in apis:
                 contract = contract_map.get(api, {})
@@ -4299,6 +4452,7 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
             lines.append(f"- 目标调整：{'；'.join(responses) or title}。")
             action_label = "前端做法" if has_frontend_evidence else "调用方/入口"
             lines.append(f"- {action_label}：{runtime_frontend_action(representative, frontend_file, api_text, language)}")
+            lines.append(render_brk_api_binding(api_binding, language))
             if backend_owner or not api_excluded:
                 lines.append(f"- 后端做法：{runtime_backend_action(representative, backend_owner, backend_actions, language)}")
             else:
@@ -4343,7 +4497,23 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         ac_ids = ac_map.get(brk_id, [])
         ac_text = "; ".join(f"{ac_id}: {ac_by_id.get(ac_id, '')}" for ac_id in ac_ids if ac_by_id.get(ac_id))
         representative = items[0]
-        api_text = ", ".join(f"`{api}`" for api in apis) if apis else "synced APIs"
+        api_binding = brk_api_applicability(
+            brk_id,
+            breakdown_by_id.get(brk_id, {}),
+            contracts_by_brk.get(brk_id, []),
+            items,
+            language,
+        )
+        bound_contracts = [human_value(value, language, "") for value in as_list(api_binding.get("contracts")) if human_value(value, language, "")]
+        external_refs = [human_value(value, language, "") for value in as_list(api_binding.get("external_references")) if human_value(value, language, "")]
+        if bound_contracts:
+            api_text = ", ".join(f"`{api}`" for api in bound_contracts)
+        elif apis:
+            api_text = ", ".join(f"`{api}`" for api in apis)
+        elif external_refs:
+            api_text = "external reference: " + ", ".join(f"`{api}`" for api in external_refs[:3])
+        else:
+            api_text = "`not_applicable`"
         contract_names = []
         for api in apis:
             contract = contract_map.get(api, {})
@@ -4363,6 +4533,7 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         lines.append(f"- Gap: {runtime_gap_sentence(representative, ac_ids, language)}")
         lines.append(f"- Target change: {'; '.join(responses) or title}.")
         lines.append(f"- Frontend approach: {runtime_frontend_action(representative, frontend_file, api_text, language)}")
+        lines.append(render_brk_api_binding(api_binding, language))
         if backend_owner or not api_excluded:
             lines.append(f"- Backend approach: {runtime_backend_action(representative, backend_owner, backend_actions, language)}")
         else:
@@ -5692,7 +5863,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"{render_problem_analysis(technical, 'zh', runtime_evidence)}\n\n"
             f"{render_current_architecture_context(architecture, runtime_evidence, 'zh')}\n\n"
             "## 三、子需求设计矩阵\n\n"
-            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'zh') or render_requirement_breakdown_table(technical, 'zh')}\n\n"
+            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'zh', technical) or render_requirement_breakdown_table(technical, 'zh')}\n\n"
             "### 代码入口置信度\n\n"
             f"{render_runtime_entrypoint_confidence(runtime_evidence, 'zh') or render_entrypoint_confidence(technical, 'zh')}\n\n"
             "### 字段/接口/权限影响表\n\n"
@@ -5903,7 +6074,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"{render_problem_analysis(technical, 'en', runtime_evidence)}\n\n"
             f"{render_current_architecture_context(architecture, runtime_evidence, 'en')}\n\n"
             "## Sub-Requirement Design Matrix\n\n"
-            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'en') or render_requirement_breakdown_table(technical, 'en')}\n\n"
+            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'en', technical) or render_requirement_breakdown_table(technical, 'en')}\n\n"
             "### Code Entrypoint Confidence\n\n"
             f"{render_runtime_entrypoint_confidence(runtime_evidence, 'en') or render_entrypoint_confidence(technical, 'en')}\n\n"
             "### Field / API / Permission Impact\n\n"

@@ -19,6 +19,7 @@ def load_module(name: str, path: Path):
 docs_i18n = load_module("docs_i18n", ROOT / "skills/core/docs-governor/scripts/docs_i18n.py")
 doc_model = load_module("doc_model", ROOT / "skills/core/docs-governor/scripts/doc_model.py")
 docs_governor = load_module("docs_governor", ROOT / "skills/core/docs-governor/scripts/docs_governor.py")
+human_doc_review = load_module("human_doc_review", ROOT / "skills/core/human-doc-reviewer/scripts/human_doc_review.py")
 workflow_contract = load_module("workflow_contract", ROOT / "skills/core/delivery-runner/scripts/workflow_contract.py")
 render_design_templates = load_module("render_design_templates", ROOT / "skills/templates/design-doc-templates/scripts/render_design_templates.py")
 
@@ -1900,6 +1901,67 @@ def test_runtime_entrypoint_confidence_derives_legacy_frontend_entrypoint() -> N
     )
     assert "运行时入口：前端操作 / operate-platform-fe / 设备置换结算" in rendered
     assert "运行时入口：未同步" not in rendered
+
+
+def test_runtime_subrequirement_design_distinguishes_external_contract_reference_from_local_api() -> None:
+    spec = {
+        "acceptance_criteria": [
+            {"id": "AC-1", "criteria": "物联网卡即将到期时先发起审批。"},
+            {"id": "AC-2", "criteria": "配置项抽到 yaml 占位，不写死在业务代码中。"},
+        ]
+    }
+    runtime_evidence = {
+        "interactions": [
+            {"scenario": "BRK-1 发起审批", "trigger": "到期续费流程触发", "response": "生成审批实例"},
+            {"scenario": "BRK-2 配置占位", "trigger": "系统启动加载配置", "response": "读取 yaml 配置"},
+        ]
+    }
+    technical = {
+        "requirement_breakdown": [
+            {"id": "BRK-1", "summary": "发起审批", "api_impact": "confirm existing route or contract for this slice"},
+            {"id": "BRK-2", "summary": "配置占位", "api_impact": "no API change confirmed"},
+        ],
+        "api_contracts": [
+            {
+                "requirement_breakdown_id": "BRK-1",
+                "contract": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "endpoint": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "source_evidence": "evidence_bundle.contracts",
+            },
+            {
+                "requirement_breakdown_id": "BRK-2",
+                "contract": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "endpoint": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "source_evidence": "evidence_bundle.contracts",
+            },
+        ],
+    }
+
+    rendered = docs_governor.render_runtime_subrequirement_design(spec, runtime_evidence, "zh", technical)
+
+    assert "#### BRK-1 发起审批" in rendered
+    assert "API 适用性：external_reference" in rendered
+    assert "外部参考契约：`//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide`" in rendered
+    assert "不等同于本地待实现 API" in rendered
+    assert "#### BRK-2 配置占位" in rendered
+    assert "API 适用性：不适用/not_applicable" in rendered
+    assert "本子需求不修改 API 路径、请求字段或响应字段" in rendered
+    assert "未同步接口" not in rendered
+
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/designs/REQ-FEISHU.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# 飞书审批能力 技术设计\n\n"
+            "## 四、候选方案、对比与决策\n\n"
+            "#### Option `A1`: 接入外部审批 provider\n\n"
+            "## 五、决策记录\n\n选择 A1。\n\n"
+            "## 三、子需求设计矩阵\n\n"
+            f"{rendered}\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert not any(item["source"] == "brk_api_binding" for item in result["blockers"])
 
 
 def test_runtime_module_and_ui_design_replace_template_placeholders() -> None:
