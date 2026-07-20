@@ -23,8 +23,8 @@ DEFAULT_BRANCHES = {"master", "main"}
 def load_workflow_contract() -> Any:
     path = CORE_DIR / "delivery-runner/scripts/workflow_contract.py"
     spec = importlib.util.spec_from_file_location("edit_readiness_workflow_contract", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -53,6 +53,10 @@ def parse_utc(value: str) -> datetime | None:
 def stable_hash(value: Any) -> str:
     raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def is_staging_path(path: str | Path) -> bool:
+    return any(part == "_staging" or part.endswith("_staging") for part in Path(path).parts)
 
 
 def load_json(path: str | Path | None) -> dict[str, Any]:
@@ -187,9 +191,17 @@ def design_evidence_check(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def delivery_plan_scope(delivery_plan: str | None, allowed_files: list[str]) -> dict[str, Any]:
-    if not allowed_files:
-        return {"decision": "ready", "checked": False, "warnings": ["no allowed files were bound"], "blockers": []}
     plan = load_json(delivery_plan)
+    blockers: list[str] = []
+    repo_tasks = plan.get("repo_tasks", []) if isinstance(plan.get("repo_tasks"), list) else []
+    for task in repo_tasks:
+        if not isinstance(task, dict) or task.get("role") != "modify":
+            continue
+        repo_path = str(task.get("repo_path") or "")
+        if repo_path and is_staging_path(repo_path):
+            blockers.append(f"modify repo_path points to _staging: {task.get('repo') or repo_path}")
+    if not allowed_files:
+        return {"decision": "ready" if not blockers else "blocked", "checked": bool(plan), "warnings": ["no allowed files were bound"], "blockers": blockers}
     if not plan:
         return {"decision": "ready", "checked": False, "warnings": ["delivery plan missing; file scope cannot be checked"], "blockers": []}
     scope_text = json.dumps(plan, ensure_ascii=False).lower()
@@ -199,7 +211,7 @@ def delivery_plan_scope(delivery_plan: str | None, allowed_files: list[str]) -> 
         basename = Path(normalized).name
         if normalized not in scope_text and basename not in scope_text:
             out_of_scope.append(item)
-    blockers = [f"proposed file not referenced by delivery plan scope: {item}" for item in out_of_scope]
+    blockers.extend(f"proposed file not referenced by delivery plan scope: {item}" for item in out_of_scope)
     return {
         "decision": "ready" if not blockers else "blocked",
         "checked": True,
@@ -258,6 +270,9 @@ def assert_readiness(args: argparse.Namespace) -> dict[str, Any]:
         blockers.append("doc_id is required before editing")
     if not args.git_evidence:
         blockers.append("git_evidence is required before editing")
+    repo_path = Path(args.repo).expanduser().resolve()
+    if is_staging_path(repo_path):
+        blockers.append("repo path points to _staging; edit readiness requires the registered project checkout")
     git = git_check(args)
     if git.get("decision") != "ready":
         blockers.extend(f"git: {item}" for item in git.get("blockers", []) or ["assert-ready failed"])
@@ -266,6 +281,10 @@ def assert_readiness(args: argparse.Namespace) -> dict[str, Any]:
     if current_branch in DEFAULT_BRANCHES:
         blockers.append("git: current branch is default branch; editing is not allowed")
     git_evidence_data = load_json(args.git_evidence)
+    for key in ["repo", "resolved_repo_path"]:
+        evidence_repo = str(git_evidence_data.get(key) or "")
+        if evidence_repo and is_staging_path(evidence_repo):
+            blockers.append(f"git evidence {key} points to _staging; rerun git-worktree-governor on the registered project checkout")
     if git_evidence_data.get("fetched") is not True:
         blockers.append("git: fetch evidence is missing")
     if git_evidence_data.get("base_updated") is not True:

@@ -926,6 +926,41 @@ def test_sync_sanitizes_active_canonical_artifacts_without_staging_block() -> No
         assert "spec.json" in result["sanitized_artifacts"]
 
 
+def test_partial_pre_edit_sync_preserves_existing_canonical_design_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        full_artifacts = root / "full-artifacts"
+        pre_edit_artifacts = root / "pre-edit-artifacts"
+        doc_id = "REQ-PRE-EDIT-PRESERVE"
+        write_json(full_artifacts / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "acceptance_criteria": []})
+        write_json(full_artifacts / "technical_design.json", {"doc_id": doc_id, "decision": "pass"})
+        write_json(full_artifacts / "architecture_design.json", {"doc_id": doc_id, "decision": "pass"})
+        write_json(full_artifacts / "test_design.json", {"doc_id": doc_id, "decision": "pass"})
+        write_json(full_artifacts / "delivery_plan.json", {"doc_id": doc_id, "decision": "ready"})
+
+        initial = docs_governor.sync(docs_root, doc_id, full_artifacts, "Pre edit preserve")
+        assert initial["decision"] == "pass"
+        canonical_design = docs_root / "deliveries" / doc_id / "artifacts/technical_design.json"
+        assert canonical_design.exists()
+
+        write_json(pre_edit_artifacts / "edit_permit.json", {"schema": "codex-edit-permit-v1", "doc_id": doc_id, "decision": "ready"})
+        write_json(pre_edit_artifacts / "write_guard_snapshot.json", {"schema": "codex-write-guard-snapshot-v1", "doc_id": doc_id, "decision": "ready"})
+        second = docs_governor.sync(docs_root, doc_id, pre_edit_artifacts, "Pre edit preserve")
+
+        delivery = json.loads((docs_root / "deliveries" / doc_id / "delivery.json").read_text(encoding="utf-8"))
+        managed = set(delivery["managed_files"])
+        assert second["decision"] == "pass"
+        assert canonical_design.exists()
+        assert json.loads(canonical_design.read_text(encoding="utf-8"))["decision"] == "pass"
+        assert "artifacts/technical_design.json" in managed
+        assert "artifacts/architecture_design.json" in managed
+        assert "artifacts/test_design.json" in managed
+        assert "artifacts/delivery_plan.json" in managed
+        assert "artifacts/edit_permit.json" in managed
+        assert "artifacts/write_guard_snapshot.json" in managed
+
+
 def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

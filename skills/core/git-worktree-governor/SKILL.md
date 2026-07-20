@@ -29,6 +29,8 @@ delivery_plan
 - Implementation must happen on a non-default branch, never directly on `master` or `main`.
 - Every `repo_tasks[].role=modify` repository in a delivery plan must be prepared before implementation starts.
 - `confirm_only`, `read_only`, and `out_of_scope` repositories must not be branched.
+- Registered project repositories must use the local project checkout from `${CODEX_HOME:-~/.codex}/skills/company/projects.yaml` when available.
+- `_staging` directories are evidence/input workspaces only; they must not be used as modify repository checkout paths for Git preparation or implementation.
 - If the helper reports blockers, stop and resolve them before editing files.
 
 ## Commands
@@ -76,7 +78,7 @@ python3 scripts/git_worktree.py \
 
 ## Delivery Plan Contract
 
-`prepare-plan` expects explicit repository paths. It does not read private project registries.
+`prepare-plan` expects explicit repository paths, then resolves registered project repositories through the optional local project registry. If a registered checkout is available, it overrides stale or staging `repo_path` values. If a modify `repo_path` points to `_staging` and no registered checkout can be resolved, preparation is blocked.
 
 ```json
 {

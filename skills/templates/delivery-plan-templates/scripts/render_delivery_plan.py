@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -83,6 +85,92 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
         if file.exists():
             result[name] = read_json(str(file))
     return result
+
+
+def unquote_yaml_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def parse_project_registry(path: Path) -> dict[str, dict[str, str]]:
+    if not path.exists():
+        return {}
+    projects: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        match = re.match(r"\s*-\s+name:\s*(.+)\s*$", line)
+        if match:
+            name = unquote_yaml_value(match.group(1))
+            current = {"name": name}
+            projects[name] = current
+            continue
+        if current is None:
+            continue
+        match = re.match(r"\s*(default_branch|local_path_hint|git_url):\s*(.+)\s*$", line)
+        if match:
+            current[match.group(1)] = unquote_yaml_value(match.group(2))
+    return projects
+
+
+def registry_candidates() -> list[Path]:
+    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    return [codex_home / "skills" / "company" / "projects.yaml"]
+
+
+def project_registry() -> dict[str, dict[str, str]]:
+    projects: dict[str, dict[str, str]] = {}
+    for path in registry_candidates():
+        projects.update(parse_project_registry(path))
+    return projects
+
+
+def is_staging_path(path: str) -> bool:
+    return any(part == "_staging" or part.endswith("_staging") for part in Path(path).parts)
+
+
+def is_git_checkout(path: Path) -> bool:
+    return (path / ".git").exists()
+
+
+def resolve_registered_checkout(entry: dict[str, str], current_root: Path | None = None) -> str:
+    hint = str(entry.get("local_path_hint") or entry.get("name") or "").strip()
+    if not hint:
+        return ""
+    hint_path = Path(hint).expanduser()
+    candidates: list[Path] = []
+    if hint_path.is_absolute():
+        candidates.append(hint_path)
+    else:
+        roots: list[Path] = []
+        if current_root:
+            roots.append(current_root)
+            roots.extend(current_root.parents)
+        home = Path.home()
+        roots.extend(sorted(path for path in home.glob("*workspace*") if path.is_dir()))
+        roots.extend([home / "workspace", home / "workspaces", home])
+        seen: set[Path] = set()
+        for root in roots:
+            try:
+                resolved_root = root.expanduser().resolve()
+            except OSError:
+                continue
+            if resolved_root in seen:
+                continue
+            seen.add(resolved_root)
+            candidates.append(resolved_root / hint_path)
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if is_git_checkout(resolved):
+            return str(resolved)
+    return ""
 
 
 def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
@@ -223,9 +311,17 @@ def render_from_design(
     topology = topology_by_repo(architecture)
     acceptance = acceptance_from_design(technical)
     tests = tests_from_design(technical)
+    registry = project_registry()
     repo_tasks: list[dict[str, Any]] = []
     open_gates: list[str] = []
-    source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+    technical_source_locations = technical.get("source_location_evidence")
+    architecture_source_locations = architecture.get("source_location_evidence")
+    if isinstance(technical_source_locations, dict):
+        source_locations: dict[str, Any] = technical_source_locations
+    elif isinstance(architecture_source_locations, dict):
+        source_locations = architecture_source_locations
+    else:
+        source_locations = {}
     confirmed_paths = {
         str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
         if isinstance(item, dict) and item.get("path") and item.get("role", "modify_candidate") != "reference_only"
@@ -243,7 +339,10 @@ def render_from_design(
     for repo in repos:
         repo_name = repo["repo"]
         role = repo["role"]
-        repo_path = repo["repo_path"] or (ctx["repo_path"] if repo_name in {ctx["project"], "target-repo"} else "")
+        planned_repo_path = repo["repo_path"] or (ctx["repo_path"] if repo_name in {ctx["project"], "target-repo"} else "")
+        registry_entry = registry.get(repo_name, {})
+        registered_checkout = resolve_registered_checkout(registry_entry, Path.cwd()) if registry_entry else ""
+        repo_path = registered_checkout if role == "modify" and registered_checkout else planned_repo_path
         modules = topology.get(repo_name, [])
         allowed = allowed_files_hint(repo_name, architecture)
         allowed = narrow_allowed_files(allowed)
@@ -262,6 +361,7 @@ def render_from_design(
             "repo_path": repo_path,
             "role": role,
             "responsibility": repo["responsibility"],
+            "base_branch": registry_entry.get("default_branch", ""),
             "git_preparation": {
                 "required_before_edit": ["git fetch --all --prune", "git pull --ff-only", "create or switch to requirement branch", "verify clean worktree"],
                 "branch_naming_hint": f"feature/{doc_id.lower()}",
@@ -285,6 +385,8 @@ def render_from_design(
         if role == "modify":
             if not repo_path:
                 open_gates.append(f"{repo_name}: repo_path is required before git prepare-plan")
+            if planned_repo_path and is_staging_path(planned_repo_path) and not registered_checkout:
+                open_gates.append(f"{repo_name}: repo_path points to _staging; resolve the registered project checkout before git prepare-plan")
             if not task["allowed_files"]:
                 open_gates.append(f"{repo_name}: allowed_files should be narrowed before edit permit")
             if not tests:
@@ -413,6 +515,8 @@ def validate(plan: dict[str, Any]) -> tuple[bool, list[str]]:
             modify_repo_count += 1
             if not task.get("repo_path"):
                 issues.append(f"{repo}: modify repo requires repo_path")
+            elif is_staging_path(str(task.get("repo_path"))):
+                issues.append(f"{repo}: modify repo_path must not point to _staging")
             if not task.get("allowed_files"):
                 issues.append(f"{repo}: modify repo requires allowed_files")
             if not task.get("tasks"):

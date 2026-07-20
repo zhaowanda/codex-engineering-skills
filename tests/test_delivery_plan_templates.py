@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import tempfile
 from pathlib import Path
 
@@ -59,6 +60,60 @@ def test_project_understanding_fills_repo_path_files_and_tests() -> None:
     assert "app/main.py" in task["allowed_files"]
     assert "pytest" in task["test_commands"]
     assert not any("repo_path is required" in item for item in plan["open_gates"])
+
+
+def test_registered_project_checkout_overrides_staging_repo_path() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        codex_home = root / ".codex"
+        checkout = root / "workspace" / "billing-service"
+        checkout.mkdir(parents=True)
+        (checkout / ".git").mkdir()
+        registry = codex_home / "skills" / "company" / "projects.yaml"
+        registry.parent.mkdir(parents=True)
+        registry.write_text(
+            "\n".join(
+                [
+                    'schema: "codex-project-registry-v1"',
+                    "projects:",
+                    '  - name: "billing-service"',
+                    '    default_branch: "develop"',
+                    "    repo:",
+                    f'      local_path_hint: "{checkout}"',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        old_codex_home = os.environ.get("CODEX_HOME")
+        os.environ["CODEX_HOME"] = str(codex_home)
+        try:
+            understanding = {
+                "repository_analysis": {"project": "billing-service", "test_hints": ["pytest"]},
+                "code_index": {"repo_root": str(root / "_staging" / "billing-service"), "files": [{"path": "src/service.py"}]},
+            }
+            technical = {
+                "doc_id": "REQ-STAGING",
+                "test_strategy": [{"case": "case", "evidence": ["pytest"]}],
+                "acceptance_mapping": [{"acceptance_id": "AC-1", "evidence_required": ["pytest"]}],
+            }
+            architecture = {
+                "doc_id": "REQ-STAGING",
+                "repo_responsibilities": [{"repo": "billing-service", "role": "modify", "responsibility": "change service"}],
+                "module_topology": [{"repo": "billing-service", "module": "src/service.py", "change_type": "modify"}],
+            }
+            plan = render_delivery_plan.render_from_design("REQ-STAGING", technical, architecture, understanding)
+        finally:
+            if old_codex_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = old_codex_home
+
+    task = plan["repo_tasks"][0]
+    assert task["repo_path"] == str(checkout.resolve())
+    assert task["base_branch"] == "develop"
+    assert "_staging" not in task["repo_path"]
+    assert not any("repo_path points to _staging" in item for item in plan["open_gates"])
 
 
 def test_delivery_plan_excludes_unconfirmed_and_rejected_files() -> None:
@@ -127,6 +182,7 @@ def run_all() -> None:
     test_example_plan_is_valid()
     test_missing_repo_path_keeps_plan_incomplete()
     test_project_understanding_fills_repo_path_files_and_tests()
+    test_registered_project_checkout_overrides_staging_repo_path()
     test_requirement_understanding_gate_keeps_delivery_plan_incomplete()
     test_render_and_validate_file()
 

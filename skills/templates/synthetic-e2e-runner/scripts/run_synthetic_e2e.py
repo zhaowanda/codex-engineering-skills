@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[4]
 def load_delivery_runner() -> Any:
     path = ROOT / "skills/core/delivery-runner/scripts/delivery_runner.py"
     spec = importlib.util.spec_from_file_location("synthetic_delivery_runner", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -26,8 +26,8 @@ DELIVERY_RUNNER = load_delivery_runner()
 def load_harness() -> Any:
     path = ROOT / "skills/core/auto-runner/scripts/harness_validation.py"
     spec = importlib.util.spec_from_file_location("synthetic_harness", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -112,7 +112,7 @@ def write_preimplementation_happy_evidence(out_dir: Path) -> None:
     questions["spec_digest"] = canonical_digest(spec)
     questions["decision"] = "pass"
     write_json(out_dir / "open_questions.json", questions)
-    defaults = {
+    defaults: dict[str, dict[str, Any]] = {
         "domain_model_design.json": {"schema": "codex-domain-model-design-v1", "decision": "pass", "blockers": []},
         "architecture_framing.json": {"schema": "codex-architecture-framing-v1", "decision": "pass", "blockers": [], "system_boundary": {}, "repo_responsibilities": []},
         "test_design.json": {"schema": "codex-test-design-v1", "decision": "pass", "test_cases": [], "evidence_required": []},
@@ -126,10 +126,11 @@ def write_preimplementation_happy_evidence(out_dir: Path) -> None:
         },
     }
     for artifact, fallback in defaults.items():
-        current = json.loads((out_dir / artifact).read_text(encoding="utf-8")) if (out_dir / artifact).exists() else fallback
+        loaded: Any = json.loads((out_dir / artifact).read_text(encoding="utf-8")) if (out_dir / artifact).exists() else fallback
+        current: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
         current.update({key: value for key, value in fallback.items() if key not in current or key in {"decision", "blockers"}})
         if artifact == "docs_quality.json" and not current.get("reviews"):
-            current["reviews"] = fallback["reviews"]
+            current["reviews"] = fallback.get("reviews", [])
         write_json(out_dir / artifact, current)
     technical = json.loads((out_dir / "technical_design.json").read_text(encoding="utf-8"))
     architecture = json.loads((out_dir / "architecture_design.json").read_text(encoding="utf-8"))
@@ -195,6 +196,21 @@ def write_preimplementation_happy_evidence(out_dir: Path) -> None:
         ["edit_permit.json", "delivery_plan.json", "harness_validation.json"],
     )
     write_json(out_dir / "write_guard_snapshot.json", {"schema": "codex-write-guard-snapshot-v1", "decision": "ready", "doc_id": "REQ-SYN-HAPPY", "branch": "feature/REQ-SYN-HAPPY", "permit_id": "EDIT-SYN-HAPPY"})
+    auto_summary_path = out_dir / "auto_run_summary.json"
+    auto_summary = json.loads(auto_summary_path.read_text(encoding="utf-8")) if auto_summary_path.exists() else {}
+    docs_root = out_dir / "delivery-docs"
+    auto_summary.update({
+        "doc_id": "REQ-SYN-HAPPY",
+        "docs_readiness": {
+            "schema": "codex-docs-readiness-v1",
+            "decision": "pass",
+            "required": True,
+            "docs_root": str(docs_root),
+            "manifest": str(docs_root / "indexes" / "REQ-SYN-HAPPY.manifest.json"),
+            "blockers": [],
+        },
+    })
+    write_json(auto_summary_path, auto_summary)
     bind_workflow_lineage(out_dir)
 
 

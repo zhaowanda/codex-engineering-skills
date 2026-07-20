@@ -213,10 +213,13 @@ def sync_canonical_delivery(
         input_target = paths["input"] / ("requirement" + input_file.suffix.lower())
         write_canonical_copy(input_file, input_target, docs_root, artifact_dir)
         managed.append(str(input_target.relative_to(paths["root"])))
-    for relative in sorted(set(previous_managed) - set(managed)):
-        stale = paths["root"] / relative
-        if stale.is_file():
-            stale.unlink()
+    current_managed = set(managed)
+    preserved_managed = {
+        relative
+        for relative in previous_managed
+        if relative not in current_managed and (paths["root"] / relative).is_file()
+    }
+    managed = sorted(current_managed | preserved_managed)
 
     digest = managed_digest(paths["root"], managed)
     delivery = {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -110,6 +111,66 @@ class GitWorktreeTests(unittest.TestCase):
             self.assertEqual(result["modify_repo_count"], 1)
             self.assertTrue((artifact_dir / "repo-a-git_baseline_evidence.json").exists())
             self.assertFalse((artifact_dir / "repo-b-git_baseline_evidence.json").exists())
+
+    def test_prepare_plan_uses_registered_checkout_instead_of_staging_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, repo = make_repo(root, "registered-service")
+            staging = root / "_staging" / "registered-service"
+            staging.mkdir(parents=True)
+            plan = {
+                "repo_tasks": [
+                    {
+                        "repo": "registered-service",
+                        "repo_path": str(staging),
+                        "role": "modify",
+                    }
+                ]
+            }
+            plan_file = root / "delivery_plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+            codex_home = root / ".codex"
+            registry = codex_home / "skills" / "company" / "projects.yaml"
+            registry.parent.mkdir(parents=True)
+            registry.write_text(
+                "\n".join(
+                    [
+                        'schema: "codex-project-registry-v1"',
+                        "projects:",
+                        '  - name: "registered-service"',
+                        '    default_branch: "main"',
+                        "    repo:",
+                        f'      local_path_hint: "{repo}"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            artifact_dir = root / "artifacts"
+            old_codex_home = os.environ.get("CODEX_HOME")
+            os.environ["CODEX_HOME"] = str(codex_home)
+            try:
+                result = git_worktree.prepare_plan(str(plan_file), "feature", "REQ-STAGING", str(artifact_dir), check_only=True)
+            finally:
+                if old_codex_home is None:
+                    os.environ.pop("CODEX_HOME", None)
+                else:
+                    os.environ["CODEX_HOME"] = old_codex_home
+
+            self.assertEqual(result["decision"], "ready")
+            evidence = result["results"][0]
+            self.assertEqual(evidence["resolved_repo_path"], str(repo.resolve()))
+            self.assertNotIn("_staging", evidence["resolved_repo_path"])
+            self.assertTrue(any("using registered checkout" in warning for warning in result["warnings"]))
+
+    def test_direct_prepare_blocks_staging_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            staging_root = Path(tmp) / "_staging"
+            staging_root.mkdir()
+            _, repo = make_repo(staging_root, "repo")
+            result = git_worktree.prepare(repo, "feature/req-staging", base_branch="main")
+            self.assertEqual(result["decision"], "blocked")
+            self.assertTrue(any("repo path points to _staging" in item for item in result["blockers"]))
 
 
 if __name__ == "__main__":

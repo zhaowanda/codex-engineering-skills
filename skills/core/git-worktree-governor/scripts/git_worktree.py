@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 from datetime import datetime
@@ -36,6 +37,10 @@ def requirement_branch_name(branch_prefix: str, doc_id: str, fallback: str = "")
     prefix = branch_prefix.strip("/ ") or "feature"
     suffix = slugify_branch_part(doc_id or fallback or "requirement")
     return f"{prefix}/{suffix}"
+
+
+def is_staging_path(path: str | Path) -> bool:
+    return any(part == "_staging" or part.endswith("_staging") for part in Path(path).parts)
 
 
 def blocked_schema(repo: Path, remote: str, blocker: str) -> dict[str, Any]:
@@ -84,6 +89,8 @@ def inspect(repo: Path, remote: str = "origin", base_branch: str = "") -> dict[s
     repo = repo.expanduser().resolve()
     if not repo.exists():
         return blocked_schema(repo, remote, "repo does not exist")
+    if is_staging_path(repo):
+        return blocked_schema(repo, remote, "repo path points to _staging; use the registered project checkout for Git preparation")
     code, _, _ = run_git(repo, ["rev-parse", "--git-dir"])
     if code != 0:
         return blocked_schema(repo, remote, "not a git repository")
@@ -209,35 +216,44 @@ def prepare_plan(
 ) -> dict[str, Any]:
     plan = load_json_file(delivery_plan_file)
     tasks = plan_modify_tasks(plan)
-    branch = requirement_branch_name(branch_prefix, doc_id, Path(delivery_plan_file).stem)
+    plan_file = Path(delivery_plan_file).expanduser().resolve()
+    registry = project_registry()
+    branch = requirement_branch_name(branch_prefix, doc_id, plan_file.stem)
     blockers: list[str] = []
     results: list[dict[str, Any]] = []
     if not tasks:
         blockers.append("delivery_plan has no repo_tasks with role=modify")
     out_dir = Path(artifact_dir) if artifact_dir else None
     for task in tasks:
-        repo_path_value = task.get("repo_path") or task.get("path")
-        if not repo_path_value:
+        repo_path, registry_base_branch, repo_blockers, repo_warnings = resolve_plan_repo(task, plan_file, registry)
+        if repo_path is None:
             item = {
                 "schema": "codex-git-baseline-evidence-v1",
                 "repo": "",
+                "repo_name": str(task.get("repo") or task.get("name") or ""),
                 "task_index": task.get("_index"),
-                "blockers": ["modify repo task is missing repo_path"],
+                "blockers": repo_blockers,
+                "warnings": repo_warnings,
                 "decision": "blocked",
                 "generated_at": now(),
             }
+            label = repo_label(task, Path(str(task.get("repo_path") or task.get("path") or task.get("repo") or f"repo-{task.get('_index', 0)}")))
             results.append(item)
-            blockers.extend(item["blockers"])
+            if out_dir:
+                write_json(out_dir / f"{label}-git_baseline_evidence.json", item)
+            blockers.extend(f"{label}: {blocker}" for blocker in repo_blockers)
             continue
-        repo_path = Path(str(repo_path_value)).expanduser().resolve()
-        result = inspect(repo_path, remote, str(task.get("base_branch") or "")) if check_only else prepare(repo_path, branch, remote, str(task.get("base_branch") or ""))
+        base_branch = str(task.get("base_branch") or registry_base_branch or "")
+        result = inspect(repo_path, remote, base_branch) if check_only else prepare(repo_path, branch, remote, base_branch)
         label = repo_label(task, repo_path)
+        result["warnings"] = [*repo_warnings, *result.get("warnings", [])]
         result.update({
             "repo_name": str(task.get("repo") or task.get("name") or label),
             "task_index": task.get("_index"),
             "required_by": "delivery_plan.repo_tasks.role=modify",
             "plan_branch": branch,
             "check_only": check_only,
+            "resolved_repo_path": str(repo_path),
         })
         results.append(result)
         if out_dir:
@@ -246,7 +262,7 @@ def prepare_plan(
             blockers.extend(f"{label}: {blocker}" for blocker in result.get("blockers", []))
     summary = {
         "schema": "codex-git-plan-baseline-v1",
-        "delivery_plan_file": str(Path(delivery_plan_file).expanduser().resolve()),
+        "delivery_plan_file": str(plan_file),
         "doc_id": doc_id,
         "branch": branch,
         "check_only": check_only,
@@ -270,6 +286,101 @@ def load_evidence(path: str | None) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def unquote_yaml_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def parse_project_registry(path: Path) -> dict[str, dict[str, str]]:
+    if not path.exists():
+        return {}
+    projects: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        match = re.match(r"\s*-\s+name:\s*(.+)\s*$", line)
+        if match:
+            name = unquote_yaml_value(match.group(1))
+            current = {"name": name}
+            projects[name] = current
+            continue
+        if current is None:
+            continue
+        match = re.match(r"\s*(default_branch|local_path_hint|git_url):\s*(.+)\s*$", line)
+        if match:
+            current[match.group(1)] = unquote_yaml_value(match.group(2))
+    return projects
+
+
+def project_registry() -> dict[str, dict[str, str]]:
+    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    return parse_project_registry(codex_home / "skills" / "company" / "projects.yaml")
+
+
+def is_git_checkout(path: Path) -> bool:
+    return (path / ".git").exists()
+
+
+def resolve_registered_checkout(entry: dict[str, str], current_root: Path | None = None) -> str:
+    hint = str(entry.get("local_path_hint") or entry.get("name") or "").strip()
+    if not hint:
+        return ""
+    hint_path = Path(hint).expanduser()
+    candidates: list[Path] = []
+    if hint_path.is_absolute():
+        candidates.append(hint_path)
+    else:
+        roots: list[Path] = []
+        if current_root:
+            roots.append(current_root)
+            roots.extend(current_root.parents)
+        home = Path.home()
+        roots.extend(sorted(path for path in home.glob("*workspace*") if path.is_dir()))
+        roots.extend([home / "workspace", home / "workspaces", home])
+        seen: set[Path] = set()
+        for root in roots:
+            try:
+                resolved_root = root.expanduser().resolve()
+            except OSError:
+                continue
+            if resolved_root in seen:
+                continue
+            seen.add(resolved_root)
+            candidates.append(resolved_root / hint_path)
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if is_git_checkout(resolved):
+            return str(resolved)
+    return ""
+
+
+def resolve_plan_repo(task: dict[str, Any], plan_file: Path, registry: dict[str, dict[str, str]]) -> tuple[Path | None, str, list[str], list[str]]:
+    repo_name = str(task.get("repo") or task.get("name") or "").strip()
+    raw_path = str(task.get("repo_path") or task.get("path") or "").strip()
+    blockers: list[str] = []
+    warnings: list[str] = []
+    entry = registry.get(repo_name, {}) if repo_name else {}
+    registered = resolve_registered_checkout(entry, plan_file.parent) if entry else ""
+    if registered and raw_path and Path(raw_path).expanduser().resolve() != Path(registered).resolve():
+        warnings.append(f"using registered checkout for {repo_name} instead of delivery_plan repo_path")
+    if registered:
+        return Path(registered).resolve(), str(entry.get("default_branch") or ""), blockers, warnings
+    if not raw_path:
+        blockers.append("modify repo task is missing repo_path")
+        return None, "", blockers, warnings
+    if is_staging_path(raw_path):
+        blockers.append("modify repo_path points to _staging; resolve the registered project checkout before git prepare-plan")
+        return None, str(entry.get("default_branch") or ""), blockers, warnings
+    return Path(raw_path).expanduser().resolve(), str(entry.get("default_branch") or ""), blockers, warnings
 
 
 def assert_ready(

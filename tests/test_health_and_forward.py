@@ -1172,6 +1172,40 @@ def test_implement_dry_run_requires_git_fetch_and_pull_evidence() -> None:
         assert any("git pull --ff-only evidence is missing" in item for item in result["missing_gates"])
 
 
+def test_implement_dry_run_blocks_staging_repo_bindings() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        implement_dry_run.DOCS_GOVERNOR.init(docs_root, "REQ-1")
+        write_ready_design_gates(root)
+        staging_repo = root / "_staging" / "repo"
+        (root / "delivery_plan.json").write_text(
+            json.dumps({
+                "doc_id": "REQ-1",
+                "repo_tasks": [
+                    {
+                        "role": "modify",
+                        "repo": "app",
+                        "repo_path": str(staging_repo),
+                        "allowed_files": ["src/app.py"],
+                    }
+                ],
+            }),
+            encoding="utf-8",
+        )
+        (root / "git_worktree_evidence.json").write_text(
+            json.dumps({"decision": "ready", "repo": str(staging_repo), "fetched": True, "base_updated": True}),
+            encoding="utf-8",
+        )
+        (root / "edit_permit.json").write_text(
+            json.dumps({"decision": "ready", "repo": str(staging_repo)}),
+            encoding="utf-8",
+        )
+        result = implement_dry_run.run(root, docs_root=docs_root)
+        assert result["decision"] == "blocked"
+        assert any("_staging" in item for item in result["missing_gates"])
+
+
 def test_implement_dry_run_requires_docs_git_repo() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -1337,6 +1371,7 @@ def run_all() -> None:
     test_implement_dry_run_blocks_without_test_design()
     test_implement_dry_run_blocks_when_docs_quality_warns()
     test_implement_dry_run_requires_git_fetch_and_pull_evidence()
+    test_implement_dry_run_blocks_staging_repo_bindings()
     test_implement_dry_run_requires_docs_git_repo()
     test_implement_dry_run_accepts_git_plan_summary()
     test_implement_dry_run_uses_configured_docs_root_by_default()

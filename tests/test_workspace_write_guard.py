@@ -130,6 +130,18 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             audit = write_guard.audit(Namespace(repo=str(repo), permit=str(permit_path), snapshot=str(snapshot_path), doc_id="", out=str(audit_path)))
             self.assertEqual(audit["decision"], "ready")
 
+    def test_staging_repo_or_permit_blocks_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            staging_root = Path(tmp) / "_staging"
+            staging_root.mkdir()
+            repo = init_repo(staging_root)
+            permit_path = repo / ".codex" / "permit.json"
+            snapshot_path = repo / ".codex" / "snapshot.json"
+            write_json(permit_path, permit(repo, ["allowed.txt"]))
+            snap = write_guard.create_snapshot(Namespace(repo=str(repo), permit=str(permit_path), doc_id="", require_clean=False, out=str(snapshot_path)))
+            self.assertEqual(snap["decision"], "blocked")
+            self.assertTrue(any("_staging" in item for item in snap["blockers"]))
+
     def test_out_of_scope_change_blocks_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = init_repo(Path(tmp))

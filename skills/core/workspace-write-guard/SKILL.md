@@ -29,6 +29,7 @@ edit-readiness-governor permit
 - Audit after edits and before review, commit, push, or release evidence.
 - Changed files must stay inside `permit.allowed_files` when the permit binds file scope.
 - Current repo, branch, doc id, permit decision, and permit expiry must still match.
+- Repo and permit repo must not point to `_staging`; write evidence is valid only from the registered project checkout.
 - Files modified before the permit was issued are suspicious and block the audit.
 - If `decision=blocked`, do not commit, push, or count the change as delivery evidence.
 - Treat built-in editor and MCP writes as imported Runtime events, then use the write audit as the authoritative filesystem backstop.
