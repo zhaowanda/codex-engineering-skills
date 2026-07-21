@@ -85,7 +85,7 @@ python3 scripts/install_pre_commit.py \
 
 The installer resolves the actual Git directory, including linked worktrees, verifies the Harness and Agent Runtime scripts before writing a hook, and automatically repairs known Codex hooks whose absolute script target no longer exists. Replaced hooks are retained beside the active hook as timestamped `*.codex-backup.*` files. Existing non-Codex hooks are preserved unless `--force` is explicit.
 
-The pre-push hook requires `CODEX_ARTIFACT_DIR`. It advances the Runtime `pre_push` checkpoint, then runs the `pre_push` Harness against the current repository and blocks missing post-implementation Harness evidence, project-skill-index synchronization, incomplete review/test evidence, or test evidence bound to another commit.
+The pre-push hook uses `CODEX_ARTIFACT_DIR` when set. If it is not set, it resolves artifacts from `git config codex.artifactDir`, `.codex/current_delivery.json`, `CODEX_DOC_ID`, `git config codex.docId`, or a branch/doc id such as `REQ-001` under `company-delivery-docs/deliveries/<doc-id>/artifacts`. For historical doc-id drift, it may resolve a unique `REQ-YYYYMMDD-<slug>` match in the unified docs repo; multiple matches remain blocked. It advances the Runtime `pre_push` checkpoint, then runs the `pre_push` Harness against the current repository and blocks missing post-implementation Harness evidence, project-skill-index synchronization, incomplete review/test evidence, or test evidence bound to another commit.
 
 At commit time set:
 

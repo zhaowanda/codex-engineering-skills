@@ -47,8 +47,168 @@ POLICY="${CODEX_HARNESS_POLICY:-__HARNESS_POLICY__}"
 REPO="$(git rev-parse --show-toplevel)"
 ARTIFACT_DIR="${CODEX_ARTIFACT_DIR:-}"
 
+resolve_artifact_dir() {
+  if [[ -n "$ARTIFACT_DIR" ]]; then
+    printf '%s\\n' "$ARTIFACT_DIR"
+    return 0
+  fi
+
+  local configured configured_path
+  configured="$(git config --get codex.artifactDir || true)"
+  if [[ -n "$configured" ]]; then
+    if [[ "$configured" = /* ]]; then
+      configured_path="$configured"
+    else
+      configured_path="$REPO/$configured"
+    fi
+    if [[ -d "$configured_path" ]]; then
+      (cd "$configured_path" && pwd)
+      return 0
+    fi
+  fi
+
+  local marker marker_value marker_doc_id
+  for marker in "$REPO/.codex/current_delivery.json" "$REPO/../.codex/current_delivery.json"; do
+    if [[ -f "$marker" ]]; then
+      marker_value="$(
+        python3 - "$marker" <<'PY' || true
+import json
+import sys
+from pathlib import Path
+
+try:
+    data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    data = {}
+for key in ("artifact_dir", "artifacts_dir", "delivery_artifact_dir"):
+    value = str(data.get(key) or "")
+    if value:
+        print(value)
+        raise SystemExit(0)
+delivery = data.get("delivery")
+if isinstance(delivery, dict):
+    value = str(delivery.get("artifact_dir") or delivery.get("artifacts_dir") or "")
+    if value:
+        print(value)
+PY
+      )"
+      if [[ -n "$marker_value" ]]; then
+        if [[ "$marker_value" = /* ]]; then
+          candidate="$marker_value"
+        else
+          candidate="$REPO/$marker_value"
+        fi
+        if [[ -d "$candidate" ]]; then
+          (cd "$candidate" && pwd)
+          return 0
+        fi
+      fi
+      marker_doc_id="$(
+        python3 - "$marker" <<'PY' || true
+import json
+import sys
+from pathlib import Path
+
+try:
+    data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    data = {}
+for key in ("doc_id", "docId", "requirement_id", "requirementId"):
+    value = str(data.get(key) or "")
+    if value:
+        print(value)
+        raise SystemExit(0)
+delivery = data.get("delivery")
+if isinstance(delivery, dict):
+    for key in ("doc_id", "docId", "requirement_id", "requirementId"):
+        value = str(delivery.get(key) or "")
+        if value:
+            print(value)
+            raise SystemExit(0)
+PY
+      )"
+      if [[ -n "$marker_doc_id" ]]; then
+        break
+      fi
+    fi
+  done
+
+  local branch doc_id normalized_doc_id configured_doc_id candidate docs_root slug matches match_count
+  branch="$(git branch --show-current || true)"
+  configured_doc_id="$(git config --get codex.docId || true)"
+  doc_id="${CODEX_DOC_ID:-${configured_doc_id:-${marker_doc_id:-}}}"
+  if [[ -z "$doc_id" && "$branch" =~ (REQ[-_A-Za-z0-9]+) ]]; then
+    doc_id="${BASH_REMATCH[1]}"
+  fi
+  if [[ -n "$doc_id" ]]; then
+    normalized_doc_id="$(
+      python3 - "$doc_id" <<'PY'
+import re
+import sys
+
+value = sys.argv[1]
+print(re.sub(r"^req", "REQ", value, flags=re.IGNORECASE))
+PY
+    )"
+    for candidate in \
+      "$REPO/.codex/artifacts/$doc_id" \
+      "$REPO/.codex/artifacts/$normalized_doc_id" \
+      "$REPO/artifacts/$doc_id" \
+      "$REPO/artifacts/$normalized_doc_id" \
+      "$REPO/../company-delivery-docs/deliveries/$doc_id/artifacts" \
+      "$REPO/../company-delivery-docs/deliveries/$normalized_doc_id/artifacts" \
+      "$REPO/../../company-delivery-docs/deliveries/$doc_id/artifacts" \
+      "$REPO/../../company-delivery-docs/deliveries/$normalized_doc_id/artifacts"; do
+      if [[ -d "$candidate" ]]; then
+        (cd "$candidate" && pwd)
+        return 0
+      fi
+    done
+    slug="$(
+      python3 - "$normalized_doc_id" <<'PY'
+import re
+import sys
+
+value = sys.argv[1]
+match = re.match(r"^REQ[-_]\\d{8}[-_](.+)$", value, flags=re.IGNORECASE)
+if match:
+    print(match.group(1))
+PY
+    )"
+    if [[ -n "$slug" ]]; then
+      for docs_root in "$REPO/../company-delivery-docs/deliveries" "$REPO/../../company-delivery-docs/deliveries"; do
+        if [[ -d "$docs_root" ]]; then
+          matches=()
+          while IFS= read -r candidate; do
+            matches+=("$candidate")
+          done < <(find "$docs_root" -mindepth 2 -maxdepth 2 -type d -path "$docs_root/REQ-*-$slug/artifacts" | sort)
+          match_count="${#matches[@]}"
+          if [[ "$match_count" -eq 1 ]]; then
+            (cd "${matches[0]}" && pwd)
+            return 0
+          fi
+          if [[ "$match_count" -gt 1 ]]; then
+            echo "workflow-harness: ambiguous artifact dirs for doc slug '$slug': ${matches[*]}" >&2
+            return 1
+          fi
+        fi
+      done
+    fi
+  fi
+}
+
 if [[ -z "$ARTIFACT_DIR" ]]; then
-  echo "workflow-harness: CODEX_ARTIFACT_DIR is required before push" >&2
+  ARTIFACT_DIR="$(resolve_artifact_dir || true)"
+fi
+
+if [[ -z "$ARTIFACT_DIR" ]]; then
+  echo "workflow-harness: CODEX_ARTIFACT_DIR could not be resolved before push" >&2
+  echo "workflow-harness: set CODEX_ARTIFACT_DIR, git config codex.artifactDir, git config codex.docId, or create .codex/current_delivery.json" >&2
+  exit 1
+fi
+
+if [[ ! -d "$ARTIFACT_DIR" ]]; then
+  echo "workflow-harness: artifact dir does not exist: $ARTIFACT_DIR" >&2
   exit 1
 fi
 

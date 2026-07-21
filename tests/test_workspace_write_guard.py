@@ -117,6 +117,64 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             self.assertEqual(result["status"], "skipped")
             self.assertEqual(pre_push.read_text(encoding="utf-8"), "#!/bin/sh\necho custom\n")
 
+    def test_pre_push_hook_resolves_artifact_dir_from_branch_and_docs_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = init_repo(root)
+            run(["git", "checkout", "-B", "feature/REQ-123-hook"], repo)
+            artifact_dir = root / "company-delivery-docs" / "deliveries" / "REQ-123-hook" / "artifacts"
+            artifact_dir.mkdir(parents=True)
+            runtime = root / "runtime_stub.py"
+            runtime.write_text(
+                "import sys\nfrom pathlib import Path\nargs=sys.argv\nPath(args[args.index('--artifact-dir')+1], 'runtime').mkdir(parents=True, exist_ok=True)\n",
+                encoding="utf-8",
+            )
+            harness = root / "harness_stub.py"
+            harness.write_text(
+                "import json, sys\nfrom pathlib import Path\nout=Path(sys.argv[sys.argv.index('--out')+1]); out.parent.mkdir(parents=True, exist_ok=True); out.write_text(json.dumps({'decision':'pass'}))\n",
+                encoding="utf-8",
+            )
+
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"})
+            self.assertEqual(result["status"], "installed")
+            env = os.environ.copy()
+            env.pop("CODEX_ARTIFACT_DIR", None)
+            env["CODEX_AGENT_RUNTIME_SCRIPT"] = str(runtime)
+            env["CODEX_HARNESS_SCRIPT"] = str(harness)
+            proc = subprocess.run([str(repo / ".git/hooks/pre-push")], cwd=repo, env=env, text=True, capture_output=True)
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue((artifact_dir / "harness/pre_push.json").exists())
+
+    def test_pre_push_hook_resolves_unique_docs_slug_when_branch_date_drifted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = init_repo(root)
+            run(["git", "checkout", "-B", "feature/REQ-20260720-feishu-approval-capability"], repo)
+            artifact_dir = root / "company-delivery-docs" / "deliveries" / "REQ-20260717-feishu-approval-capability" / "artifacts"
+            artifact_dir.mkdir(parents=True)
+            runtime = root / "runtime_stub.py"
+            runtime.write_text(
+                "import sys\nfrom pathlib import Path\nargs=sys.argv\nPath(args[args.index('--artifact-dir')+1], 'runtime').mkdir(parents=True, exist_ok=True)\n",
+                encoding="utf-8",
+            )
+            harness = root / "harness_stub.py"
+            harness.write_text(
+                "import json, sys\nfrom pathlib import Path\nout=Path(sys.argv[sys.argv.index('--out')+1]); out.parent.mkdir(parents=True, exist_ok=True); out.write_text(json.dumps({'decision':'pass'}))\n",
+                encoding="utf-8",
+            )
+
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"})
+            self.assertEqual(result["status"], "installed")
+            env = os.environ.copy()
+            env.pop("CODEX_ARTIFACT_DIR", None)
+            env["CODEX_AGENT_RUNTIME_SCRIPT"] = str(runtime)
+            env["CODEX_HARNESS_SCRIPT"] = str(harness)
+            proc = subprocess.run([str(repo / ".git/hooks/pre-push")], cwd=repo, env=env, text=True, capture_output=True)
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue((artifact_dir / "harness/pre_push.json").exists())
+
     def test_allowed_change_passes_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = init_repo(Path(tmp))
