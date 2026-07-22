@@ -9,6 +9,14 @@ from typing import Any
 
 SCHEMA = "codex-delivery-final-consistency-v1"
 BAD_TEMPLATE_TERMS = {"需求标题", "requirement title"}
+DOMAIN_LEAK_TERMS = {"播放器资源", "播放器生命周期", "player resources", "player lifecycle"}
+PERSISTENCE_REQUIRED_TERMS = {
+    "审批记录", "审批状态", "审批结果", "实例号", "失败原因", "回调", "建单", "结算单",
+    "批次", "落库", "记录表", "状态机",
+    "approval record", "approval status", "failure reason", "callback", "retry count", "settlement",
+    "idempotency key", "state machine",
+}
+EXTERNAL_PROVIDER_API_PATTERNS = {"/open-apis/", "external_access_token", "provider_access_token"}
 BLOCKING_DECISIONS = {"block", "blocked", "no_go", "fail", "failed", "request_changes", "needs_revision"}
 PASS_DECISIONS = {"pass", "ready", "approved", "approve", "warn"}
 CORE_GATE_FILES = {
@@ -60,6 +68,35 @@ def contains_bad_template_text(value: Any) -> bool:
         return False
     lowered = value.lower()
     return any(term.lower() in lowered for term in BAD_TEMPLATE_TERMS)
+
+
+def contains_domain_leak(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    lowered = value.lower()
+    return any(term.lower() in lowered for term in DOMAIN_LEAK_TERMS)
+
+
+def has_any_term(text: str, terms: set[str]) -> bool:
+    lowered = text.lower()
+    return any(term.lower() in lowered or term in text for term in terms)
+
+
+def is_external_provider_contract(value: str) -> bool:
+    lowered = value.lower()
+    return any(pattern in lowered for pattern in EXTERNAL_PROVIDER_API_PATTERNS)
+
+
+def strip_non_trigger_explanation(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_non_trigger_explanation(item)
+            for key, item in value.items()
+            if key not in {"not_applicable_reason"}
+        }
+    if isinstance(value, list):
+        return [strip_non_trigger_explanation(item) for item in value]
+    return value
 
 
 def requirement_text(artifact_dir: Path) -> str:
@@ -160,6 +197,34 @@ def validate(artifact_dir: Path) -> dict[str, Any]:
         ]
         if bad:
             blockers.append({"source": "semantic_quality", "message": "template heading text leaked into semantic artifact fields", "artifact": filename, "fields": bad[:20], "count": len(bad)})
+        leaks = [
+            path for path, value in walk(data)
+            if contains_domain_leak(value)
+            and not path.endswith(("source_lines", "source_text", "raw_text", "requirement_text"))
+        ]
+        if leaks:
+            blockers.append({"source": "semantic_quality", "message": "cross-domain terms leaked into semantic artifact fields", "artifact": filename, "fields": leaks[:20], "count": len(leaks)})
+
+    technical, _ = load_json(artifact_dir / "technical_design.json")
+    architecture, _ = load_json(artifact_dir / "architecture_design.json")
+    design_blob = json.dumps(strip_non_trigger_explanation({"spec": spec, "technical": technical, "architecture": architecture}), ensure_ascii=False)
+    if has_any_term(design_blob, PERSISTENCE_REQUIRED_TERMS):
+        applicability = {
+            str(item.get("area", "")).lower(): str(item.get("status", "")).lower()
+            for item in as_list(technical.get("impact_applicability"))
+            if isinstance(item, dict)
+        }
+        data_model_raw = technical.get("data_model_design")
+        data_model = data_model_raw if isinstance(data_model_raw, dict) else {}
+        if applicability.get("data") in {"excluded", "not_applicable"} or data_model.get("applicable") is False:
+            blockers.append({"source": "semantic_quality", "message": "design claims no persistence impact while requirement contains records, states, callbacks, retries, idempotency, or query semantics"})
+    bad_provider_contracts = [
+        item for item in as_list(technical.get("api_contracts"))
+        if isinstance(item, dict)
+        and is_external_provider_contract(str(item.get("endpoint") or item.get("contract") or ""))
+    ]
+    if bad_provider_contracts:
+        blockers.append({"source": "semantic_quality", "message": "external provider API is used as a local system API contract", "contracts": bad_provider_contracts[:10]})
 
     gate_issues, decisions = gate_blockers(artifact_dir)
     blockers.extend(gate_issues)

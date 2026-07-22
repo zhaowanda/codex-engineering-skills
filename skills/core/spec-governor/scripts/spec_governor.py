@@ -1779,8 +1779,8 @@ def evidence_match(value: str, requirement_text: str) -> dict[str, Any]:
         hits = sorted(token for token in tokens if token in lower_value)
         return {"score": min(100, 60 + 5 * len(hits)), "match_reason": f"matched requirement tokens: {', '.join(hits[:5])}"}
     domain_equivalents = {
-        "续费": ("renew", "renewal", "recalculate", "requote"),
-        "续期": ("renew", "renewal"),
+        "生命周期": ("lifecycle", "renew", "renewal", "expired"),
+        "重新计算": ("recalculate", "requote"),
         "订单": ("order", "orders"),
         "支付": ("payment", "pay"),
         "状态": ("status", "state"),

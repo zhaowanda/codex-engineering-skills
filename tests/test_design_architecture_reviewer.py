@@ -447,6 +447,79 @@ def test_generic_design_phrasing_needs_revision() -> None:
     assert "generic template phrasing" in json_dumps(result)
 
 
+def test_cross_domain_leaked_terms_block_review() -> None:
+    technical, architecture = complete_design()
+    technical["rollback_strategy"] = "清理播放器资源后回滚审批能力"
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "cross-domain leaked terms" in json_dumps(result)
+
+
+def test_persistence_required_terms_cannot_be_marked_not_applicable() -> None:
+    technical, architecture = complete_design()
+    technical["business_rule_mapping"][0]["technical_enforcement"] = "审批状态 PENDING、失败原因、回调结果和重试次数必须可查询"
+    technical["impact_applicability"] = [
+        {"area": "data", "status": "excluded", "reason": "incorrect fixture"},
+        {"area": "api", "status": "required", "reason": "approval callback"},
+    ]
+    technical["data_design"] = []
+    technical["data_model_design"] = {"applicable": False, "not_applicable_reason": "no persistence"}
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "design claims no persistence impact" in json_dumps(result)
+
+
+def test_external_provider_api_cannot_be_local_api_contract() -> None:
+    technical, architecture = complete_design()
+    technical["api_contracts"] = [{
+        "contract": "POST /open-apis/approval/v4/instances",
+        "endpoint": "/open-apis/approval/v4/instances",
+        "controller_file": "FeishuApprovalClient.java",
+        "source_evidence": "requirement.external_provider",
+        "confirmed_contract": True,
+        "compatibility": "provider contract",
+        "old_consumer_impact": "none",
+    }]
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "external provider API is used as a local system API contract" in json_dumps(result)
+
+
+def test_requirement_declared_frontend_repo_cannot_be_dropped() -> None:
+    technical, architecture = complete_design()
+    repo_map = {
+        "multi_repo_required": True,
+        "repos": [
+            {"name": "sigreal-operate-platform", "relation": "owner"},
+            {"name": "operate-platform-fe", "relation": "downstream"},
+        ],
+    }
+    technical["repo_impact_map"] = repo_map
+    technical["requirements_understanding_gate"] = {
+        "design_allowed": True,
+        "implementation_allowed": True,
+        "business_intent": "接入飞书审批能力",
+        "business_flow": ["后端创建审批实例", "前端展示审批状态和重试入口"],
+        "entrypoints": ["审批入口"],
+        "repo_impact_map": repo_map,
+    }
+    architecture["repo_responsibilities"] = [
+        {"repo": "sigreal-operate-platform", "role": "modify", "responsibility": "backend approval capability"}
+    ]
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "repo responsibilities do not cover all requirement-declared repositories" in json_dumps(result)
+    assert "operate-platform-fe" in json_dumps(result)
+
+
 def test_template_problem_analysis_needs_revision() -> None:
     technical, architecture = complete_design()
     technical.pop("problem_analysis")

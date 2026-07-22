@@ -49,6 +49,23 @@ GENERIC_ENTRYPOINT_NAMES = {
     "docker-compose.yml",
 }
 GENERIC_ENTRYPOINT_PARTS = {"assets", "icons", "plugins", "config", "node_modules"}
+DOMAIN_LEAK_TERMS = (
+    "播放器资源",
+    "播放器生命周期",
+    "player resources",
+    "player lifecycle",
+)
+PERSISTENCE_REQUIRED_TERMS = (
+    "审批记录", "审批状态", "审批结果", "实例号", "失败原因", "回调", "建单", "结算单",
+    "批次", "落库", "记录表", "状态机",
+    "approval record", "approval status", "failure reason", "callback", "retry count", "settlement",
+    "idempotency key", "state machine",
+)
+EXTERNAL_PROVIDER_API_PATTERNS = (
+    "/open-apis/",
+    "external_access_token",
+    "provider_access_token",
+)
 REVIEW_AREAS = [
     "requirement_coverage",
     "standalone_readability_review",
@@ -148,6 +165,28 @@ def is_applicable(value: Any) -> bool:
 
 def has_signal(blob: str, terms: tuple[str, ...]) -> bool:
     return any(term in blob for term in terms)
+
+
+def has_any_signal(blob: str, terms: tuple[str, ...]) -> bool:
+    lower = blob.lower()
+    return any(term.lower() in lower or term in blob for term in terms)
+
+
+def is_external_provider_contract(value: str) -> bool:
+    lower = value.lower()
+    return any(pattern in lower for pattern in EXTERNAL_PROVIDER_API_PATTERNS)
+
+
+def strip_non_trigger_explanation(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_non_trigger_explanation(item)
+            for key, item in value.items()
+            if key not in {"not_applicable_reason"}
+        }
+    if isinstance(value, list):
+        return [strip_non_trigger_explanation(item) for item in value]
+    return value
 
 
 def finding(area: str, severity: str, message: str, evidence: Any, suggestion: str) -> dict[str, Any]:
@@ -333,6 +372,98 @@ def review_generic_constraints(technical: dict[str, Any], architecture: dict[str
             "implementation-facing design violates requirement-provided forbidden or out-of-scope constraints",
             violations[:30],
             "Remove forbidden/out-of-scope modules, paths, contracts, or behaviors from implementation-facing sections, or update the requirement constraint model with explicit approval.",
+        ))
+
+
+def expected_repositories_from_design(technical: dict[str, Any], architecture: dict[str, Any]) -> set[str]:
+    expected: set[str] = set()
+    for source in [technical, architecture]:
+        repo_map_raw = source.get("repo_impact_map")
+        repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+        if not repo_map:
+            gate_raw = source.get("requirements_understanding_gate")
+            gate = gate_raw if isinstance(gate_raw, dict) else {}
+            repo_map_raw = gate.get("repo_impact_map")
+            repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+        for item in as_list(repo_map.get("repos") if isinstance(repo_map, dict) else []):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                if name:
+                    expected.add(name)
+        scope_raw = source.get("design_scope")
+        scope = scope_raw if isinstance(scope_raw, dict) else {}
+        for item in as_list(scope.get("declared_roles")):
+            if isinstance(item, dict):
+                repo = str(item.get("repo") or item.get("repository") or "").strip()
+                path = str(item.get("path") or "")
+                if repo:
+                    expected.add(repo)
+                elif path.startswith("src/") or path.endswith((".vue", ".tsx", ".jsx")):
+                    continue
+    design_text = text_of({"technical": technical, "architecture": architecture})
+    for repo in re.findall(r"\b[A-Za-z0-9_-]+(?:-platform-fe|-fe|-[Ff]rontend)\b", design_text):
+        expected.add(repo)
+    return expected
+
+
+def review_semantic_hygiene(
+    technical: dict[str, Any],
+    architecture: dict[str, Any],
+    api_contracts: list[Any],
+    data_model_design: dict[str, Any],
+    repo_responsibilities: list[Any],
+    data_excluded: bool,
+    findings: list[dict[str, Any]],
+) -> None:
+    design_text = json.dumps(strip_non_trigger_explanation({"technical": technical, "architecture": architecture}), ensure_ascii=False)
+    leaks = sorted({term for term in DOMAIN_LEAK_TERMS if term.lower() in design_text.lower()})
+    if leaks:
+        findings.append(finding(
+            "technical_design_quality",
+            "blocker",
+            "design contains cross-domain leaked terms",
+            leaks,
+            "Remove stale terms from other requirements and regenerate the affected design/docs artifacts before review.",
+        ))
+
+    persistence_required = has_any_signal(design_text, PERSISTENCE_REQUIRED_TERMS)
+    if persistence_required and (data_excluded or data_model_design.get("applicable") is False):
+        findings.append(finding(
+            "data_model_review",
+            "blocker",
+            "design claims no persistence impact while requirement needs records, states, callbacks, retries, or idempotency",
+            {"data_excluded": data_excluded, "data_model_design": data_model_design},
+            "Generate data-model design with entities, fields, indexes, migration/no-migration evidence, read/write rules, and rollback strategy before review.",
+        ))
+
+    provider_contracts = [
+        item for item in api_contracts
+        if isinstance(item, dict)
+        and is_external_provider_contract(str(item.get("endpoint") or item.get("contract") or ""))
+    ]
+    if provider_contracts:
+        findings.append(finding(
+            "api_contract_review",
+            "blocker",
+            "external provider API is used as a local system API contract",
+            provider_contracts[:10],
+            "Classify provider APIs under external_provider_contracts and bind local controllers/routes separately for implementation and testing.",
+        ))
+
+    expected_repos = expected_repositories_from_design(technical, architecture)
+    planned_repos = {
+        str(item.get("repo") or "").strip()
+        for item in repo_responsibilities
+        if isinstance(item, dict) and str(item.get("repo") or "").strip()
+    }
+    missing_repos = sorted(repo for repo in expected_repos if repo not in planned_repos)
+    if missing_repos:
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "repo responsibilities do not cover all requirement-declared repositories",
+            {"expected": sorted(expected_repos), "planned": sorted(planned_repos), "missing": missing_repos},
+            "Regenerate architecture and delivery planning so every declared owner/consumer/frontend/backend repository is represented with modify/read_only/confirm_only/out_of_scope role.",
         ))
 
 
@@ -1099,6 +1230,15 @@ def review(
         findings.append(finding("technical_design_quality", "medium", "design still contains placeholders", "placeholder detected", "Replace placeholders with concrete decisions."))
     if has_generic_phrase(technical) or has_generic_phrase(architecture):
         findings.append(finding("technical_design_quality", "high", "design contains generic template phrasing", "generic phrase detected", "Replace template phrases with real project files, contracts, owners, and behavior."))
+    review_semantic_hygiene(
+        technical,
+        architecture,
+        api_contracts,
+        data_model_design,
+        repo_responsibilities,
+        data_excluded,
+        findings,
+    )
     if not business_rules:
         findings.append(finding("technical_design_quality", "high", "business rules are not mapped to technical enforcement", "business_rule_mapping empty", "Map each business rule to API/service/query/frontend/export enforcement."))
     elif any(isinstance(item, dict) and not (item.get("technical_enforcement") and item.get("source_of_truth")) for item in business_rules):
@@ -1132,6 +1272,8 @@ def review(
             if missing:
                 findings.append(finding("api_contract_review", "high", "API contract lacks compatibility fields", {"index": idx, "missing": missing}, "Add compatibility and old_consumer_impact."))
             contract_text = str(item.get("contract") or item.get("endpoint") or "")
+            if contract_text and is_external_provider_contract(contract_text):
+                continue
             if contract_text and "no api impact confirmed" not in contract_text.lower() and not (item.get("source_evidence") or item.get("controller_file") or item.get("frontend_proxy_path")):
                 findings.append(finding("api_contract_review", "high", "API contract lacks source binding evidence", {"index": idx, "contract": contract_text}, "Bind every concrete API contract to api_surface/source_location evidence, controller file, or frontend proxy path."))
             if contract_text and contract_text.strip() in {"/list", "/paging", "/page"} and not item.get("source_evidence"):
@@ -1146,7 +1288,7 @@ def review(
             if not isinstance(item, dict):
                 continue
             endpoint = str(item.get("endpoint") or item.get("contract") or "").split(" (", 1)[0].strip()
-            if endpoint.startswith("/") and endpoint not in confirmed_contracts:
+            if endpoint.startswith("/") and not is_external_provider_contract(endpoint) and endpoint not in confirmed_contracts:
                 findings.append(finding("api_contract_review", "high", "API contract is not in confirmed source contracts", {"index": idx, "endpoint": endpoint, "confirmed_contracts": sorted(confirmed_contracts)}, "Use only confirmed_contracts from source location evidence or regenerate source evidence."))
     if api_contracts and not interface_examples and not api_excluded:
         findings.append(finding("api_contract_review", "medium", "API/interface examples are missing", "interface_examples empty", "Add request/response/error examples or an explicit no-example reason."))

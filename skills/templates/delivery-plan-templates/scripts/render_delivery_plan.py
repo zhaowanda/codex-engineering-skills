@@ -278,6 +278,34 @@ def read_first_hint(repo: str, architecture: dict[str, Any], ctx: dict[str, Any]
     return narrow_allowed_files(hints)
 
 
+def normalize_repo_name(value: str) -> str:
+    value = value.strip().strip("`'\"")
+    match = re.search(r"`([^`]+)`", value)
+    if match:
+        value = match.group(1)
+    match = re.search(r"\b([A-Za-z0-9_-]+(?:-platform-fe|-fe|-[Ff]rontend|-backend)?)\b", value)
+    return match.group(1) if match else value
+
+
+def expected_repositories(technical: dict[str, Any], architecture: dict[str, Any]) -> set[str]:
+    expected: set[str] = set()
+    for source in [technical, architecture]:
+        repo_map_raw = source.get("repo_impact_map")
+        repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+        if not repo_map:
+            gate_raw = source.get("requirements_understanding_gate")
+            gate = gate_raw if isinstance(gate_raw, dict) else {}
+            repo_map_raw = gate.get("repo_impact_map")
+            repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+        for item in as_list(repo_map.get("repos") if isinstance(repo_map, dict) else []):
+            if isinstance(item, dict):
+                repo = normalize_repo_name(str(item.get("name") or ""))
+                if repo:
+                    expected.add(repo)
+    blob = json.dumps({"technical": technical, "architecture": architecture}, ensure_ascii=False).lower()
+    return expected
+
+
 def narrow_allowed_files(paths: list[str]) -> list[str]:
     concrete: list[str] = []
     for item in paths:
@@ -336,6 +364,10 @@ def render_from_design(
         open_gates.append("requirements_understanding_gate: design is blocked until requirement clarification is resolved")
     if source_design_gate and source_design_gate.get("implementation_allowed") is False:
         open_gates.append("requirements_understanding_gate: implementation is blocked until requirement clarification is resolved")
+    expected_repos = expected_repositories(technical, architecture)
+    planned_repos = {item.get("repo") for item in repos}
+    for repo_name in sorted(expected_repos - planned_repos):
+        open_gates.append(f"{repo_name}: requirement-declared repository is missing from architecture.repo_responsibilities")
     for repo in repos:
         repo_name = repo["repo"]
         role = repo["role"]
@@ -471,17 +503,17 @@ def render_from_design(
 def example_plan(doc_id: str) -> dict[str, Any]:
     technical = {
         "doc_id": doc_id,
-        "acceptance_mapping": [{"acceptance_id": "AC-1", "design_refs": ["checkout summary"], "evidence_required": ["browser screenshot"]}],
-        "test_strategy": [{"case": "discount breakdown visible", "evidence": ["browser screenshot"], "type": "ui"}],
+        "acceptance_mapping": [{"acceptance_id": "AC-1", "design_refs": ["summary panel"], "evidence_required": ["browser screenshot"]}],
+        "test_strategy": [{"case": "item breakdown visible", "evidence": ["browser screenshot"], "type": "ui"}],
     }
     architecture = {
         "doc_id": doc_id,
         "repo_responsibilities": [
-            {"repo": "web-app", "repo_path": "/workspace/web-app", "role": "modify", "responsibility": "render discount rows"},
-            {"repo": "pricing-service", "repo_path": "/workspace/pricing-service", "role": "confirm_only", "responsibility": "confirm contract unchanged"},
+            {"repo": "web-app", "repo_path": "/workspace/web-app", "role": "modify", "responsibility": "render item rows"},
+            {"repo": "provider-service", "repo_path": "/workspace/provider-service", "role": "confirm_only", "responsibility": "confirm contract unchanged"},
         ],
         "module_topology": [
-            {"repo": "web-app", "module": "src/checkout/summary", "responsibility": "display discount rows", "depends_on": ["pricing-service"], "boundary_rule": "read-only API consumer", "change_type": "modify"}
+            {"repo": "web-app", "module": "src/summary/panel", "responsibility": "display item rows", "depends_on": ["provider-service"], "boundary_rule": "read-only API consumer", "change_type": "modify"}
         ],
         "rollback_strategy": [{"repo": "web-app", "steps": ["revert commit", "redeploy"], "data_risk": "none"}],
     }

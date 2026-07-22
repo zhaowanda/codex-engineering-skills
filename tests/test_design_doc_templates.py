@@ -31,8 +31,8 @@ def test_empty_templates_have_required_top_level_sections() -> None:
 
 
 def test_example_templates_pass_design_reviewer() -> None:
-    technical = render_design_templates.example_technical("REQ-1", "Checkout discount display")
-    architecture = render_design_templates.example_architecture("REQ-1", "Checkout discount display")
+    technical = render_design_templates.example_technical("REQ-1", "Summary item display")
+    architecture = render_design_templates.example_architecture("REQ-1", "Summary item display")
     assert "test_design_ref" in technical["test_strategy"][0]
     assert "steps" not in technical["test_strategy"][0]
     result = design_arch_review.review(technical, architecture)
@@ -41,9 +41,9 @@ def test_example_templates_pass_design_reviewer() -> None:
 
 
 def test_new_service_example_templates_pass_design_reviewer() -> None:
-    technical = render_design_templates.new_service_example_technical("REQ-2", "Notification preference service")
-    architecture = render_design_templates.new_service_example_architecture("REQ-2", "Notification preference service")
-    assert architecture["new_service_design"]["repository_bootstrap"]["repo_name"] == "notification-service"
+    technical = render_design_templates.new_service_example_technical("REQ-2", "Shared rule service")
+    architecture = render_design_templates.new_service_example_architecture("REQ-2", "Shared rule service")
+    assert architecture["new_service_design"]["repository_bootstrap"]["repo_name"] == "service-a"
     result = design_arch_review.review(technical, architecture)
     assert result["decision"] == "pass"
     assert result["readiness_gate"]["implementation_allowed"]
@@ -52,12 +52,12 @@ def test_new_service_example_templates_pass_design_reviewer() -> None:
 def test_render_writes_manifest_and_files() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out_dir = Path(tmp)
-        manifest = render_design_templates.render("REQ-1", "Checkout discount display", out_dir, example=True)
+        manifest = render_design_templates.render("REQ-1", "Summary item display", out_dir, example=True)
         assert manifest["schema"] == "codex-design-template-manifest-v1"
         assert (out_dir / "technical_design.json").exists()
         assert (out_dir / "architecture_design.json").exists()
         assert (out_dir / "design_template_manifest.json").exists()
-        new_manifest = render_design_templates.render("REQ-2", "Notification preference service", out_dir / "new-service", new_service_example=True)
+        new_manifest = render_design_templates.render("REQ-2", "Shared rule service", out_dir / "new-service", new_service_example=True)
         assert new_manifest["new_service_example"] is True
         assert (out_dir / "new-service/technical_design.json").exists()
 

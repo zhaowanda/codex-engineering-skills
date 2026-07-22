@@ -926,6 +926,24 @@ def test_sync_sanitizes_active_canonical_artifacts_without_staging_block() -> No
         assert "spec.json" in result["sanitized_artifacts"]
 
 
+def test_sync_blocks_non_canonical_staging_artifact_dir() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "_staging" / "REQ-STAGING" / "artifacts"
+        doc_id = "REQ-STAGING"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "acceptance_criteria": []})
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Staging blocked")
+
+        assert result["decision"] == "block"
+        assert any("_staging" in item["message"] for item in result["blockers"])
+
+
 def test_partial_pre_edit_sync_preserves_existing_canonical_design_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

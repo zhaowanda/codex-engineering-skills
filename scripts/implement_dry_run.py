@@ -134,13 +134,74 @@ def design_chain_blockers(artifact_dir: Path) -> list[str]:
     return blockers
 
 
-def docs_ready(docs_root: Path | None, doc_id: str) -> tuple[bool, str, list[str]]:
+def docs_ready(docs_root: Path | None, doc_id: str, artifact_dir: Path | None = None) -> tuple[bool, str, list[str]]:
     if not docs_root:
         return False, "", ["docs_root is required"]
     manifest = docs_root / "indexes" / f"{doc_id}.manifest.json"
     validation = DOCS_GOVERNOR.validate(docs_root, doc_id, require_git=True)
     blockers = [str(item.get("message") or "docs validation failed") for item in validation.get("blockers", [])]
+    if artifact_dir:
+        canonical_artifact_dir = (docs_root / "deliveries" / doc_id / "artifacts").resolve()
+        if artifact_dir.resolve() != canonical_artifact_dir and is_staging_path(artifact_dir):
+            blockers.append("artifact_dir under _staging cannot be used as the docs readiness source")
     return not blockers, str(manifest), blockers
+
+
+def source_location_readiness(artifact_dir: Path) -> dict[str, Any]:
+    auto_summary = load_json(artifact_dir / "auto_run_summary.json")
+    stored = auto_summary.get("source_location_readiness") if isinstance(auto_summary.get("source_location_readiness"), dict) else {}
+    if stored:
+        result = dict(stored)
+        result.setdefault("artifact_dir", str(artifact_dir))
+        return result
+
+    evidence = load_json(artifact_dir / "project_understanding/source_location_evidence.json")
+    if not evidence:
+        evidence = load_json(artifact_dir / "source_location_evidence.json")
+    harness = load_json(artifact_dir / "harness/source_location.json")
+    confirmed = [
+        str(item.get("path"))
+        for item in as_list(evidence.get("confirmed_anchors"))
+        if isinstance(item, dict) and item.get("path")
+    ]
+    rejected = [
+        str(item.get("path"))
+        for item in as_list(evidence.get("rejected_candidates"))
+        if isinstance(item, dict) and item.get("path")
+    ]
+    blockers: list[dict[str, Any]] = []
+    if evidence:
+        if evidence.get("decision") != "pass":
+            blockers.append({
+                "source": "source_location_evidence",
+                "message": "requirement-specific source location evidence did not pass",
+            })
+        if not confirmed:
+            blockers.append({"source": "source_location_evidence", "message": "no confirmed source anchors"})
+    if harness and harness.get("decision") != "pass":
+        blockers.extend(item for item in as_list(harness.get("blockers")) if isinstance(item, dict))
+
+    if not evidence and not harness:
+        return {
+            "decision": "not_applicable",
+            "applicable": False,
+            "artifact_dir": str(artifact_dir),
+            "confirmed_anchor_count": 0,
+            "rejected_candidate_count": 0,
+            "blockers": [],
+        }
+    return {
+        "decision": "pass" if not blockers else "block",
+        "applicable": True,
+        "artifact_dir": str(artifact_dir),
+        "source_location_decision": str(evidence.get("decision") or ""),
+        "harness_decision": str(harness.get("decision") or ""),
+        "confirmed_anchor_count": len(confirmed),
+        "confirmed_anchors": confirmed[:8],
+        "rejected_candidate_count": len(rejected),
+        "rejected_candidates": rejected[:8],
+        "blockers": blockers,
+    }
 
 
 def git_evidence_ready(git_evidence: dict[str, Any], label: str) -> list[str]:
@@ -215,8 +276,16 @@ def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> 
         missing_gates.append("delivery_plan.json")
     if not allowed_files:
         missing_gates.append("delivery_plan.allowed_files")
-    docs_ok, docs_manifest, docs_blockers = docs_ready(docs_root, effective_doc_id)
+    docs_ok, docs_manifest, docs_blockers = docs_ready(docs_root, effective_doc_id, artifact_dir)
     missing_gates.extend(f"docs: {item}" for item in docs_blockers)
+    source_location_status = source_location_readiness(artifact_dir)
+    if source_location_status.get("decision") == "block":
+        for item in as_list(source_location_status.get("blockers")):
+            if isinstance(item, dict):
+                message = str(item.get("message") or item.get("source") or "source location readiness failed")
+            else:
+                message = str(item)
+            missing_gates.append(f"source_location: {message}")
     runtime_verification = AGENT_RUNTIME.verify(artifact_dir)
     if runtime_verification.get("decision") != "pass":
         missing_gates.append("runtime session/event chain is missing or invalid")
@@ -250,9 +319,11 @@ def run(artifact_dir: Path, docs_root: Path | None = None, doc_id: str = "") -> 
         "docs_readiness": {
             "decision": "pass" if docs_ok else "block",
             "docs_root": str(docs_root) if docs_root else "",
+            "artifact_dir": str(artifact_dir),
             "manifest": docs_manifest,
             "blockers": docs_blockers,
         },
+        "source_location_readiness": source_location_status,
         "git_requires_fetch_and_ff_pull": True,
         "git_evidence_count": len(git_evidence_items),
         "allowed_files": allowed_files,

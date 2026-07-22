@@ -423,14 +423,14 @@ def run(out_dir: Path) -> dict[str, Any]:
     req = ROOT / "examples/synthetic-e2e-case/requirement.md"
     happy_req = happy_dir / "requirement.md"
     happy_req.write_text(
-        "Goal: reduce buyer support tickets caused by an unclear completed-order confirmation message by 20 percent.\n"
-        "Metric: completed-order confirmation support tickets decrease by 20 percent.\n"
-        "Flow: buyer submits an order through the create_order API and receives the completed-order confirmation.\n"
-        "Route: POST /orders.\n"
-        "Entrypoint: buyer submits the checkout form through create_order.\n"
-        "Requirement: update create_order so a completed POST /orders response includes Order received.\n"
-        "Rule: keep existing order processing unchanged.\n"
-        "Acceptance: a completed order shows Order received.\n",
+        "Goal: reduce user support tickets caused by an unclear completed-task confirmation message by 20 percent.\n"
+        "Metric: completed-task confirmation support tickets decrease by 20 percent.\n"
+        "Flow: user submits a task through the create_task API and receives the completed-task confirmation.\n"
+        "Route: POST /tasks.\n"
+        "Entrypoint: user submits the task form through create_task.\n"
+        "Requirement: update create_task so a completed POST /tasks response includes Task received.\n"
+        "Rule: keep existing task processing unchanged.\n"
+        "Acceptance: a completed task shows Task received.\n",
         encoding="utf-8",
     )
     happy_docs = write_docs_manifest(happy_dir, "REQ-SYN-HAPPY")

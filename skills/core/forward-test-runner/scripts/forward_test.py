@@ -19,35 +19,35 @@ def load_module(name: str, path: Path):
 
 def requirement_shape_results(root: Path) -> dict[str, object]:
     governor = load_module("forward_spec_governor", root / "skills/core/spec-governor/scripts/spec_governor.py")
-    one_line = governor.normalize("REQ-FWD-ONE", "Order confirmation", "Optimize order confirmation.")
+    one_line = governor.normalize("REQ-FWD-ONE", "Task confirmation", "Optimize task confirmation.")
     long_prd = governor.normalize(
         "REQ-FWD-PRD",
-        "Order confirmation",
+        "Task confirmation",
         "\n".join([
-            "Goal: reduce buyer support tickets by 20 percent.",
+            "Goal: reduce user support tickets by 20 percent.",
             "Metric: support tickets decrease by 20 percent.",
-            "Flow: buyer submits an order and receives a confirmation.",
-            "Entrypoint: buyer submits the checkout form.",
-            "Requirement: completed orders show Order received.",
-            "Acceptance: a completed order shows Order received.",
+            "Flow: user submits a task and receives a confirmation.",
+            "Entrypoint: user submits the task form.",
+            "Requirement: completed tasks show Task received.",
+            "Acceptance: a completed task shows Task received.",
         ]),
     )
-    vague_bugfix = governor.normalize("REQ-FWD-BUG-BLOCK", "Order bug", "Fix the order confirmation bug.")
+    vague_bugfix = governor.normalize("REQ-FWD-BUG-BLOCK", "Task bug", "Fix the task confirmation bug.")
     resolved_bugfix = governor.normalize(
         "REQ-FWD-BUG-READY",
-        "Order bug correction",
+        "Task bug correction",
         "\n".join([
-            "Defect: completed orders show an empty confirmation message.",
-            "Goal: reduce buyer tickets caused by an empty order confirmation by 20 percent.",
-            "Metric: order-confirmation tickets decrease by 20 percent.",
-            "Current: completed orders show an empty confirmation message.",
-            "Flow: buyer submits an order and receives the completed-order confirmation.",
-            "Entrypoint: buyer submits the checkout form.",
+            "Defect: completed tasks show an empty confirmation message.",
+            "Goal: reduce user tickets caused by an empty task confirmation by 20 percent.",
+            "Metric: task-confirmation tickets decrease by 20 percent.",
+            "Current: completed tasks show an empty confirmation message.",
+            "Flow: user submits a task and receives the completed-task confirmation.",
+            "Entrypoint: user submits the task form.",
             "Observed: the confirmation message is empty.",
-            "Expected: the confirmation message shows Order received.",
-            "Reproduction: submit a valid order and wait for completion.",
-            "Requirement: completed orders show Order received.",
-            "Acceptance: after a valid order completes, the confirmation shows Order received.",
+            "Expected: the confirmation message shows Task received.",
+            "Reproduction: submit a valid task and wait for completion.",
+            "Requirement: completed tasks show Task received.",
+            "Acceptance: after a valid task completes, the confirmation shows Task received.",
         ]),
     )
     return {

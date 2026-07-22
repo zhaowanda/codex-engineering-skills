@@ -168,6 +168,40 @@ def test_requirement_understanding_gate_keeps_delivery_plan_incomplete() -> None
     assert any("requirements_understanding_gate" in item for item in plan["open_gates"])
 
 
+def test_requirement_declared_repo_missing_from_architecture_keeps_plan_incomplete() -> None:
+    repo_map = {
+        "multi_repo_required": True,
+        "repos": [
+            {"name": "sigreal-operate-platform", "relation": "owner"},
+            {"name": "operate-platform-fe", "relation": "downstream"},
+        ],
+    }
+    technical = {
+        "doc_id": "REQ-FEISHU",
+        "requirements_understanding_gate": {
+            "design_allowed": True,
+            "implementation_allowed": True,
+            "business_intent": "接入飞书审批能力",
+            "business_flow": ["后端创建审批实例", "前端展示审批状态"],
+            "entrypoints": ["审批入口"],
+            "repo_impact_map": repo_map,
+        },
+        "repo_impact_map": repo_map,
+        "test_strategy": [{"case": "approval", "evidence": ["unit"]}],
+        "acceptance_mapping": [{"acceptance_id": "AC-1", "evidence_required": ["unit"]}],
+    }
+    architecture = {
+        "doc_id": "REQ-FEISHU",
+        "repo_responsibilities": [{"repo": "sigreal-operate-platform", "repo_path": "/workspace/sigreal-operate-platform", "role": "modify", "responsibility": "backend approval"}],
+        "module_topology": [{"repo": "sigreal-operate-platform", "module": "operate-provider/src/main/java/approval", "change_type": "modify"}],
+    }
+
+    plan = render_delivery_plan.render_from_design("REQ-FEISHU", technical, architecture)
+
+    assert plan["decision"] == "needs_completion"
+    assert any("operate-platform-fe: requirement-declared repository is missing" in item for item in plan["open_gates"])
+
+
 def test_render_and_validate_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "delivery_plan.json"

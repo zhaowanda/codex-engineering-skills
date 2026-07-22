@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,65 @@ def is_business_route(route: dict[str, Any]) -> bool:
 
 def route_ref(route: dict[str, Any]) -> str:
     return f"{route.get('method', '')} {route.get('route', '')} ({route.get('file', '')})".strip()
+
+
+def normalize_repo_name(value: str) -> str:
+    value = value.strip().strip("`'\"")
+    match = re.search(r"`([^`]+)`", value)
+    if match:
+        value = match.group(1)
+    match = re.search(r"\b([A-Za-z0-9_-]+(?:-platform-fe|-operate-platform|-[Ff]rontend|-backend)?)\b", value)
+    return match.group(1) if match else value
+
+
+def declared_repo_entries(spec: dict[str, Any], technical: dict[str, Any], owner_repo: str) -> list[dict[str, Any]]:
+    repo_map_raw = spec.get("repo_impact_map")
+    repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+    if not repo_map:
+        gate_raw = technical.get("requirements_understanding_gate")
+        gate = gate_raw if isinstance(gate_raw, dict) else {}
+        repo_map_raw = gate.get("repo_impact_map")
+        repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+    design_text = json.dumps({"spec": spec, "technical": technical}, ensure_ascii=False).lower()
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in as_list(repo_map.get("repos") if isinstance(repo_map, dict) else []):
+        if not isinstance(item, dict):
+            continue
+        repo = normalize_repo_name(str(item.get("name") or ""))
+        if not repo or repo in seen:
+            continue
+        seen.add(repo)
+        relation = str(item.get("relation") or "related")
+        role = "modify" if repo == owner_repo or relation in {"owner", "downstream", "related"} else "confirm_only"
+        if repo.endswith("-fe") or "frontend" in repo.lower() or repo in design_text and any(term in design_text for term in ["页面", "前端", "button", "ui", "frontend"]):
+            role = "modify"
+        entries.append({"repo": repo, "role": role, "relation": relation, "source": item.get("source_evidence") or "repo_impact_map"})
+    if owner_repo and owner_repo not in seen:
+        entries.insert(0, {"repo": owner_repo, "role": "modify", "relation": "owner", "source": "architecture_owner"})
+    return entries
+
+
+def declared_paths_for_repo(spec: dict[str, Any], repo: str, owner_repo: str, owner_module: str) -> list[str]:
+    scope_raw = spec.get("scope")
+    scope = scope_raw if isinstance(scope_raw, dict) else {}
+    paths: list[str] = []
+    for item in as_list(scope.get("declared_roles")):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        item_repo = str(item.get("repo") or item.get("repository") or "").strip()
+        if item_repo and normalize_repo_name(item_repo) == repo:
+            paths.append(path)
+        elif repo.endswith("-fe") and path.startswith("src/"):
+            paths.append(path)
+        elif repo == owner_repo and path.startswith(("operate-", "src/main", "app/", "server/")):
+            paths.append(path)
+    if repo == owner_repo and owner_module:
+        paths.append(owner_module)
+    return sorted(dict.fromkeys(paths))
 
 
 def load_project_understanding(path: Path | None) -> dict[str, Any]:
@@ -537,6 +597,38 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "planned_new_module": bool(item.get("planned_new_module")),
         "source_evidence": item.get("source_evidence") or "technical_design.module_decomposition",
     } for item in technical_modules]
+    repo_entries = declared_repo_entries(spec, technical, owner_repo)
+    declared_repo_topology: list[dict[str, Any]] = []
+    for repo_entry in repo_entries:
+        repo_name = str(repo_entry.get("repo") or "")
+        for path in declared_paths_for_repo(spec, repo_name, owner_repo, owner_module):
+            declared_repo_topology.append({
+                "repo": repo_name,
+                "module": path,
+                "responsibility": summary if repo_name == owner_repo else f"Implement or verify {summary} in {repo_name}",
+                "depends_on": [owner_repo] if repo_name != owner_repo else ["existing API/config dependencies"],
+                "boundary_rule": "module path is declared by requirement scope; confirm source before editing",
+                "change_type": "modify" if repo_entry.get("role") == "modify" else "confirm",
+                "requirement_breakdown_id": breakdown[0].get("id") if breakdown else req_id,
+                "entrypoint_confidence": "requirement_declared",
+                "source_evidence": repo_entry.get("source") or "repo_impact_map",
+            })
+    merged_topology = module_topology or [{"repo": owner_repo, "module": owner_module, "responsibility": str(item.get("summary") or summary), "depends_on": ["existing API/config dependencies"], "boundary_rule": "keep change inside owner module unless this slice requires contract change", "change_type": "modify", "requirement_breakdown_id": item.get("id"), "entrypoint_confidence": entrypoint_confidence.get("level")} for item in breakdown]
+    for item in declared_repo_topology:
+        if not any(existing.get("repo") == item.get("repo") and existing.get("module") == item.get("module") for existing in merged_topology):
+            merged_topology.append(item)
+    repo_responsibilities = []
+    for repo_entry in repo_entries:
+        repo_name = str(repo_entry.get("repo") or "")
+        repo_responsibilities.append({
+            "repo": repo_name,
+            "repo_path": repo_path if repo_name == owner_repo else "",
+            "role": repo_entry.get("role") or ("modify" if repo_name == owner_repo else "confirm_only"),
+            "responsibility": summary if repo_name == owner_repo else f"Deliver declared repository scope for {summary}",
+            "requirement_breakdown_refs": [item.get("id") for item in breakdown],
+            "owner_tasks": [str(item.get("summary") or summary) for item in breakdown],
+            "source_evidence": repo_entry.get("source"),
+        })
     result = {
         "schema": "codex-architecture-design-v1",
         "decision": "pass" if design_allowed else "block",
@@ -583,8 +675,8 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             for item in reqs
         ] or [{"requirement_id": req_id, "requirement_breakdown_refs": [row.get("id") for row in breakdown], "component_boundary_refs": [f"{owner_repo} owns change"], "module_topology_refs": [owner_module], "data_flow_refs": [f"{route_contract or 'existing source'}->{owner_repo}"], "integration_sequence_refs": ["load/execute affected behavior"], "contract_refs": [route_contract or "preserve existing contracts"], "selected_architecture_option_id": selected_architecture.get("selected_option_id"), "decision_reason": selected_architecture.get("selection_reason")}],
         "component_boundaries": [{"component": owner_repo, "role": "owner", "exclusion": "do not move unrelated responsibilities"}],
-        "module_topology": module_topology or [{"repo": owner_repo, "module": owner_module, "responsibility": str(item.get("summary") or summary), "depends_on": ["existing API/config dependencies"], "boundary_rule": "keep change inside owner module unless this slice requires contract change", "change_type": "modify", "requirement_breakdown_id": item.get("id"), "entrypoint_confidence": entrypoint_confidence.get("level")} for item in breakdown],
-        "repo_responsibilities": [{"repo": owner_repo, "repo_path": repo_path, "role": "modify", "responsibility": summary, "requirement_breakdown_refs": [item.get("id") for item in breakdown], "owner_tasks": [str(item.get("summary") or summary) for item in breakdown]}],
+        "module_topology": merged_topology,
+        "repo_responsibilities": repo_responsibilities or [{"repo": owner_repo, "repo_path": repo_path, "role": "modify", "responsibility": summary, "requirement_breakdown_refs": [item.get("id") for item in breakdown], "owner_tasks": [str(item.get("summary") or summary) for item in breakdown]}],
         "cross_repo_contracts": [{"producer": producer, "consumer": owner_repo, "contract": route_contract or f"{owner_repo} internal contract", "compatibility": "backward compatible", "failure_mode": "fallback/error state"}],
         "cross_repo_dependency_graph": [{"from": producer, "to": owner_repo, "contract": route_contract or f"{owner_repo} internal contract", "change": "confirm only unless implementation proves contract change is required"}],
         "data_flow": [{"source": route_contract or "existing source", "target": owner_repo, "rule": f"{item.get('id')}: read/write only through owner boundary", "requirement_breakdown_id": item.get("id")} for item in breakdown],

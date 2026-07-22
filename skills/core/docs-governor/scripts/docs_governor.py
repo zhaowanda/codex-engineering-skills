@@ -182,6 +182,14 @@ def sync_canonical_delivery(
     previous_managed = [str(item) for item in as_list(previous.get("managed_files"))]
     managed: list[str] = []
     source_is_canonical = artifact_dir == paths["artifacts"]
+    if not source_is_canonical and "_staging" in artifact_dir.parts:
+        return {
+            "decision": "block",
+            "blockers": [{
+                "source": "artifact_dir",
+                "message": "artifact_dir under _staging cannot be synced into canonical delivery; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+            }],
+        }
     sanitized_artifacts: list[str] = []
     if source_is_canonical:
         sanitized_artifacts = sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=True)
@@ -2289,7 +2297,7 @@ def render_engineering_sequence_summary(
             return "\n".join(
                 [
                     (
-                        "- 时序口径：以下图表达用户操作、前端组件、既有 API 契约和控制成功后的播放器状态更新；服务端不在修改范围。"
+                        "- 时序口径：以下图表达用户操作、前端组件、既有 API 契约和操作成功后的页面状态更新；服务端不在修改范围。"
                         if api_excluded and not backend
                         else "- 时序口径：以下图优先使用源码/项目证据，表达真实入口、责任模块和已确认的下游处理。"
                     ),
@@ -4493,7 +4501,7 @@ def render_runtime_subrequirement_design(
             if contract_names:
                 lines.append(f"- 契约绑定：{'；'.join(contract_names[:4])}。")
             if data_excluded:
-                lines.append("- 数据影响：不涉及数据库表、迁移或持久化字段变更；仅处理前端运行时状态和播放器资源。")
+                lines.append("- 数据影响：不涉及数据库表、迁移或持久化字段变更；仅处理前端运行时状态。")
             else:
                 lines.append(f"- 数据影响：{runtime_data_impact_sentence(models, representative, language)}")
             lines.append(f"- 异常边界：{'；'.join(failures) or '保留既有错误语义和页面提示'}。")
@@ -4574,7 +4582,7 @@ def render_runtime_subrequirement_design(
         if contract_names:
             lines.append(f"- Contract binding: {'; '.join(contract_names[:4])}.")
         if data_excluded:
-            lines.append("- Data impact: no database table, migration, or persistence-field changes; only frontend runtime state and player resources change.")
+            lines.append("- Data impact: no database table, migration, or persistence-field changes; only frontend runtime state changes.")
         else:
             lines.append(f"- Data impact: {runtime_data_impact_sentence(models, representative, language)}")
         lines.append(f"- Exception boundary: {'; '.join(failures) or 'preserve existing error semantics'}.")
@@ -4601,7 +4609,7 @@ def render_runtime_process_flows(runtime_evidence: dict[str, Any], language: str
             request_label = "前端请求" if text(entrypoint.get("kind"), "") == "frontend_action" else "入口载荷/请求"
             lines.append(f"- {request_label}：{api or '未同步接口'}；{human_value(item.get('request'), language, '未同步请求参数')}")
             if runtime_area_excluded(runtime_evidence, "api") and not runtime_evidence.get("backend"):
-                lines.append("- 契约边界：调用既有 API，路径、字段和响应结构保持不变；控制成功后由前端执行播放器状态重建或清理。")
+                lines.append("- 契约边界：调用既有 API，路径、字段和响应结构保持不变；操作成功后由前端更新页面状态或清理局部资源。")
             else:
                 lines.append(f"- 后端处理：{human_value(item.get('backend_action'), language, '需结合责任模块证据确认')}")
             lines.append(f"- 正常结果：{human_value(item.get('response'), language, '页面刷新或提示成功')}")
@@ -4695,7 +4703,7 @@ def render_runtime_process_mermaid(runtime_evidence: dict[str, Any], language: s
         lines.append(f'  U{index}["{trigger or entry_default}"]:::actor')
         lines.append(f'  A{index}["{api or api_default}"]:::api')
         if frontend_only:
-            local_action = action or ("前端更新播放器状态并清理资源" if language == "zh" else "Frontend updates player state and cleans resources")
+            local_action = action or ("前端更新页面状态并清理局部资源" if language == "zh" else "Frontend updates page state and cleans local resources")
             lines.append(f'  B{index}["{local_action}"]:::frontend')
         else:
             lines.append(f'  B{index}["{action or ("后端处理" if language == "zh" else "Backend handling")}"]:::backend')
@@ -5033,7 +5041,7 @@ def render_runtime_architecture_operations(runtime_evidence: dict[str, Any], lan
             f"- 集成边界：`{frontend_repo or '前端仓库'}` 调用既有 API；接口路径、字段和响应结构保持不变，不产生服务端发布单元。",
             f"- 既有 API：{', '.join(f'`{api}`' for api in apis[:10]) or '以技术设计中的引用清单为准'}",
             "- 发布顺序：仅发布前端仓库；发布前验证既有接口兼容性和浏览器回归证据。",
-            "- 回滚口径：回滚前端提交并复核播放器资源清理；不需要数据库或服务端回滚。",
+            "- 回滚口径：回滚前端提交并复核页面状态恢复；不需要数据库或服务端回滚。",
         ])
     if language != "zh" and frontend_only:
         return "\n".join([
@@ -5041,7 +5049,7 @@ def render_runtime_architecture_operations(runtime_evidence: dict[str, Any], lan
             f"- Integration boundary: `{frontend_repo or 'frontend repository'}` calls existing APIs whose paths, fields, and response shapes remain unchanged; no server release unit is created.",
             f"- Existing APIs: {', '.join(f'`{api}`' for api in apis[:10]) or 'see referenced contracts in the technical design'}",
             "- Release order: release only the frontend repository after existing-contract compatibility and browser regression evidence pass.",
-            "- Rollback: revert the frontend commit and verify player-resource cleanup; no database or server rollback is required.",
+            "- Rollback: revert the frontend commit and verify page-state recovery; no database or server rollback is required.",
         ])
     if language == "zh":
         lines = ["### 集成、发布与回滚口径"]
@@ -5099,7 +5107,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
             )
         lines.append("- 交付顺序：按仓库角色和依赖图执行；confirm-only 依赖不进入修改范围。")
         lines.append(
-            "- 回滚策略：回滚前端提交并验证播放器资源清理；既有 API 和数据结构未变，不需要服务端或数据回滚。"
+            "- 回滚策略：回滚前端提交并验证页面状态恢复；既有 API 和数据结构未变，不需要服务端或数据回滚。"
             if frontend_only
             else "- 回滚策略：前端回滚页面提交；后端回滚接口/服务提交；若引入 DDL 或回填，必须执行配套数据回滚或兼容脚本。"
         )
@@ -5124,7 +5132,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
                 "",
                 "- Read first: " + ", ".join(f"`{item}`" for item in backend_files),
                 "- Allowed files: listed controller/service/DTO/VO and direct tests; mapper/SQL/migration changes need data rollback notes.",
-                "- Core tasks: calibrate status filtering, month derivation, filter propagation, reason-required checks, and renewal-pool writes.",
+                "- Core tasks: calibrate status filtering, month derivation, filter propagation, reason-required checks, and status-pool writes.",
                 "- Test command: `mvn -pl operate-provider -DskipTests compile`, plus relevant service/API tests or environment blocker notes.",
                 "",
             ]
@@ -5135,7 +5143,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
         else "- Delivery order: backend contract/data semantics first, frontend adaptation second; if backend does not change, evidence must prove the existing API already satisfies the target."
     )
     lines.append(
-        "- Rollback: revert the frontend commit and verify player-resource cleanup; unchanged APIs and data structures need no server or data rollback."
+        "- Rollback: revert the frontend commit and verify page-state recovery; unchanged APIs and data structures need no server or data rollback."
         if frontend_only
         else "- Rollback: revert frontend page commit and backend API/service commit; DDL/backfill requires paired rollback or compatibility script."
     )

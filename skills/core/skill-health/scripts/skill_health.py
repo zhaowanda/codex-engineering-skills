@@ -47,6 +47,26 @@ DEPRECATED_STAGE_SCHEMAS = {
     "codex-workflow-stages-v2",
     "codex-workflow-stages-v3",
 }
+PUBLIC_SCRIPT_LEAK_TERMS = (
+    "pricing-service",
+    "notification-service",
+    "renewal/recalculate",
+    "renewal-status",
+    "renewal-pool",
+    "operate-platform-fe",
+    "sigreal-",
+    "open.feishu.cn",
+    "larksuite",
+    "tenant_access_token",
+    "checkout summary",
+    "completed-order",
+    "create_order",
+    "order received",
+    "飞书",
+    "续费",
+    "结算订单",
+    "回款",
+)
 REQUIRED_SEMANTIC_DEPENDENCIES = {
     "architecture_framing": {"domain_model_design"},
     "technical_design": {"requirement_questions", "architecture_framing"},
@@ -82,6 +102,30 @@ def artifact_schema_inventory(root: Path) -> dict[str, Any]:
     return module.inventory(root)
 
 
+def public_script_leak_scan(root: Path) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    public_script_globs = [
+        "skills/core/*/scripts/*.py",
+        "skills/templates/*/scripts/*.py",
+    ]
+    for pattern in public_script_globs:
+        for path in sorted(root.glob(pattern)):
+            rel = path.relative_to(root).as_posix()
+            if rel == "skills/core/skill-health/scripts/skill_health.py":
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            lower = text.lower()
+            for term in PUBLIC_SCRIPT_LEAK_TERMS:
+                needle = term.lower()
+                if needle in lower:
+                    findings.append({"source": rel, "term": term})
+    return {
+        "decision": "block" if findings else "pass",
+        "finding_count": len(findings),
+        "findings": findings[:50],
+    }
+
+
 def design_template_regression(root: Path) -> dict[str, Any]:
     template_script = root / "skills/templates/design-doc-templates/scripts/render_design_templates.py"
     review_script = root / "skills/core/design-architecture-reviewer/scripts/design_arch_review.py"
@@ -106,13 +150,13 @@ def design_template_regression(root: Path) -> dict[str, Any]:
         examples = [
             (
                 "standard_design_example",
-                templates.example_technical("REQ-EXAMPLE", "Checkout discount display"),
-                templates.example_architecture("REQ-EXAMPLE", "Checkout discount display"),
+                templates.example_technical("REQ-EXAMPLE", "Summary item display"),
+                templates.example_architecture("REQ-EXAMPLE", "Summary item display"),
             ),
             (
                 "new_service_design_example",
-                templates.new_service_example_technical("REQ-NEW-SERVICE", "Notification preference service"),
-                templates.new_service_example_architecture("REQ-NEW-SERVICE", "Notification preference service"),
+                templates.new_service_example_technical("REQ-NEW-SERVICE", "Shared rule service"),
+                templates.new_service_example_architecture("REQ-NEW-SERVICE", "Shared rule service"),
             ),
         ]
     except Exception as exc:
@@ -529,6 +573,12 @@ def check(root: Path) -> dict[str, Any]:
             source = item.get("source") if isinstance(item, dict) else "design_template_regression"
             message = item.get("message") if isinstance(item, dict) else str(item)
             blockers.append({"source": source or "design_template_regression", "message": f"design template regression blocked: {message}"})
+    public_leaks = public_script_leak_scan(root)
+    if public_leaks.get("decision") == "block":
+        for item in as_list(public_leaks.get("findings")):
+            source = item.get("source") if isinstance(item, dict) else "public_script_leak_scan"
+            term = item.get("term") if isinstance(item, dict) else str(item)
+            blockers.append({"source": source or "public_script_leak_scan", "message": "public skill script contains project/business-specific leaked term", "term": term})
     profile_path = root / "config/workflow-profiles.example.yaml"
     if profile_path.exists():
         profiles = load_restricted_yaml(profile_path)
@@ -768,6 +818,11 @@ def check(root: Path) -> dict[str, Any]:
                 "decision": design_templates.get("decision"),
                 "blocker_count": len(as_list(design_templates.get("blockers"))),
                 "examples": design_templates.get("examples", []),
+            },
+            "public_script_leak_scan": {
+                "decision": public_leaks.get("decision"),
+                "finding_count": public_leaks.get("finding_count", 0),
+                "findings": public_leaks.get("findings", []),
             },
         },
         "skill_scores": expert_scores,

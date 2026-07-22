@@ -38,6 +38,7 @@ technical_design + architecture_design
 - File scope should be narrow enough for `edit-readiness-governor` and `workspace-write-guard`.
 - Include cross-repo order, validation order, release order, rollback order, and open gates.
 - Dependency edges and contract freeze points must reference repositories declared in `repo_tasks`.
+- If technical or architecture design carries a requirement-declared repo map, every declared repo must appear in `repo_tasks`. A missing repo is an unresolved `open_gates` item, not a reason to silently emit a single-repo ready plan.
 - Multiple `modify` repositories must require a cross-repo graph, gated parallel group, or serial group before execution.
 - Do not start implementation while `open_gates` has unresolved items.
 - Do not start Git preparation or edits when `source_design_gate` says requirement understanding is blocked.

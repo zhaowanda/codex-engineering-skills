@@ -176,24 +176,40 @@ def default_docs_root() -> Path | None:
         return None
 
 
-def docs_readiness(docs_root: Path | None, doc_id: str) -> dict[str, Any]:
+def docs_source_blockers(docs_root: Path | None, doc_id: str, artifact_dir: Path | None) -> list[dict[str, Any]]:
+    if not docs_root or not artifact_dir:
+        return []
+    canonical_artifact_dir = (docs_root / "deliveries" / doc_id / "artifacts").resolve()
+    resolved_artifact_dir = artifact_dir.resolve()
+    if resolved_artifact_dir != canonical_artifact_dir and "_staging" in resolved_artifact_dir.parts:
+        return [{
+            "source": "docs_source",
+            "message": "artifact_dir under _staging cannot be used as the docs readiness source; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+        }]
+    return []
+
+
+def docs_readiness(docs_root: Path | None, doc_id: str, artifact_dir: Path | None = None) -> dict[str, Any]:
     if not docs_root:
         return {
             "schema": "codex-docs-readiness-v1",
             "decision": "block",
             "required": True,
             "docs_root": "",
+            "artifact_dir": str(artifact_dir) if artifact_dir else "",
             "blockers": [{"source": "docs_root", "message": "delivery docs repository root is required before implementation"}],
             "next_command": f"python3 skills/core/docs-governor/scripts/docs_governor.py init --docs-root delivery-docs --doc-id {doc_id}",
         }
     manifest = docs_root / "indexes" / f"{doc_id}.manifest.json"
     validation = load_docs_governor_module().validate(docs_root, doc_id, require_git=True)
     blockers = [dict(item) for item in validation.get("blockers", [])]
+    blockers.extend(docs_source_blockers(docs_root, doc_id, artifact_dir))
     return {
         "schema": "codex-docs-readiness-v1",
         "decision": "pass" if not blockers else "block",
         "required": True,
         "docs_root": str(docs_root),
+        "artifact_dir": str(artifact_dir) if artifact_dir else "",
         "manifest": str(manifest),
         "canonical_delivery": str(docs_root / "deliveries" / doc_id),
         "blockers": blockers,
@@ -240,6 +256,16 @@ def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifac
         return {"decision": "block", "reason": "docs_root is not configured", "blockers": [{"source": "docs_root", "message": "docs_root is not configured"}]}
     if not docs_root.exists():
         return {"decision": "block", "reason": "docs_root does not exist", "blockers": [{"source": "docs_root", "message": "docs_root does not exist"}]}
+    canonical_artifact_dir = docs_root / "deliveries" / doc_id / "artifacts"
+    if artifact_dir.resolve() != canonical_artifact_dir.resolve() and "_staging" in artifact_dir.parts:
+        return {
+            "decision": "block",
+            "reason": "artifact_dir under _staging cannot be synced into canonical delivery",
+            "blockers": [{
+                "source": "docs_source",
+                "message": "artifact_dir under _staging cannot be synced into canonical delivery; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+            }],
+        }
     proc = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=docs_root, text=True, capture_output=True)
     if proc.returncode != 0 or proc.stdout.strip() != "true":
         return {"decision": "block", "reason": "docs_root is not a git repository", "blockers": [{"source": "docs_git", "message": "docs_root is not a git repository"}]}
@@ -567,6 +593,54 @@ def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any]
     return blockers
 
 
+def source_location_readiness(out: Path, project_out: Path | None = None) -> dict[str, Any]:
+    source_path = (project_out / "source_location_evidence.json") if project_out else out / "source_location_evidence.json"
+    bundle_path = (project_out / "evidence_bundle.json") if project_out else out / "evidence_bundle.json"
+    harness_path = out / "harness/source_location.json"
+    source_data = read_json(source_path)
+    bundle_data = read_json(bundle_path)
+    harness_data = read_json(harness_path)
+    confirmed = [
+        str(item.get("path"))
+        for item in as_list(source_data.get("confirmed_anchors"))
+        if isinstance(item, dict) and item.get("path")
+    ]
+    rejected = [
+        str(item.get("path"))
+        for item in as_list(source_data.get("rejected_candidates"))
+        if isinstance(item, dict) and item.get("path")
+    ]
+    blockers: list[dict[str, Any]] = []
+    if project_out is None:
+        return {
+            "decision": "not_applicable",
+            "applicable": False,
+            "confirmed_anchor_count": 0,
+            "rejected_candidate_count": 0,
+            "blockers": [],
+        }
+    if source_data.get("decision") != "pass":
+        blockers.append({"source": "source_location_evidence", "message": "requirement-specific source location evidence did not pass"})
+    if harness_data and harness_data.get("decision") != "pass":
+        blockers.extend(item for item in as_list(harness_data.get("blockers")) if isinstance(item, dict))
+    if not confirmed:
+        blockers.append({"source": "source_location_evidence", "message": "no confirmed source anchors"})
+    if bundle_data.get("stale_references"):
+        blockers.append({"source": "project_overlay", "message": "project overlay contains stale references"})
+    return {
+        "decision": "pass" if not blockers else "block",
+        "applicable": True,
+        "source_location_decision": str(source_data.get("decision") or ""),
+        "harness_decision": str(harness_data.get("decision") or ""),
+        "confirmed_anchor_count": len(confirmed),
+        "confirmed_anchors": confirmed[:8],
+        "rejected_candidate_count": len(rejected),
+        "rejected_candidates": rejected[:8],
+        "local_project_binding": bundle_data.get("local_project_binding") if isinstance(bundle_data.get("local_project_binding"), dict) else {},
+        "blockers": blockers,
+    }
+
+
 def as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -624,10 +698,15 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
     impacts = required_impacts(spec)
     profile_name = str(profile.get("name") or "")
     regulated_impacts = {"data", "database", "security", "permission", "tenant", "payment", "performance", "configuration", "release"}
-    standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo", "mq", "async", "scheduler", "task", "job", "cache", "integration"}
+    standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo", "mq", "async", "scheduler", "task", "job", "cache", "integration", "business_flow", "workflow", "state", "status"}
+    workflow_surface = impacts & {"business_flow", "workflow", "state", "status"}
+    mixed_complexity = bool(workflow_surface and impacts & {"api", "cross_repo", "integration", "data", "permission"})
     reasons: list[str] = []
     if impacts & regulated_impacts or "data_migration" in profile_name:
         reasons.extend(sorted(impacts & regulated_impacts) or ["data_migration_profile"])
+        tier = "regulated"
+    elif mixed_complexity:
+        reasons.append("workflow/stateful change spans business flow with contract/data/permission impact")
         tier = "regulated"
     elif lane in {"bugfix", "hotfix"} and impacts & standard_upgrade_impacts:
         reasons.extend(f"{item} impact raises defect fix above light tier" for item in sorted(impacts & standard_upgrade_impacts))
@@ -1445,7 +1524,7 @@ def run(
     out = (out or default_out(doc_id)).resolve()
     out.mkdir(parents=True, exist_ok=True)
     effective_docs_root = docs_root.resolve() if docs_root else default_docs_root()
-    docs_status = docs_readiness(effective_docs_root, doc_id)
+    docs_status = docs_readiness(effective_docs_root, doc_id, out)
     write_json(out / "auto_run_summary.json", {
         "schema": SCHEMA,
         "decision": "in_progress",
@@ -1497,7 +1576,7 @@ def run(
         effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
         docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
         if docs_sync.get("decision") == "pass":
-            docs_status = docs_readiness(effective_docs_root, doc_id)
+            docs_status = docs_readiness(effective_docs_root, doc_id, out)
         strictness = workflow_strictness({}, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
         effective_profile = effective_profile_for_strictness(selected_profile, strictness)
         blockers = collect_blockers(steps, inspect_status)
@@ -1705,10 +1784,11 @@ def run(
 
     if spec_data.get("decision") == "blocked" or spec_data.get("design_allowed") is False:
         strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+        location_status = source_location_readiness(out, project_out)
         effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
         docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language, human_section="spec")
         if docs_sync.get("decision") == "pass":
-            docs_status = docs_readiness(effective_docs_root, doc_id)
+            docs_status = docs_readiness(effective_docs_root, doc_id, out)
         blockers = collect_blockers(steps, {}, include_inspect=False)
         blockers.extend(
             item for item in as_list((spec_data.get("requirements_understanding") or {}).get("blockers"))
@@ -1737,6 +1817,7 @@ def run(
             "workflow_strictness": strictness,
             "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
             "required_gates": selected_profile.get("required_skills", []),
+            "source_location_readiness": location_status,
             "docs_readiness": docs_status,
             "docs_sync": docs_sync,
             "doc_language": effective_doc_language,
@@ -2021,7 +2102,7 @@ def run(
     effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
     docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
     if docs_sync.get("decision") == "pass":
-        docs_status = docs_readiness(effective_docs_root, doc_id)
+        docs_status = docs_readiness(effective_docs_root, doc_id, out)
     docs_quality = run_docs_quality(effective_docs_root, docs_sync, out)
     WORKFLOW_CONTRACT.bind_lineage(
         out / "docs_quality.json",
@@ -2036,7 +2117,7 @@ def run(
         final_docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
         if final_docs_sync.get("decision") == "pass":
             docs_sync = final_docs_sync
-            docs_status = docs_readiness(effective_docs_root, doc_id)
+            docs_status = docs_readiness(effective_docs_root, doc_id, out)
 
     delivery_status = out / "delivery_status.json"
     inspect_command = [
@@ -2063,6 +2144,7 @@ def run(
             inspect_status = {}
 
     strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+    location_status = source_location_readiness(out, project_out)
     effective_profile = effective_profile_for_strictness(selected_profile, strictness)
     strictness_gaps = strictness_gate_gaps(selected_profile, strictness)
     blockers = collect_blockers(steps, inspect_status, include_inspect=False)
@@ -2102,6 +2184,7 @@ def run(
         "strictness_gate_gaps": strictness_gaps,
         "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
         "required_gates": selected_profile.get("required_skills", []),
+        "source_location_readiness": location_status,
         "docs_readiness": docs_status,
         "docs_sync": docs_sync,
         "docs_quality": docs_quality,

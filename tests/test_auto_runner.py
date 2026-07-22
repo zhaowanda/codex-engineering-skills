@@ -265,6 +265,65 @@ def test_harness_design_requires_sequence_for_api_change() -> None:
         assert "architecture design is missing integration_sequence" in messages
 
 
+def test_harness_design_blocks_callback_requirement_without_callback_step() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "requirement.normalized.txt").write_text("Flow: external approval callback updates backend result.", encoding="utf-8")
+        (root / "spec.json").write_text(json.dumps({
+            "impact_applicability": [{"area": "business_flow", "status": "required"}],
+        }), encoding="utf-8")
+        (root / "technical_design.json").write_text(json.dumps({
+            "process_flow": [{"steps": [{"action": "start approval"}, {"action": "persist result"}]}],
+            "process_flow_diagram": "```mermaid\nflowchart TD\nA[start approval] --> B[persist result]\n```",
+            "system_interaction_sequence": {
+                "applicable": True,
+                "participants": ["User/Client", "approval-module", "Approval Provider"],
+                "sequence": [{"from": "User/Client", "to": "approval-module", "mode": "sync", "action": "start approval", "success": "pending", "failure": "fail"}],
+            },
+            "system_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: start approval\n```",
+        }), encoding="utf-8")
+        (root / "architecture_design.json").write_text(json.dumps({
+            "integration_sequence": [{"from": "approval-module", "to": "Approval Provider", "action": "start approval"}],
+            "integration_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: start approval\n```",
+        }), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="design")
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "callback-driven requirement requires a callback step in system_interaction_sequence" for item in result["blockers"])
+
+
+def test_harness_design_blocks_stateful_workflow_with_shallow_process_flow() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "requirement.normalized.txt").write_text("业务流程：审批通过后更新状态。", encoding="utf-8")
+        (root / "spec.json").write_text(json.dumps({
+            "impact_applicability": [{"area": "business_flow", "status": "required"}],
+            "state_machine": {"states": ["pending", "approved"]},
+        }), encoding="utf-8")
+        (root / "technical_design.json").write_text(json.dumps({
+            "process_flow": [{"steps": [{"action": "update status"}]}],
+            "process_flow_diagram": "```mermaid\nflowchart TD\nA[update status]\n```",
+            "system_interaction_sequence": {
+                "applicable": True,
+                "participants": ["User/Client", "status-module"],
+                "sequence": [{"from": "User/Client", "to": "status-module", "mode": "sync", "action": "update status", "success": "updated", "failure": "failed"}],
+            },
+            "system_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: update status\n```",
+        }), encoding="utf-8")
+        (root / "architecture_design.json").write_text(json.dumps({
+            "integration_sequence": [{"from": "status-module", "to": "status-store", "action": "persist status"}],
+            "integration_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: persist status\n```",
+        }), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="design")
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "stateful or workflow requirement requires a multi-step business process flow" for item in result["blockers"])
+
+
 def test_harness_blocks_single_repo_multi_repo_claim() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -416,6 +475,29 @@ def test_auto_runner_blocks_ready_projection_when_upstream_artifacts_are_blocked
         assert any(item["source"] == "docs_projection_state" for item in result["docs_sync"]["blockers"])
         assert result["doc_language"] == "zh"
         assert (docs_root / "deliveries/REQ-AUTO-DOCS/artifacts/spec.json").exists()
+
+
+def test_auto_runner_blocks_staging_artifact_source_before_docs_sync() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = root / "_staging" / "artifacts"
+
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-STAGING",
+            title="Order export",
+            out=out,
+            docs_root=docs_root,
+        )
+
+        assert result["docs_readiness"]["decision"] == "block"
+        assert any(item["source"] == "docs_source" for item in result["docs_readiness"]["blockers"])
+        assert result["docs_sync"]["decision"] == "block"
+        assert any(item["source"] == "docs_source" for item in result["docs_sync"]["blockers"])
+        assert any(item["source"] == "docs_source" for item in result["blockers"])
 
 
 def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
@@ -733,6 +815,9 @@ def test_auto_runner_project_understanding_optional() -> None:
         assert result["decision"] == "block"
         assert not (out / "technical_design.json").exists()
         assert any(step["name"] == "project_understanding" for step in result["steps"])
+        assert result["source_location_readiness"]["applicable"] is True
+        assert result["source_location_readiness"]["decision"] == "block"
+        assert result["source_location_readiness"]["blockers"]
 
 
 def test_auto_runner_explicit_profile_selects_required_gates() -> None:
@@ -1035,6 +1120,14 @@ def test_workflow_strictness_classifies_light_standard_and_regulated() -> None:
     mq_bugfix = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "mq"}]}, {"name": "bugfix"}, "high")
     assert mq_bugfix["tier"] == "standard"
     assert mq_bugfix["elevated"] is True
+    workflow_bugfix = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "business_flow"}]}, {"name": "bugfix"}, "high")
+    assert workflow_bugfix["tier"] == "standard"
+    complex_workflow = auto_runner.workflow_strictness(
+        {"lane": "standard_requirement", "impact_surface": [{"area": "business_flow"}, {"area": "api"}, {"area": "permission"}]},
+        {"name": "small_feature"},
+        "high",
+    )
+    assert complex_workflow["tier"] == "regulated"
     regulated = auto_runner.workflow_strictness({"lane": "standard_requirement", "impact_surface": [{"area": "data"}]}, {"name": "data_migration"}, "high")
     assert regulated["tier"] == "regulated"
     profile = {"name": "data_migration", "required_skills": ["release-evidence-binder"]}

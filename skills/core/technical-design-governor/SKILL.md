@@ -50,6 +50,8 @@ Then run `design-architecture-reviewer` after architecture design exists.
 - Build `process_flow` as one ordered business flow from confirmed triggers, system actions, and observable acceptance outcomes; do not turn document headings or correction notes into standalone flows.
 - Emit `process_flow_diagram` as a Mermaid `flowchart` derived from the reviewed `process_flow`; the diagram must stay semantically aligned with the structured steps.
 - Prefer `source_location_evidence.confirmed_contracts` for API contracts and system interaction sequence participants.
+- Separate external provider APIs from local system API contracts. Provider endpoints such as Feishu/Lark `/open-apis/...`, token APIs, or provider console URLs are references only and must be emitted under `external_provider_contracts`; `api_contracts` must bind local controllers/routes or explicitly say the local contract is unconfirmed.
+- Records, status, callback, retry, idempotency, query, batch, settlement, or persistence terms must force data model and consistency design. Do not let an `impact_applicability.data=excluded` default suppress required persistence evidence.
 - Emit `system_sequence_diagram` as a Mermaid `sequenceDiagram` derived from `system_interaction_sequence`; keep participants and actions consistent with the structured sequence rows.
 - Do not present fallback phrases such as `target module to be confirmed` as expert-ready facts; keep them as review-blocking uncertainty.
 - Preserve open questions; do not hide uncertainty.

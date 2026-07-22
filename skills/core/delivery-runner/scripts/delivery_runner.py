@@ -94,6 +94,58 @@ def infer_docs_root_from_artifact_dir(artifact_dir: Path, doc_id: str = "") -> P
     return deliveries.parent
 
 
+def source_location_readiness(artifact_dir: Path) -> dict[str, Any]:
+    auto_summary = load_json(artifact_dir / "auto_run_summary.json")
+    stored = auto_summary.get("source_location_readiness") if isinstance(auto_summary.get("source_location_readiness"), dict) else {}
+    if stored:
+        result = dict(stored)
+        result.setdefault("artifact_dir", str(artifact_dir))
+        return result
+    evidence = load_json(artifact_dir / "project_understanding/source_location_evidence.json")
+    if not evidence:
+        evidence = load_json(artifact_dir / "source_location_evidence.json")
+    harness = load_json(artifact_dir / "harness/source_location.json")
+    confirmed = [
+        str(item.get("path"))
+        for item in (evidence.get("confirmed_anchors") or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    rejected = [
+        str(item.get("path"))
+        for item in (evidence.get("rejected_candidates") or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    blockers: list[dict[str, Any]] = []
+    if evidence:
+        if evidence.get("decision") != "pass":
+            blockers.append({"source": "source_location_evidence", "message": "requirement-specific source location evidence did not pass"})
+        if not confirmed:
+            blockers.append({"source": "source_location_evidence", "message": "no confirmed source anchors"})
+    if harness and harness.get("decision") != "pass":
+        blockers.extend(item for item in harness.get("blockers", []) if isinstance(item, dict))
+    if not evidence and not harness:
+        return {
+            "decision": "not_applicable",
+            "applicable": False,
+            "artifact_dir": str(artifact_dir),
+            "confirmed_anchor_count": 0,
+            "rejected_candidate_count": 0,
+            "blockers": [],
+        }
+    return {
+        "decision": "pass" if not blockers else "block",
+        "applicable": True,
+        "artifact_dir": str(artifact_dir),
+        "source_location_decision": str(evidence.get("decision") or ""),
+        "harness_decision": str(harness.get("decision") or ""),
+        "confirmed_anchor_count": len(confirmed),
+        "confirmed_anchors": confirmed[:8],
+        "rejected_candidate_count": len(rejected),
+        "rejected_candidates": rejected[:8],
+        "blockers": blockers,
+    }
+
+
 def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
     auto_summary = load_json(artifact_dir / "auto_run_summary.json")
     status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
@@ -109,6 +161,12 @@ def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
     manifest = ""
     if docs_root_value:
         docs_root = Path(docs_root_value)
+        canonical_artifact_dir = (docs_root / "deliveries" / doc_id / "artifacts").resolve() if doc_id else None
+        if canonical_artifact_dir is not None and artifact_dir.resolve() != canonical_artifact_dir and "_staging" in artifact_dir.parts:
+            blockers.append({
+                "source": "docs_source",
+                "message": "artifact_dir under _staging cannot be used as the docs readiness source; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+            })
         manifest_value = str(status.get("manifest") or "")
         if not manifest_value or "<" in manifest_value:
             manifest = str(docs_root / "indexes" / f"{doc_id}.manifest.json")
@@ -124,6 +182,7 @@ def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
         "decision": "pass" if not blockers else "block",
         "doc_id": doc_id,
         "docs_root": docs_root_value,
+        "artifact_dir": str(artifact_dir),
         "manifest": manifest,
         "blockers": blockers,
     }
@@ -422,6 +481,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         blockers.append({"source": "delivery_state", "message": "delivery state has blockers", "count": len(state.get("blockers", []))})
     release_only = profile.get("profile_stage_mode") == "release_only"
     docs_status = {"decision": "not_applicable", "blockers": []} if release_only else docs_readiness(artifact_dir)
+    source_location_status = source_location_readiness(artifact_dir)
     if not release_only and docs_status.get("decision") != "pass":
         blockers.extend(docs_status.get("blockers", []))
     docs_quality = artifacts.get("docs_quality", {})
@@ -434,6 +494,13 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     consistency = CONSISTENCY.validate(artifact_dir)
     if consistency.get("decision") != "pass":
         blockers.extend(consistency.get("blockers", []))
+    stored_status_raw = load_json(artifact_dir / "delivery_status.json")
+    stored_status = stored_status_raw if isinstance(stored_status_raw, dict) else {}
+    if stored_status:
+        if stored_status.get("can_implement") is True and blockers:
+            blockers.append({"source": "delivery_status", "message": "stored delivery_status claims can_implement=true while current inspection has blockers"})
+        if stored_status.get("can_release") is True and blockers:
+            blockers.append({"source": "delivery_status", "message": "stored delivery_status claims can_release=true while current inspection has blockers"})
     next_required_actions = profile_next_actions(profile, artifact_dir)
 
     next_stage = "done"
@@ -466,6 +533,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "blockers": blockers,
         "workflow_profile": profile,
         "detected_impacts": sorted(impacts),
+        "source_location_readiness": source_location_status,
         "docs_readiness": docs_status,
         "git_edit_readiness": git_status,
         "final_consistency": consistency,

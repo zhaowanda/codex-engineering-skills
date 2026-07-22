@@ -242,6 +242,11 @@ def requirement_context(artifact_dir: Path) -> str:
     return "\n".join(part for part in parts if part).lower()
 
 
+def is_mermaid_diagram(value: Any, diagram_type: str) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text) and "```mermaid" in text and diagram_type.lower() in text
+
+
 def relevance_terms(anchor: dict[str, Any]) -> list[str]:
     raw_terms: list[str] = []
     for key in ("matched_symbols", "matched_contract_terms", "matched_requirement_terms"):
@@ -484,19 +489,20 @@ def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[
     process_flow = technical.get("process_flow")
     if policy.get("require_process_flow", True) and not process_flow:
         add_blocker(blockers, "design_completeness", "technical design is missing process_flow")
-    if process_flow and policy.get("require_process_flow_diagram", True) and not str(technical.get("process_flow_diagram") or "").strip():
+    if process_flow and policy.get("require_process_flow_diagram", True) and not is_mermaid_diagram(technical.get("process_flow_diagram"), "flowchart"):
         add_blocker(blockers, "design_completeness", "technical design is missing process_flow_diagram")
     impacts = applicability_areas(spec)
     sequence_impacts = {str(item).lower() for item in policy.get("sequence_impacts", ["api", "cross_repo", "integration", "business_flow"])}
     sequence = technical.get("system_interaction_sequence")
+    requirement_text = requirement_context(artifact_dir)
     if impacts & sequence_impacts:
         if not isinstance(sequence, dict) or sequence.get("applicable") is not True or not sequence.get("participants") or not sequence.get("sequence"):
             add_blocker(blockers, "design_completeness", "applicable cross-component change requires a populated system interaction sequence", impacts=sorted(impacts & sequence_impacts))
-        if isinstance(sequence, dict) and sequence.get("applicable") is True and policy.get("require_system_sequence_diagram", True) and not str(technical.get("system_sequence_diagram") or "").strip():
+        if isinstance(sequence, dict) and sequence.get("applicable") is True and policy.get("require_system_sequence_diagram", True) and not is_mermaid_diagram(technical.get("system_sequence_diagram"), "sequenceDiagram"):
             add_blocker(blockers, "design_completeness", "technical design is missing system_sequence_diagram")
         if not architecture.get("integration_sequence"):
             add_blocker(blockers, "design_completeness", "architecture design is missing integration_sequence")
-        elif policy.get("require_integration_sequence_diagram", True) and not str(architecture.get("integration_sequence_diagram") or "").strip():
+        elif policy.get("require_integration_sequence_diagram", True) and not is_mermaid_diagram(architecture.get("integration_sequence_diagram"), "sequenceDiagram"):
             add_blocker(blockers, "design_completeness", "architecture design is missing integration_sequence_diagram")
     if isinstance(sequence, dict) and sequence.get("applicable") is True:
         participants = {str(item) for item in sequence.get("participants", []) if str(item).strip()}
@@ -509,6 +515,12 @@ def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[
                 add_blocker(blockers, "design_semantics", "sequence entry is incomplete", index=index, missing=missing)
             if edge.get("from") not in participants or edge.get("to") not in participants:
                 add_blocker(blockers, "design_semantics", "sequence edge references an undeclared participant", index=index)
+        if any(term in requirement_text for term in ["callback", "回调", "审批"]):
+            if not any(str(edge.get("mode") or "").lower() == "callback" for edge in sequence.get("sequence", []) if isinstance(edge, dict)):
+                add_blocker(blockers, "design_semantics", "callback-driven requirement requires a callback step in system_interaction_sequence")
+        process_flow_steps = sum(len(item.get("steps") or []) for item in process_flow if isinstance(item, dict))
+        if process_flow_steps < 2 and any(term in requirement_text for term in ["workflow", "flow", "流程", "审批", "回调", "state", "status"]):
+            add_blocker(blockers, "design_completeness", "stateful or workflow requirement requires a multi-step business process flow", steps=process_flow_steps)
     state_impacts = {str(item).lower() for item in policy.get("state_impacts", ["state", "status", "workflow", "business_flow"])}
     if impacts & state_impacts and not (technical.get("state_machine") or spec.get("state_machine")):
         add_blocker(blockers, "design_completeness", "stateful change requires a state machine", impacts=sorted(impacts & state_impacts))

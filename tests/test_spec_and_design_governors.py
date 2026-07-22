@@ -648,7 +648,7 @@ def test_technical_design_models_feishu_approval_callback_as_system_sequence() -
     design_blob = json.dumps({"technical": tech, "architecture": arch}, ensure_ascii=False).lower()
 
     assert tech["system_interaction_sequence"]["applicable"] is True
-    assert "Feishu Approval" in tech["system_interaction_sequence"]["participants"]
+    assert "Approval Provider" in tech["system_interaction_sequence"]["participants"]
     assert any(step.get("mode") == "callback" for step in tech["system_interaction_sequence"]["sequence"])
     assert "```mermaid" in tech["system_sequence_diagram"]
     assert any(item.get("contract") == "POST /api/iot/anomaly/snapshot/syncCurrent" for item in tech["api_contracts"])
@@ -658,6 +658,58 @@ def test_technical_design_models_feishu_approval_callback_as_system_sequence() -
     planned_labels = {item.get("label") for item in tech["planned_new_modules"]}
     assert {"审批服务接口", "审批服务实现", "飞书审批客户端封装", "飞书回调控制器", "审批主表 mapper", "审批历史表 mapper"}.issubset(planned_labels)
     assert any(item.get("planned_new_module") for item in arch["module_topology"])
+
+
+def test_feishu_approval_generation_separates_provider_api_data_and_frontend_repo() -> None:
+    spec = spec_governor.normalize(
+        "REQ-FEISHU-APPROVAL-FULL",
+        "飞书审批能力接入",
+        "\n".join([
+            "业务目标：物联网卡即将到期且命中续费条件时，系统先创建飞书审批流。",
+            "业务流程：后端 sigreal-operate-platform 按批次调用飞书创建审批实例。",
+            "业务流程：飞书将审批结果回调给后端，审批通过后自动创建结算单。",
+            "业务流程：前端 operate-platform-fe 展示审批状态、失败原因和重试入口。",
+            "后端主仓：sigreal-operate-platform。",
+            "前端主仓：operate-platform-fe。",
+            "外部飞书接口：POST /open-apis/approval/v4/instances。",
+            "规则：审批记录必须落库，审批状态 PENDING 和结算单状态 SETTLEMENT_STATUS_PENDING_RECEIPT 不能混用。",
+            "规则：回调处理必须幂等，失败后可以重试。",
+            "验收标准：审批拒绝后不创建结算单。",
+            "验收标准：页面展示审批状态、失败原因和重试入口。",
+        ]),
+    )
+    spec["repo_impact_map"] = {
+        "multi_repo_required": True,
+        "repos": [
+            {"name": "sigreal-operate-platform", "relation": "owner", "source_evidence": "requirement backend repo"},
+            {"name": "operate-platform-fe", "relation": "downstream", "source_evidence": "requirement frontend repo"},
+        ],
+    }
+    spec["scope"].setdefault("declared_roles", []).extend([
+        {"repo": "sigreal-operate-platform", "path": "operate-provider/src/main/java"},
+        {"repo": "operate-platform-fe", "path": "src/views"},
+    ])
+
+    tech = technical_design.render(spec, {
+        "evidence_bundle": {
+            "project": "sigreal-operate-platform",
+            "repo_root": "/workspace/sigreal-operate-platform",
+            "confirmed_anchors": [{"path": "operate-provider/src/main/java/com/sigreal/approval/ApprovalService.java"}],
+            "contracts": ["POST /open-apis/approval/v4/instances"],
+        },
+        "repository_analysis": {"project": "sigreal-operate-platform"},
+        "code_index": {"repo_root": "/workspace/sigreal-operate-platform"},
+    })
+    arch = architecture_design.render(spec, tech, {"code_index": {"repo_root": "/workspace/sigreal-operate-platform"}})
+
+    assert tech["external_provider_contracts"]
+    assert any("/open-apis/approval/v4/instances" in item["contract"] for item in tech["external_provider_contracts"])
+    assert all("/open-apis/" not in str(item.get("endpoint") or item.get("contract") or "") for item in tech["api_contracts"])
+    assert tech["data_model_design"]["applicable"] is True
+    assert tech["transaction_consistency"]["applicable"] is True
+    planned_repos = {item.get("repo") for item in arch["repo_responsibilities"]}
+    assert {"sigreal-operate-platform", "operate-platform-fe"}.issubset(planned_repos)
+    assert any(item.get("repo") == "operate-platform-fe" and item.get("role") == "modify" for item in arch["repo_responsibilities"])
 
 
 def test_specialized_ui_ue_design_review_and_frontend_plan() -> None:
@@ -969,6 +1021,71 @@ def test_delivery_runner_infers_docs_root_when_summary_is_sanitized() -> None:
         assert status["manifest"] == str(docs_root / "indexes/REQ-1.manifest.json")
 
 
+def test_delivery_runner_blocks_staging_docs_readiness_source() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        artifact_dir = root / "_staging" / "REQ-1" / "artifacts"
+        artifact_dir.mkdir(parents=True)
+        write_json(
+            artifact_dir / "auto_run_summary.json",
+            {
+                "doc_id": "REQ-1",
+                "docs_readiness": {
+                    "decision": "pass",
+                    "docs_root": str(docs_root),
+                    "manifest": str(docs_root / "indexes/REQ-1.manifest.json"),
+                },
+            },
+        )
+
+        status = delivery_runner.docs_readiness(artifact_dir)
+
+        assert status["decision"] == "block"
+        assert any(item["source"] == "docs_source" for item in status["blockers"])
+
+
+def test_delivery_runner_exposes_source_location_readiness_from_summary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "auto_run_summary.json", {
+            "doc_id": "REQ-1",
+            "source_location_readiness": {
+                "decision": "block",
+                "applicable": True,
+                "confirmed_anchor_count": 0,
+                "rejected_candidate_count": 1,
+                "blockers": [{"source": "source_location_evidence", "message": "no confirmed source anchors"}],
+            },
+        })
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+        assert status["source_location_readiness"]["decision"] == "block"
+        assert status["source_location_readiness"]["rejected_candidate_count"] == 1
+
+
+def test_delivery_runner_infers_source_location_readiness_without_summary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project = root / "project_understanding"
+        project.mkdir(parents=True)
+        write_json(project / "source_location_evidence.json", {
+            "decision": "block",
+            "confirmed_anchors": [],
+            "rejected_candidates": [{"path": "src/guessed.py"}],
+        })
+        write_json(root / "harness/source_location.json", {
+            "decision": "block",
+            "blockers": [{"source": "source_location", "message": "stale source digest"}],
+        })
+
+        status = delivery_runner.source_location_readiness(root)
+
+        assert status["decision"] == "block"
+        assert status["confirmed_anchor_count"] == 0
+        assert status["rejected_candidate_count"] == 1
+        assert any(item["source"] == "source_location" for item in status["blockers"])
+
+
 def test_delivery_runner_blocks_when_docs_quality_not_pass() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -1017,6 +1134,42 @@ def test_delivery_runner_rejects_placeholder_artifact_even_with_pass_decisions()
         status = delivery_runner.inspect(root, profile_name="small_feature")
         assert status["can_implement"] is False
         assert any(item["source"] == "technical_design" and "contract" in item["message"] for item in status["blockers"])
+
+
+def test_delivery_runner_blocks_semantic_artifact_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        technical = json.loads((root / "technical_design.json").read_text(encoding="utf-8"))
+        technical["api_contracts"] = [{"contract": "POST /open-apis/approval/v4/instances", "endpoint": "/open-apis/approval/v4/instances"}]
+        technical["rollback_strategy"] = "清理播放器资源"
+        technical["data_model_design"] = {"applicable": False}
+        technical["business_rule_mapping"] = [{"technical_enforcement": "审批状态、回调结果和重试记录必须可查询"}]
+        write_json(root / "technical_design.json", technical)
+        write_bound_design_review(root)
+
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+
+        assert status["can_implement"] is False
+        messages = json.dumps(status, ensure_ascii=False)
+        assert "cross-domain terms leaked" in messages
+        assert "external provider API is used as a local system API contract" in messages
+        assert "design claims no persistence impact" in messages
+
+
+def test_delivery_runner_blocks_stored_ready_claim_when_current_inspection_has_blockers() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        write_json(root / "docs_quality.json", {"decision": "warn", "warnings": [{"source": "depth"}]})
+        write_json(root / "delivery_status.json", {"can_implement": True, "can_release": True})
+
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+
+        assert status["can_implement"] is False
+        assert any(item["source"] == "delivery_status" for item in status["blockers"])
 
 
 def test_delivery_runner_rejects_vacuous_artifact_with_correct_schema() -> None:

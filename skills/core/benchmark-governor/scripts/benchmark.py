@@ -36,122 +36,122 @@ def run_json(root: Path, cmd: list[str]) -> dict[str, Any]:
 def requirement_understanding_strict(root: Path) -> bool:
     try:
         spec_governor = load_module("spec_governor_for_benchmark", root / "skills/core/spec-governor/scripts/spec_governor.py")
-        ambiguous = spec_governor.normalize("REQ-BENCH-AMB", "续费优化", "优化续费流程，状态更新正确，功能正常。")
+        ambiguous = spec_governor.normalize("REQ-BENCH-AMB", "流程优化", "优化处理流程，状态更新正确，功能正常。")
         clear = spec_governor.normalize(
             "REQ-BENCH-CLEAR",
-            "续费重新试算",
+            "流程重试",
             "\n".join(
                 [
-                    "业务目的: 减少运营手工核对续费状态的时间。",
-                    "成功指标: 续费状态人工核对量下降 50%。",
-                    "现状: 当前已有续费列表页面、续费试算接口和续费状态刷新逻辑。",
-                    "流程: 运营在续费列表点击重新试算按钮，系统调用续费试算接口并刷新当前设备的试算结果。",
-                    "入口: 续费列表的重新试算按钮。",
-                    "Req: 运营可以对单个设备重新触发续费试算。",
-                    "Rule: 只有有续费管理权限的运营角色可以触发。",
-                    "AC: 给定有权限运营在续费列表点击重新试算按钮，接口返回成功后页面展示新的试算金额和试算时间。",
-                    "AC: 无权限角色看不到重新试算按钮且直接调用接口返回无权限。",
+                    "业务目的: 减少人工核对处理状态的时间。",
+                    "成功指标: 状态人工核对量下降 50%。",
+                    "现状: 当前已有列表页面、重试接口和状态刷新逻辑。",
+                    "流程: 操作员在列表点击重试按钮，系统调用重试接口并刷新当前条目的处理结果。",
+                    "入口: 列表的重试按钮。",
+                    "Req: 操作员可以对单个条目重新触发处理。",
+                    "Rule: 只有有处理管理权限的操作员角色可以触发。",
+                    "AC: 给定有权限操作员在列表点击重试按钮，接口返回成功后页面展示新的处理状态和更新时间。",
+                    "AC: 无权限角色看不到重试按钮且直接调用接口返回无权限。",
                 ]
             ),
         )
         no_goal = spec_governor.normalize(
             "REQ-BENCH-NO-GOAL",
-            "订单导出",
+            "列表导出",
             "\n".join(
                 [
-                    "入口: 订单列表导出按钮。",
-                    "流程: 运营点击订单列表导出按钮，系统调用导出接口并生成 Excel 文件。",
-                    "Req: 运营可以导出订单列表。",
-                    "AC: 给定运营点击导出按钮，系统生成包含订单号和状态的 Excel 文件。",
+                    "入口: 列表导出按钮。",
+                    "流程: 操作员点击列表导出按钮，系统调用导出接口并生成文件。",
+                    "Req: 操作员可以导出列表。",
+                    "AC: 给定操作员点击导出按钮，系统生成包含条目标识和状态的文件。",
                 ]
             ),
         )
         missing_state_controls = spec_governor.normalize(
             "REQ-BENCH-MISSING-STATE-CONTROLS",
-            "订单状态同步",
+            "状态同步",
             "\n".join(
                 [
-                    "业务目的: 减少订单同步失败导致的客服排查。",
-                    "成功指标: 订单同步失败人工排查量下降 50%。",
-                    "流程: 订单服务发送 order-sync MQ；报表服务 Consumer 消费消息并同步订单状态；失败时需要重试。",
-                    "入口: order-sync MQ Consumer。",
+                    "业务目的: 减少同步失败导致的人工排查。",
+                    "成功指标: 同步失败人工排查量下降 50%。",
+                    "流程: provider-service 发送 workflow-sync MQ；consumer-service 消费消息并同步状态；失败时需要重试。",
+                    "入口: workflow-sync MQ Consumer。",
                     "状态: pending -> synced.",
-                    "重试策略: order-sync Consumer fails can retry three times.",
-                    "Req: 报表服务同步订单状态。",
-                    "AC: 消息消费成功后报表订单状态更新。",
+                    "重试策略: workflow-sync Consumer fails can retry three times.",
+                    "Req: consumer-service 同步状态。",
+                    "AC: 消息消费成功后目标状态更新。",
                 ]
             ),
         )
         multi_entry = spec_governor.normalize(
             "REQ-BENCH-MULTI-ENTRY",
-            "续费状态修复",
+            "状态修复",
             "\n".join(
                 [
-                    "业务目的: 减少运营和系统补偿续费状态不一致导致的人工排查。",
-                    "成功指标: 续费状态异常人工处理量下降 50%。",
-                    "现状: 当前已有续费列表重新试算按钮、renewal/recalculate 后端接口、renewal-status topic 消费者和夜间补偿 Task。",
-                    "证据: baseline shows renewal list page, renewal/recalculate API, renewal-status topic, and nightly renewal compensation Task.",
-                    "流程: 运营在续费列表点击重新试算按钮，前端调用续费试算接口；后端复用试算服务并发送 renewal-status MQ；消费者刷新续费状态，夜间补偿 Task 处理超时未回调记录；无权限用户不可触发。",
-                    "入口: 续费列表重新试算按钮。",
-                    "入口: renewal-status MQ Consumer 消费续费状态消息。",
-                    "入口: 夜间续费状态补偿 Task。",
-                    "仓库: operate-platform-fe owns renewal list button.",
-                    "仓库: sigreal-operate-platform owns renewal/recalculate API and renewal-status producer.",
-                    "仓库: renewal-worker owns renewal-status Consumer and nightly compensation Task.",
-                    "依赖: operate-platform-fe -> sigreal-operate-platform -> renewal-status topic -> renewal-worker.",
+                    "业务目的: 减少操作入口和系统补偿状态不一致导致的人工排查。",
+                    "成功指标: 状态异常人工处理量下降 50%。",
+                    "现状: 当前已有列表重试按钮、/api/service-a/retry 后端接口、workflow-status topic 消费者和夜间补偿 Task。",
+                    "证据: baseline shows list page, /api/service-a/retry API, workflow-status topic, and nightly compensation Task.",
+                    "流程: 操作员在列表点击重试按钮，前端调用重试接口；后端复用处理服务并发送 workflow-status MQ；消费者刷新状态，夜间补偿 Task 处理超时未回调记录；无权限用户不可触发。",
+                    "入口: 列表重试按钮。",
+                    "入口: workflow-status MQ Consumer 消费状态消息。",
+                    "入口: 夜间状态补偿 Task。",
+                    "仓库: web-app owns retry button.",
+                    "仓库: service-a owns /api/service-a/retry API and workflow-status producer.",
+                    "仓库: workflow-worker owns workflow-status Consumer and nightly compensation Task.",
+                    "依赖: web-app -> service-a -> workflow-status topic -> workflow-worker.",
                     "状态: pending -> recalculating.",
                     "状态: recalculating -> calculated.",
-                    "重试策略: renewal-status Consumer fails can retry three times with dead-letter observation.",
-                    "幂等键: renewalId + calculationVersion.",
+                    "重试策略: workflow-status Consumer fails can retry three times with dead-letter observation.",
+                    "幂等键: itemId + calculationVersion.",
                     "超时规则: nightly Task scans recalculating records older than 30 minutes.",
-                    "补偿规则: timeout records are moved back to pending and emit renewal-status compensation event.",
+                    "补偿规则: timeout records are moved back to pending and emit workflow-status compensation event.",
                     "非法流转: calculated cannot transition back to recalculating without a new calculationVersion.",
-                    "Req: 运营可以对单个设备重新触发续费试算并修复状态不一致。",
-                    "Rule: 只有续费管理权限角色可以触发前端重新试算。",
-                    "AC: 有权限运营点击重新试算按钮后，接口返回成功且页面展示新的试算金额和试算时间。",
-                    "AC: renewal-status MQ 消费失败时可以重试且不会重复更新同一条状态。",
+                    "Req: 操作员可以对单个条目重新触发处理并修复状态不一致。",
+                    "Rule: 只有处理管理权限角色可以触发前端重试。",
+                    "AC: 有权限操作员点击重试按钮后，接口返回成功且页面展示新的状态和更新时间。",
+                    "AC: workflow-status MQ 消费失败时可以重试且不会重复更新同一条状态。",
                     "AC: 夜间补偿 Task 只处理超时未回调记录。",
-                    "AC: 无权限角色看不到重新试算按钮且直接调用接口返回无权限。",
+                    "AC: 无权限角色看不到重试按钮且直接调用接口返回无权限。",
                 ]
             ),
         )
         with tempfile.TemporaryDirectory() as tmp:
             evidence_root = Path(tmp)
             (evidence_root / "api_surface.json").write_text(json.dumps({
-                "project": "sigreal-operate-platform",
-                "routes": [{"method": "POST", "route": "/renewal/recalculate", "file": "RenewalController.java"}],
+                "project": "service-a",
+                "routes": [{"method": "POST", "route": "/api/service-a/retry", "file": "RetryController.java"}],
             }, ensure_ascii=False), encoding="utf-8")
             (evidence_root / "code_index.json").write_text(json.dumps({
-                "symbols": ["RenewalStatusConsumer", "NightlyRenewalCompensationTask"],
+                "symbols": ["WorkflowStatusConsumer", "NightlyCompensationTask"],
             }, ensure_ascii=False), encoding="utf-8")
             (evidence_root / "config_surface.json").write_text(json.dumps({
-                "items": [{"key": "rocketmq.topic.renewal-status", "value": "renewal-status"}],
+                "items": [{"key": "rocketmq.topic.workflow-status", "value": "workflow-status"}],
             }, ensure_ascii=False), encoding="utf-8")
             (evidence_root / "baseline.json").write_text(json.dumps({
-                "project": "sigreal-operate-platform",
-                "module_hints": [{"module": "renewal"}],
-                "fields": ["renewal_status", "retry_count", "calculation_version", "updated_at"],
+                "project": "service-a",
+                "module_hints": [{"module": "workflow"}],
+                "fields": ["workflow_status", "retry_count", "calculation_version", "updated_at"],
             }, ensure_ascii=False), encoding="utf-8")
             (evidence_root / "dependency_surface.json").write_text(json.dumps({
-                "dependencies": ["sigreal-operate-platform -> renewal-status topic -> renewal-worker"],
+                "dependencies": ["service-a -> workflow-status topic -> workflow-worker"],
             }, ensure_ascii=False), encoding="utf-8")
             evidence_backed = spec_governor.normalize(
                 "REQ-BENCH-EVIDENCE",
-                "续费重新试算",
+                "流程重试",
                 "\n".join([
-                    "业务目的: 减少续费状态不一致导致的人工排查。",
-                    "成功指标: 续费状态异常人工处理量下降 50%。",
-                    "流程: 运营点击重新试算后，后端接口发送 renewal-status MQ，Consumer 刷新续费状态。",
-                    "入口: 续费列表重新试算按钮。",
+                    "业务目的: 减少状态不一致导致的人工排查。",
+                    "成功指标: 状态异常人工处理量下降 50%。",
+                    "流程: 操作员点击重试后，后端接口发送 workflow-status MQ，Consumer 刷新状态。",
+                    "入口: 列表重试按钮。",
                     "状态: pending -> recalculating.",
                     "状态: recalculating -> calculated.",
-                    "重试策略: renewal-status Consumer fails can retry three times.",
-                    "幂等键: renewalId + calculationVersion.",
+                    "重试策略: workflow-status Consumer fails can retry three times.",
+                    "幂等键: itemId + calculationVersion.",
                     "补偿规则: retry exhausted records remain recalculating and are picked by the nightly compensation task.",
                     "非法流转: calculated cannot transition back to recalculating without a new calculationVersion.",
-                    "Req: 运营可以重新触发续费试算。",
-                    "AC: 接口成功后页面展示新的试算金额和试算时间。",
-                    "AC: renewal-status MQ 消费失败时可以重试且不会重复更新同一条状态。",
+                    "Req: 操作员可以重新触发处理。",
+                    "AC: 接口成功后页面展示新的状态和更新时间。",
+                    "AC: workflow-status MQ 消费失败时可以重试且不会重复更新同一条状态。",
                 ]),
                 spec_governor.load_project_evidence(evidence_root),
             )
