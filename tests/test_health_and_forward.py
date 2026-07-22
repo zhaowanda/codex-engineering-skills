@@ -67,6 +67,8 @@ forward_test = load_module("forward_test", ROOT / "skills/core/forward-test-runn
 scenario_catalog = load_module("scenario_catalog", ROOT / "scripts/scenario_catalog.py")
 benchmark = load_module("benchmark", ROOT / "skills/core/benchmark-governor/scripts/benchmark.py")
 implement_dry_run = load_module("implement_dry_run", ROOT / "scripts/implement_dry_run.py")
+codex_eng = load_module("codex_eng_module", ROOT / "scripts/codex_eng.py")
+workflow_contract = load_module("workflow_contract_module", ROOT / "skills/core/delivery-runner/scripts/workflow_contract.py")
 
 
 def test_skill_health_runs_on_repo() -> None:
@@ -212,7 +214,7 @@ def test_workflow_profiles_reference_existing_skills() -> None:
         for path in (ROOT / "skills").glob("*/*/SKILL.md")
     }
     profile_names = {item["name"] for item in profiles["profiles"]}
-    assert {"bugfix", "small_feature", "frontend_change", "cross_repo_api", "data_migration", "release_readiness"}.issubset(profile_names)
+    assert {"bugfix", "bugfix-lite", "small_feature", "small_feature-lite", "frontend_change", "cross_repo_api", "data_migration", "release_readiness"}.issubset(profile_names)
     for profile in profiles["profiles"]:
         required = profile.get("required_skills", [])
         assert required
@@ -938,6 +940,21 @@ def test_scenario_catalog_documents_supported_development_scenarios() -> None:
             assert "architecture_design.json" not in item["evidence"]
 
 
+def test_scenario_guide_matches_catalog_renderer() -> None:
+    guide = (ROOT / "docs/scenario-guide.md").read_text(encoding="utf-8")
+    assert guide == scenario_catalog.render_markdown()
+
+
+def test_workflow_guide_profile_section_matches_catalog_renderer() -> None:
+    workflow = (ROOT / "docs/workflow-guide.md").read_text(encoding="utf-8")
+    start = scenario_catalog.WORKFLOW_GUIDE_MARKER_START
+    end = scenario_catalog.WORKFLOW_GUIDE_MARKER_END
+    assert start in workflow
+    assert end in workflow
+    expected_block = f"{start}\n{scenario_catalog.render_workflow_profile_markdown().rstrip()}\n{end}"
+    assert expected_block in workflow
+
+
 def test_codex_eng_scenarios_cli_runs() -> None:
     proc = subprocess.run(
         [sys.executable, "scripts/codex_eng.py", "scenarios"],
@@ -1394,6 +1411,82 @@ def test_codex_eng_implement_dry_run_cli_runs() -> None:
         assert "missing_gates" in proc.stdout
 
 
+def test_codex_eng_post_change_human_render_includes_push_projection() -> None:
+    text = codex_eng.render_post_change_human({
+        "decision": "block",
+        "repo": "/tmp/repo",
+        "branch": "feature/test",
+        "head": "abc1234",
+        "changed_files": ["src/api/orders.py"],
+        "push_readiness_projection": {
+            "decision": "block",
+            "worktree_clean": False,
+            "missing_artifacts": ["test_evidence_gate.json"],
+            "blockers": [{"source": "project_skill_index_sync", "message": "project skill index synchronization is not satisfied"}],
+        },
+        "blockers": [],
+    })
+
+    assert "Codex post-change report" in text
+    assert "push_readiness: block" in text
+    assert "missing_pre_push_artifacts:" in text
+    assert "project_skill_index_sync" in text
+
+
+def test_codex_eng_status_human_includes_pre_push_readiness() -> None:
+    text = codex_eng.render_status_human({
+        "artifact_dir": "/tmp/artifacts",
+        "workflow_profile": {"name": "small_feature"},
+        "next_stage": "review",
+        "next_action_type": "fix_blocker",
+        "can_implement": False,
+        "can_release": False,
+        "primary_blocker_stage": "review",
+        "primary_blockers": [{"source": "design_review", "message": "design review is still blocked"}],
+        "downstream_blockers": [{"source": "docs_quality", "message": "docs quality waits on design"}],
+        "primary_next_action": {"summary": "fix blocker", "command": "python3 scripts/codex_eng.py next"},
+        "pre_push_readiness": {
+            "decision": "block",
+            "blockers": [{"source": "project_skill_index_sync", "message": "project skill index synchronization is not satisfied"}],
+        },
+        "blockers": [],
+        "next_command": "python3 scripts/codex_eng.py next",
+        "next_profile_command": "",
+    })
+
+    assert "pre_push_readiness: block" in text
+    assert "primary_blocker_stage: review" in text
+    assert "primary_blockers:" in text
+    assert "downstream_blockers:" in text
+    assert "pre_push_blockers:" in text
+    assert "project_skill_index_sync" in text
+
+
+def test_codex_eng_status_human_shows_pre_push_next_summary() -> None:
+    text = codex_eng.render_status_human({
+        "artifact_dir": "/tmp/artifacts",
+        "workflow_profile": {"name": "small_feature"},
+        "next_stage": "review",
+        "next_action_type": "fix_blocker",
+        "can_implement": False,
+        "can_release": False,
+        "primary_next_action": {
+            "summary": "pre_push: project_skill_index_sync: project skill index synchronization is not satisfied",
+            "command": "python3 scripts/codex_eng.py post-change --artifact-dir /tmp/artifacts --repo /tmp/repo",
+        },
+        "pre_push_readiness": {
+            "decision": "block",
+            "blockers": [{"source": "project_skill_index_sync", "message": "project skill index synchronization is not satisfied"}],
+        },
+        "blockers": [],
+        "next_command": "python3 scripts/codex_eng.py post-change --artifact-dir /tmp/artifacts --repo /tmp/repo",
+        "next_profile_command": "",
+    })
+
+    assert "next_summary: pre_push: project_skill_index_sync: project skill index synchronization is not satisfied" in text
+    assert "next_command: python3 scripts/codex_eng.py post-change" in text
+
+
 def test_benchmark_reports_scenario_coverage_metrics() -> None:
     result = benchmark.report(ROOT)
     metrics = result["metrics"]
@@ -1402,6 +1495,7 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["setup_command_available"] is True
     assert metrics["next_command_available"] is True
     assert metrics["implement_dry_run_available"] is True
+    assert metrics["post_change_command_available"] is True
     assert metrics["human_output_available"] is True
     assert metrics["profile_scoring_available"] is True
     assert metrics["scenario_count"] >= 8
@@ -1427,6 +1521,31 @@ def test_benchmark_reports_scenario_coverage_metrics() -> None:
     assert metrics["cross_repo_cycle_block_test_available"] is True
     assert metrics["cross_repo_profile_artifact_step_available"] is True
     assert metrics["cross_repo_auto_runner_generation_available"] is True
+
+
+def test_benchmark_run_json_reports_timeout() -> None:
+    result = benchmark.run_json(
+        ROOT,
+        ["python3", "-c", "import time; time.sleep(1.5)"],
+        timeout_seconds=1,
+    )
+    assert result["returncode"] == 124
+    assert result["timed_out"] is True
+    assert "timed out after 1s" in result["stderr"]
+
+
+def test_workflow_contract_git_context_respects_pure_mode() -> None:
+    import os
+
+    previous = os.environ.get("CODEX_PURE_MODE")
+    os.environ["CODEX_PURE_MODE"] = "1"
+    try:
+        assert workflow_contract.git_context(ROOT) == {}
+    finally:
+        if previous is None:
+            os.environ.pop("CODEX_PURE_MODE", None)
+        else:
+            os.environ["CODEX_PURE_MODE"] = previous
 
 
 def run_all() -> None:
@@ -1483,6 +1602,8 @@ def run_all() -> None:
     test_implement_dry_run_accepts_git_plan_summary()
     test_implement_dry_run_uses_configured_docs_root_by_default()
     test_codex_eng_implement_dry_run_cli_runs()
+    test_codex_eng_post_change_human_render_includes_push_projection()
+    test_codex_eng_status_human_includes_pre_push_readiness()
     test_benchmark_reports_scenario_coverage_metrics()
 
 

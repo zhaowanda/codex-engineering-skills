@@ -181,6 +181,9 @@ def test_post_change_sync_generates_report_from_git_changes() -> None:
         assert result["baseline_update_candidates"]
         assert result["project_skill_sync_candidates"]
         assert result["project_skill_index_requirements"]["status"] == "missing_evidence"
+        assert result["push_readiness_projection"]["decision"] == "block"
+        assert "post_implementation_traceability_matrix.json" in result["push_readiness_projection"]["missing_artifacts"]
+        assert any(item["source"] == "project_skill_index_sync" for item in result["push_readiness_projection"]["blockers"])
         assert (artifact_dir / "post_change_implementation_report.json").exists()
         assert post_change_sync.validate(result)["decision"] == "block"
         write_json(
@@ -191,9 +194,16 @@ def test_post_change_sync_generates_report_from_git_changes() -> None:
                 "updated_index_paths": ["company/demo/references/code-index.md"],
             },
         )
+        write_json(artifact_dir / "post_implementation_traceability_matrix.json", {"decision": "pass"})
+        write_json(artifact_dir / "test_evidence_gate.json", {"decision": "pass"})
+        write_json(artifact_dir / "code_review_gate.json", {"decision": "pass"})
+        write_json(artifact_dir / "harness/post_implementation.json", {"decision": "pass"})
+        subprocess.run(["git", "add", "src/api/orders.py"], cwd=repo, text=True, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "feature"], cwd=repo, text=True, capture_output=True, check=True)
         satisfied = post_change_sync.generate(repo, artifact_dir, doc_id="REQ-1")
         assert satisfied["decision"] in {"pass", "warn"}
-        assert satisfied["project_skill_index_requirements"]["status"] == "satisfied"
+        assert satisfied["project_skill_index_requirements"]["status"] == "not_required"
+        assert satisfied["push_readiness_projection"]["decision"] == "pass"
         assert post_change_sync.validate(satisfied)["decision"] == "pass"
 
 
@@ -251,6 +261,8 @@ def test_post_change_sync_blocks_required_docs_when_unbound() -> None:
         result = post_change_sync.generate(repo, artifact_dir, require_docs=True)
         assert result["decision"] == "block"
         assert any(item["source"] in {"docs_root", "doc_id"} for item in result["blockers"])
+        assert result["push_readiness_projection"]["decision"] == "block"
+        assert any(item["source"] == "docs_sync" for item in result["push_readiness_projection"]["blockers"])
 
 
 def test_synthetic_e2e_runner_completes_core_flow() -> None:

@@ -1036,6 +1036,24 @@ def test_sync_blocks_upstream_block_with_downstream_pass_projection() -> None:
         assert docs_governor.validate(root / "docs", doc_id)["decision"] == "block"
 
 
+def test_sync_projection_precheck_skips_canonical_write_on_state_conflict() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-STATE-PRECHECK"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "decision": "block"})
+        write_json(artifact_dir / "open_questions.json", {"schema": "codex-open-questions-v1", "doc_id": doc_id, "decision": "pass", "questions": []})
+        write_json(artifact_dir / "technical_design.json", {"schema": "codex-technical-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "architecture_design.json", {"schema": "codex-architecture-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "design_architecture_review.json", {"schema": "codex-design-architecture-review-v1", "doc_id": doc_id, "decision": "pass", "blockers": []})
+
+        result = docs_governor.sync(root / "docs", doc_id, artifact_dir, "State precheck")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in result["blockers"])
+        assert not (root / "docs" / "deliveries" / doc_id / "artifacts" / "spec.json").exists()
+
+
 def test_validate_blocks_stale_canonical_delivery_projection() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

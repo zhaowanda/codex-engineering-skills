@@ -8,6 +8,7 @@ import json
 import py_compile
 import re
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -387,7 +388,23 @@ def assigned_names(node: ast.Assign | ast.AnnAssign) -> set[str]:
     }
 
 
-def skill_test_aliases(source: str, tree: ast.Module, identifiers: set[str]) -> set[str]:
+def node_source_segment(source_lines: list[str], node: ast.AST) -> str:
+    start = getattr(node, "lineno", None)
+    end = getattr(node, "end_lineno", None)
+    if not isinstance(start, int) or not isinstance(end, int) or start < 1 or end < start:
+        return ""
+    segment_lines = source_lines[start - 1:end]
+    if not segment_lines:
+        return ""
+    first_col = getattr(node, "col_offset", 0) or 0
+    last_col = getattr(node, "end_col_offset", None)
+    segment_lines[0] = segment_lines[0][first_col:]
+    if isinstance(last_col, int):
+        segment_lines[-1] = segment_lines[-1][:last_col]
+    return "".join(segment_lines)
+
+
+def skill_test_aliases(source_lines: list[str], tree: ast.Module, identifiers: set[str]) -> set[str]:
     assignments: list[tuple[set[str], str, set[str]]] = []
     for node in tree.body:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -398,7 +415,7 @@ def skill_test_aliases(source: str, tree: ast.Module, identifiers: set[str]) -> 
         assignments.append(
             (
                 assigned_names(node),
-                ast.get_source_segment(source, value) or "",
+                node_source_segment(source_lines, value),
                 {child.id for child in ast.walk(value) if isinstance(child, ast.Name)},
             )
         )
@@ -416,6 +433,41 @@ def skill_test_aliases(source: str, tree: ast.Module, identifiers: set[str]) -> 
     return aliases
 
 
+@lru_cache(maxsize=8)
+def test_behavior_index(root_str: str) -> tuple[dict[str, Any], ...]:
+    root = Path(root_str)
+    indexed: list[dict[str, Any]] = []
+    for path in (root / "tests").glob("test_*.py"):
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        source_lines = source.splitlines(keepends=True)
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        assignments: list[dict[str, Any]] = []
+        tests: list[dict[str, Any]] = []
+        for node in tree.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                value = node.value
+                if value is None:
+                    continue
+                assignments.append({
+                    "targets": assigned_names(node),
+                    "segment": node_source_segment(source_lines, value),
+                    "dependencies": {child.id for child in ast.walk(value) if isinstance(child, ast.Name)},
+                })
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
+                continue
+            tests.append({
+                "name": node.name,
+                "segment": node_source_segment(source_lines, node),
+                "referenced_names": {child.id for child in ast.walk(node) if isinstance(child, ast.Name)},
+            })
+        indexed.append({"assignments": assignments, "tests": tests})
+    return tuple(indexed)
+
+
 def behavior_test_signals(root: Path, skill_name: str) -> tuple[int, int]:
     identifiers = {
         skill_name,
@@ -426,22 +478,33 @@ def behavior_test_signals(root: Path, skill_name: str) -> tuple[int, int]:
     positive = 0
     negative = 0
     negative_terms = {"block", "reject", "invalid", "missing", "stale", "tamper", "empty", "fail", "deny"}
-    for path in (root / "tests").glob("test_*.py"):
-        source = path.read_text(encoding="utf-8", errors="ignore")
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            continue
-        aliases = skill_test_aliases(source, tree, identifiers)
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
+    for file_data in test_behavior_index(str(root.resolve())):
+        assignments = file_data.get("assignments", [])
+        aliases: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for item in assignments:
+                targets = item.get("targets", set())
+                segment = str(item.get("segment", ""))
+                dependencies = item.get("dependencies", set())
+                if any(identifier and identifier in segment for identifier in identifiers) or dependencies & aliases:
+                    additions = set(targets) - aliases
+                    if additions:
+                        aliases.update(additions)
+                        changed = True
+        for test in file_data.get("tests", []):
+            referenced_names = set(test.get("referenced_names", set()))
+            if referenced_names & aliases:
+                positive += 1
+                if any(term in str(test.get("name", "")).lower() for term in negative_terms):
+                    negative += 1
                 continue
-            segment = ast.get_source_segment(source, node) or ""
-            referenced_names = {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
-            if not any(identifier and identifier in segment for identifier in identifiers) and not referenced_names & aliases:
+            segment = str(test.get("segment", ""))
+            if not any(identifier and identifier in segment for identifier in identifiers):
                 continue
             positive += 1
-            if any(term in node.name.lower() for term in negative_terms):
+            if any(term in str(test.get("name", "")).lower() for term in negative_terms):
                 negative += 1
     return positive, negative
 
@@ -741,6 +804,8 @@ def check(root: Path) -> dict[str, Any]:
                     if artifact_name and artifact_name not in seen_artifacts:
                         blockers.append({"source": f"workflow_profile.{profile.get('name')}", "message": "required gate artifact is not registered in workflow stages", "artifact": artifact_name})
                 if profile.get("profile_stage_mode") == "release_only":
+                    continue
+                if profile.get("profile_stage_mode") == "lightweight_pre_edit":
                     continue
                 required_skills = {str(item) for item in as_list(profile.get("required_skills"))}
                 impacts = {str(item) for item in as_list(profile.get("trigger_impacts"))}

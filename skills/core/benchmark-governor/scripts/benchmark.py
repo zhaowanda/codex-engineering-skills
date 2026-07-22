@@ -6,6 +6,7 @@ import importlib.util
 import json
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -13,24 +14,83 @@ from typing import Any
 
 SCHEMA = "codex-benchmark-report-v1"
 SCHEMA_RE = re.compile(r"codex-[a-z0-9-]+-v\d+")
+DEFAULT_TIMEOUT_SECONDS = 90
 
 
 def load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def run_json(root: Path, cmd: list[str]) -> dict[str, Any]:
-    proc = subprocess.run(cmd, cwd=root, text=True, capture_output=True)
+def call_module(root: Path, module_name: str, path: Path, fn_name: str, *args: Any) -> dict[str, Any]:
+    try:
+        module = load_module(module_name, path)
+        fn = getattr(module, fn_name)
+        result = fn(*args)
+        if isinstance(result, dict):
+            decision = str(result.get("decision") or "")
+            return {
+                "returncode": 0 if decision in {"pass", "ready", "approve", "go"} else 1,
+                "json": result,
+                "stderr": "",
+                "stdout": "",
+                "timed_out": False,
+                "command": [fn_name],
+                "timeout_seconds": 0,
+            }
+    except Exception as exc:
+        return {
+            "returncode": 1,
+            "json": {},
+            "stderr": str(exc),
+            "stdout": "",
+            "timed_out": False,
+            "command": [fn_name],
+            "timeout_seconds": 0,
+        }
+    return {
+        "returncode": 1,
+        "json": {},
+        "stderr": f"{fn_name} did not return a dict",
+        "stdout": "",
+        "timed_out": False,
+        "command": [fn_name],
+        "timeout_seconds": 0,
+    }
+
+
+def run_json(root: Path, cmd: list[str], timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    try:
+        proc = subprocess.run(cmd, cwd=root, text=True, capture_output=True, timeout=timeout_seconds, check=False)
+        timed_out = False
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "returncode": 124,
+            "json": {},
+            "stderr": f"timed out after {timeout_seconds}s",
+            "stdout": (exc.stdout or "").strip() if isinstance(exc.stdout, str) else "",
+            "timed_out": True,
+            "command": cmd,
+            "timeout_seconds": timeout_seconds,
+        }
     data: Any = {}
     try:
         data = json.loads(proc.stdout)
     except Exception:
         data = {}
-    return {"returncode": proc.returncode, "json": data if isinstance(data, dict) else {}, "stderr": proc.stderr.strip()}
+    return {
+        "returncode": proc.returncode,
+        "json": data if isinstance(data, dict) else {},
+        "stderr": proc.stderr.strip(),
+        "stdout": proc.stdout.strip(),
+        "timed_out": timed_out,
+        "command": cmd,
+        "timeout_seconds": timeout_seconds,
+    }
 
 
 def requirement_understanding_strict(root: Path) -> bool:
@@ -213,10 +273,27 @@ def report(root: Path) -> dict[str, Any]:
         workflow_profiles = skill_health.load_restricted_yaml(root / "config/workflow-profiles.example.yaml").get("profiles", [])
     except Exception:
         workflow_profiles = []
-    privacy = run_json(root, ["python3", "scripts/privacy_scan.py", "--root", ".", "--patterns", "config/private-patterns.example.yaml"])
-    health = run_json(root, ["python3", "skills/core/skill-health/scripts/skill_health.py", "--root", "."])
-    forward = run_json(root, ["python3", "skills/core/forward-test-runner/scripts/forward_test.py", "--root", "."])
-    replay = run_json(root, ["python3", "skills/core/delivery-case-capture/scripts/capture_case.py", "--validate-replay-dir", "examples/replay-cases"])
+    privacy_module = load_module("privacy_scan_for_benchmark", root / "scripts/privacy_scan.py")
+    privacy_hits = privacy_module.scan(root, privacy_module.load_simple_yaml(root / "config/private-patterns.example.yaml"))
+    privacy = {
+        "returncode": 0 if not privacy_hits else 1,
+        "json": {
+            "schema": "codex-engineering-skills-privacy-scan-v1",
+            "root": str(root.resolve()),
+            "patterns": str((root / "config/private-patterns.example.yaml").resolve()),
+            "hit_count": len(privacy_hits),
+            "decision": "pass" if not privacy_hits else "block",
+            "hits": [hit.__dict__ for hit in privacy_hits],
+        },
+        "stderr": "",
+        "stdout": "",
+        "timed_out": False,
+        "command": ["scan"],
+        "timeout_seconds": 0,
+    }
+    health = call_module(root, "skill_health_for_benchmark_call", root / "skills/core/skill-health/scripts/skill_health.py", "check", root)
+    forward = call_module(root, "forward_test_for_benchmark_call", root / "skills/core/forward-test-runner/scripts/forward_test.py", "run", root, True)
+    replay = call_module(root, "capture_case_for_benchmark_call", root / "skills/core/delivery-case-capture/scripts/capture_case.py", "validate_replay_dir", root / "examples/replay-cases")
     with tempfile.TemporaryDirectory() as tmp:
         cross_repo = run_json(root, ["python3", "skills/core/cross-repo-planner/scripts/cross_repo_plan.py", "plan", "--example", "--out-dir", tmp])
         cross_repo_validation = run_json(root, ["python3", "skills/core/cross-repo-planner/scripts/cross_repo_plan.py", "validate", "--graph", f"{tmp}/cross_repo_execution_graph.json"])
@@ -287,6 +364,20 @@ def report(root: Path) -> dict[str, Any]:
     design_template_gate = quality_gates.get("design_template_regression", {}) if isinstance(quality_gates.get("design_template_regression"), dict) else {}
     requirement_understanding_gate = requirement_understanding_strict(root)
     blockers: list[dict[str, Any]] = []
+    subprocess_results = {
+        "privacy_scan": privacy,
+        "skill_health": health,
+        "forward_test": forward,
+        "replay_cases": replay,
+        "cross_repo_plan": cross_repo,
+        "cross_repo_validate": cross_repo_validation,
+    }
+    for source, result in subprocess_results.items():
+        if result.get("timed_out"):
+            blockers.append({
+                "source": source,
+                "message": f"benchmark subprocess timed out after {result.get('timeout_seconds', DEFAULT_TIMEOUT_SECONDS)}s",
+            })
     if privacy["returncode"] != 0:
         blockers.append({"source": "privacy_scan", "message": "privacy scan failed"})
     if health["json"].get("decision") == "block":
@@ -330,6 +421,7 @@ def report(root: Path) -> dict[str, Any]:
             "setup_command_available": "sub.add_parser(\"setup\")" in cli_text,
             "next_command_available": "sub.add_parser(\"next\")" in cli_text,
             "implement_dry_run_available": "sub.add_parser(\"implement\")" in cli_text and (root / "scripts/implement_dry_run.py").exists(),
+            "post_change_command_available": "sub.add_parser(\"post-change\")" in cli_text and "render_post_change_human" in cli_text,
             "human_output_available": "--format" in cli_text and "render_auto_human" in cli_text,
             "profile_scoring_available": "profile_selection_confidence" in auto_runner_text and "profile_selection_candidates" in auto_runner_text,
             "scenario_catalog_count": scenario_catalog_count,
@@ -376,6 +468,16 @@ def report(root: Path) -> dict[str, Any]:
             "cross_repo_cycle_block_test_available": cross_repo_cycle_validation.get("decision") == "block",
             "cross_repo_profile_artifact_step_available": cross_repo_profile_artifact_step_available,
             "cross_repo_auto_runner_generation_available": cross_repo_auto_runner_generation_available,
+            "timeout_count": sum(1 for item in subprocess_results.values() if item.get("timed_out")),
+            "timed_out_commands": [
+                {
+                    "source": source,
+                    "command": " ".join(str(part) for part in item.get("command", [])),
+                    "timeout_seconds": item.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS),
+                }
+                for source, item in subprocess_results.items()
+                if item.get("timed_out")
+            ],
         },
         "blockers": blockers,
     }

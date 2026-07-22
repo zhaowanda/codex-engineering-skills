@@ -36,6 +36,18 @@ def load_workflow_contract_module() -> Any:
 WORKFLOW_CONTRACT = load_workflow_contract_module()
 
 
+def load_summary_contract_module() -> Any:
+    path = ROOT / "skills/core/delivery-runner/scripts/summary_contract.py"
+    spec = importlib.util.spec_from_file_location("auto_runner_summary_contract", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SUMMARY_CONTRACT = load_summary_contract_module()
+
+
 def load_agent_runtime_module() -> Any:
     path = ROOT / "skills/core/auto-runner/scripts/agent_runtime.py"
     spec = importlib.util.spec_from_file_location("auto_runner_agent_runtime", path)
@@ -278,14 +290,14 @@ def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifac
 def run_docs_quality(docs_root: Path | None, docs_sync: dict[str, Any], out: Path) -> dict[str, Any]:
     quality_path = out / "docs_quality.json"
     if not docs_root or docs_sync.get("decision") != "pass":
-        result = {
+        quality_path.unlink(missing_ok=True)
+        return {
             "schema": "codex-docs-quality-aggregate-v1",
-            "decision": "block",
-            "blockers": [{"source": "docs_sync", "message": "docs sync must pass before docs quality review"}],
+            "decision": "not_applicable",
+            "reason": "docs sync must pass before docs quality review",
+            "blockers": [],
             "reviews": [],
         }
-        write_json(quality_path, result)
-        return result
     reviews: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -593,6 +605,71 @@ def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any]
     return blockers
 
 
+def artifact_decision(data: dict[str, Any]) -> str:
+    return str(data.get("decision") or data.get("status") or "")
+
+
+def unique_blockers(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = (str(item.get("source") or ""), str(item.get("message") or ""))
+        if key in seen:
+            continue
+        unique.append(item)
+        seen.add(key)
+    return unique
+
+
+def not_applicable_gate(schema: str, reason: str, source: str = "workflow") -> dict[str, Any]:
+    return {
+        "schema": schema,
+        "decision": "not_applicable",
+        "reason": reason,
+        "blockers": [{"source": source, "message": reason}],
+    }
+
+
+def design_phase_blockers(out: Path, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blockers = [item for item in collect_blockers(steps, {}, include_inspect=False) if isinstance(item, dict)]
+    stage_artifacts = {
+        "spec": out / "spec.json",
+        "open_questions": out / "open_questions.json",
+        "technical_design": out / "technical_design.json",
+        "architecture_design": out / "architecture_design.json",
+        "test_design": out / "test_design.json",
+        "delivery_plan": out / "delivery_plan.json",
+        "delivery_plan_review": out / "delivery_plan_review.json",
+        "design_review": out / "design_architecture_review.json",
+        "harness_design": out / "harness_validation.json",
+    }
+    accepted = {
+        "spec": {"pass", "ready_for_design"},
+        "open_questions": {"pass", "ready", "answered"},
+        "technical_design": {"pass", "ready"},
+        "architecture_design": {"pass", "ready"},
+        "test_design": {"pass", "ready"},
+        "delivery_plan": {"pass", "ready"},
+        "delivery_plan_review": {"pass", "ready", "approved"},
+        "design_review": {"pass", "approved"},
+        "harness_design": {"pass"},
+    }
+    for source, path in stage_artifacts.items():
+        data = read_json(path)
+        if not data:
+            continue
+        decision = artifact_decision(data)
+        if decision and decision not in accepted[source]:
+            blockers.append({"source": source, "message": f"artifact decision is {decision}"})
+        for key in ["blockers", "active_blockers", "missing_evidence"]:
+            value = data.get(key)
+            if value:
+                blockers.append({"source": source, "message": f"{key} present"})
+    return unique_blockers(blockers)
+
+
 def source_location_readiness(out: Path, project_out: Path | None = None) -> dict[str, Any]:
     source_path = (project_out / "source_location_evidence.json") if project_out else out / "source_location_evidence.json"
     bundle_path = (project_out / "evidence_bundle.json") if project_out else out / "evidence_bundle.json"
@@ -653,9 +730,16 @@ def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_rep
     name = str(profile.get("name") or "")
     score = 0
     signals: list[str] = []
+    simple_defect_impacts = {"business_flow", "workflow", "state", "status"}
     if explicit_profile and explicit_profile == name:
         score += 100
         signals.append("explicit_profile")
+    if name == "small_feature-lite" and lane == "small_change" and not impacts and not has_repo:
+        score += 70
+        signals.append("lite_small_change")
+    if name == "bugfix-lite" and lane in {"bugfix", "hotfix"} and impacts.issubset(simple_defect_impacts):
+        score += 70
+        signals.append("lite_defect")
     trigger_lanes = {str(item) for item in as_list(profile.get("trigger_lanes"))}
     if lane and lane in trigger_lanes:
         score += 45
@@ -665,7 +749,7 @@ def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_rep
     if matched_impacts:
         score += 35 + (5 * len(matched_impacts))
         signals.extend(f"impact:{item}" for item in matched_impacts)
-    if has_repo and name != "small_feature":
+    if has_repo and name not in {"small_feature", "small_feature-lite"}:
         score += 5
         signals.append("repo_context")
     if {"data", "security"} & impacts and name == "data_migration":
@@ -674,7 +758,7 @@ def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_rep
     if lane in {"bugfix", "hotfix"} and name in {"bugfix", "hotfix"}:
         score += 60
         signals.append("defect_containment")
-    if not signals and name == "small_feature":
+    if not signals and name in {"small_feature", "small_feature-lite"}:
         score += 5
         signals.append("default_fallback")
     return {"profile": name, "score": score, "signals": signals}
@@ -702,7 +786,13 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
     workflow_surface = impacts & {"business_flow", "workflow", "state", "status"}
     mixed_complexity = bool(workflow_surface and impacts & {"api", "cross_repo", "integration", "data", "permission"})
     reasons: list[str] = []
-    if impacts & regulated_impacts or "data_migration" in profile_name:
+    if profile_name == "small_feature-lite" and not impacts:
+        reasons.append("lite small-feature profile with no declared impact")
+        tier = "light"
+    elif profile_name == "bugfix-lite" and impacts <= workflow_surface:
+        reasons.append("lite bugfix profile without elevated impact")
+        tier = "light"
+    elif impacts & regulated_impacts or "data_migration" in profile_name:
         reasons.extend(sorted(impacts & regulated_impacts) or ["data_migration_profile"])
         tier = "regulated"
     elif mixed_complexity:
@@ -779,6 +869,14 @@ def effective_profile_for_strictness(profile: dict[str, Any], strictness: dict[s
     effective["expected_artifacts"] = controls["expected_artifacts"]
     effective["strictness_gate_overrides"] = controls["gate_overrides"]
     return effective
+
+
+def required_gate_artifact_names(profile: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for item in as_list(profile.get("required_gate_artifacts")):
+        if isinstance(item, dict) and item.get("artifact"):
+            names.append(str(item["artifact"]))
+    return names
 
 
 def strictness_gate_gaps(profile: dict[str, Any], strictness: dict[str, Any]) -> list[dict[str, Any]]:
@@ -898,44 +996,54 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
         mode = "explicit_profile"
         reason = "Profile was explicitly requested."
     elif lane in {"bugfix", "hotfix"}:
-        base_profile = profiles.get("bugfix", {})
-        for profile in profiles.values():
-            if lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
-                base_profile = profile
-                break
-        mode = "lane"
-        reason = f"Spec lane {lane} anchors defect containment; impact overlays are merged instead of replacing bugfix gates."
-    else:
-        priority = [
-            ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
-            ("database", "data_migration", "Database changes require migration, rollback, performance, and release evidence gates."),
-            ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
-            ("permission", "data_migration", "Permission changes require security, test, and release evidence gates."),
-            ("configuration", "data_migration", "Configuration changes require configuration, rollback, and release evidence gates."),
-            ("performance", "data_migration", "Performance-sensitive changes require performance and release evidence gates."),
-            ("release", "data_migration", "Release-sensitive changes require production readiness gates."),
-            ("api", "cross_repo_api", "API changes require contract and traceability gates."),
-            ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
-            ("frontend", "frontend_change", "Frontend changes require browser acceptance evidence."),
-        ]
-        base_profile = {}
-        for impact, profile_name, item_reason in priority:
-            if impact in impacts and profile_name in profiles:
-                base_profile = profiles[profile_name]
-                mode = "impact_surface"
-                reason = item_reason
-                break
-        if not base_profile:
+        simple_defect_impacts = {"business_flow", "workflow", "state", "status"}
+        if impacts.issubset(simple_defect_impacts) and "bugfix-lite" in profiles:
+            base_profile = profiles["bugfix-lite"]
+            reason = "Simple defect without declared impact uses the lite bugfix workflow."
+        else:
+            base_profile = profiles.get("bugfix", {})
             for profile in profiles.values():
-                if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
+                if lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
                     base_profile = profile
-                    mode = "lane"
-                    reason = f"Spec lane {lane} is declared in profile trigger_lanes."
                     break
-        if not base_profile:
-            base_profile = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
-            mode = "fallback"
-            reason = "No explicit, repository, impact, or lane trigger matched; using default small feature workflow."
+            reason = f"Spec lane {lane} anchors defect containment; impact overlays are merged instead of replacing bugfix gates."
+        mode = "lane"
+    else:
+        if lane == "small_change" and not impacts and not has_repo and "small_feature-lite" in profiles:
+            base_profile = profiles["small_feature-lite"]
+            mode = "lane"
+            reason = "Small single-scope request without declared impact uses the lite small-feature workflow."
+        else:
+            priority = [
+                ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
+                ("database", "data_migration", "Database changes require migration, rollback, performance, and release evidence gates."),
+                ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
+                ("permission", "data_migration", "Permission changes require security, test, and release evidence gates."),
+                ("configuration", "data_migration", "Configuration changes require configuration, rollback, and release evidence gates."),
+                ("performance", "data_migration", "Performance-sensitive changes require performance and release evidence gates."),
+                ("release", "data_migration", "Release-sensitive changes require production readiness gates."),
+                ("api", "cross_repo_api", "API changes require contract and traceability gates."),
+                ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
+                ("frontend", "frontend_change", "Frontend changes require browser acceptance evidence."),
+            ]
+            base_profile = {}
+            for impact, profile_name, item_reason in priority:
+                if impact in impacts and profile_name in profiles:
+                    base_profile = profiles[profile_name]
+                    mode = "impact_surface"
+                    reason = item_reason
+                    break
+            if not base_profile:
+                for profile in profiles.values():
+                    if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
+                        base_profile = profile
+                        mode = "lane"
+                        reason = f"Spec lane {lane} is declared in profile trigger_lanes."
+                        break
+            if not base_profile:
+                base_profile = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
+                mode = "fallback"
+                reason = "No explicit, repository, impact, or lane trigger matched; using default small feature workflow."
     overlay_names = [name for name in impact_overlay_profile_names(impacts, has_repo) if name in profiles and name != str(base_profile.get("name") or "")]
     overlays = [profiles[name] for name in overlay_names]
     selected = merge_workflow_profiles(base_profile, overlays) if overlays else base_profile
@@ -1608,7 +1716,7 @@ def run(
             "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
             "strictness_gate_gaps": strictness_gaps,
             "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
-            "required_gates": selected_profile.get("required_skills", []),
+            "required_gates": required_gate_artifact_names(selected_profile),
             "docs_readiness": docs_status,
             "docs_sync": docs_sync,
             "doc_language": effective_doc_language,
@@ -1816,7 +1924,7 @@ def run(
             "impact_applicability": applicability_decisions(spec_data),
             "workflow_strictness": strictness,
             "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
-            "required_gates": selected_profile.get("required_skills", []),
+            "required_gates": required_gate_artifact_names(selected_profile),
             "source_location_readiness": location_status,
             "docs_readiness": docs_status,
             "docs_sync": docs_sync,
@@ -2099,25 +2207,85 @@ def run(
         steps,
     )
 
+    finalize_runtime_lineage(out)
+    design_blockers = design_phase_blockers(out, steps)
+    if design_blockers:
+        strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+        location_status = source_location_readiness(out, project_out)
+        effective_profile = effective_profile_for_strictness(selected_profile, strictness)
+        strictness_gaps = strictness_gate_gaps(selected_profile, strictness)
+        design_blockers.extend(strictness_gaps)
+        design_blockers = unique_blockers(design_blockers)
+        primary_stage = SUMMARY_CONTRACT.primary_blocker_stage(design_blockers, "design_review")
+        next_command = "python3 scripts/codex_eng.py clarify --artifact-dir {}".format(out) if primary_stage == "requirements_clarification" else "Resolve design-stage blockers before docs sync or implementation readiness."
+        summary = {
+            "schema": SCHEMA,
+            "decision": "block",
+            "stage_result": {"decision": "block", "can_continue": False, "exit_code": 2, "blockers": design_blockers},
+            "doc_id": doc_id,
+            "title": title,
+            "input": str(input_path),
+            "out_dir": str(out),
+            "generated_artifacts": sorted(set(generated)),
+            "skipped_artifacts": skipped,
+            "steps": steps,
+            "workflow_metrics": workflow_metrics(steps, generated, skipped, selected_profile),
+            "workflow_profile": selected_profile,
+            "profile_selection_reason": profile_selection_reason,
+            "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
+            "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
+            "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
+            "workflow_strictness": strictness,
+            "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
+            "strictness_gate_gaps": strictness_gaps,
+            "required_gates": required_gate_artifact_names(selected_profile),
+            "source_location_readiness": location_status,
+            "docs_readiness": docs_status,
+            "docs_sync": not_applicable_gate("codex-docs-governor-sync-v1", "design-stage blockers prevent docs sync in this run", "docs_sync"),
+            "docs_quality": not_applicable_gate("codex-docs-quality-aggregate-v1", "docs quality review is skipped until design-stage blockers are resolved", "docs_quality"),
+            "doc_language": effective_doc_language,
+            "readiness_blockers": [],
+            "missing_profile_artifacts": [],
+            "profile_gate_gaps": [],
+            "next_profile_command": selected_profile.get("next_safe_command", ""),
+            "blockers": design_blockers,
+            "inspect_status": {},
+            "next_stage": primary_stage,
+            "next_command": next_command,
+            "can_implement": False,
+            "can_release": False,
+            "runtime_session": runtime_session,
+            "safety_boundary": "analysis_and_artifact_generation_only",
+            **SUMMARY_CONTRACT.summary_fields(
+                design_blockers,
+                primary_stage,
+                "fix_blocker",
+                next_command,
+                {
+                    "action_type": "fix_blocker",
+                    "stage": primary_stage,
+                    "summary": "resolve design-stage blockers",
+                    "command": next_command,
+                },
+            ),
+        }
+        write_json(out / "auto_run_summary.json", summary)
+        return summary
+
     effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
     docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
     if docs_sync.get("decision") == "pass":
         docs_status = docs_readiness(effective_docs_root, doc_id, out)
     docs_quality = run_docs_quality(effective_docs_root, docs_sync, out)
-    WORKFLOW_CONTRACT.bind_lineage(
-        out / "docs_quality.json",
-        "docs_quality",
-        workflow_stage_inputs(out / "docs_quality.json"),
-        command=["docs_quality", str(effective_docs_root or "")],
-        workspace=ROOT,
-    )
-    generated.append("docs_quality.json")
-    finalize_runtime_lineage(out)
-    if docs_sync.get("decision") == "pass":
-        final_docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
-        if final_docs_sync.get("decision") == "pass":
-            docs_sync = final_docs_sync
-            docs_status = docs_readiness(effective_docs_root, doc_id, out)
+    if (out / "docs_quality.json").exists():
+        WORKFLOW_CONTRACT.bind_lineage(
+            out / "docs_quality.json",
+            "docs_quality",
+            workflow_stage_inputs(out / "docs_quality.json"),
+            command=["docs_quality", str(effective_docs_root or "")],
+            workspace=ROOT,
+        )
+        generated.append("docs_quality.json")
 
     delivery_status = out / "delivery_status.json"
     inspect_command = [
@@ -2161,6 +2329,11 @@ def run(
     blockers.extend(readiness_blockers)
     blockers.extend({"source": "profile_artifact", "message": f"missing required artifact {name}"} for name in missing_profile)
     blockers.extend({"source": "profile_gate", **item} for item in gate_gaps)
+    blockers = unique_blockers(blockers)
+    next_stage = str(inspect_status.get("next_stage") or "")
+    next_action_type = str(inspect_status.get("next_action_type") or "")
+    next_command = str(inspect_status.get("next_command") or "")
+    primary_action = inspect_status.get("primary_next_action") if isinstance(inspect_status.get("primary_next_action"), dict) else None
     decision = "block" if blockers or not bool(inspect_status.get("can_implement")) else "pass"
     summary = {
         "schema": SCHEMA,
@@ -2183,7 +2356,7 @@ def run(
         "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
         "strictness_gate_gaps": strictness_gaps,
         "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
-        "required_gates": selected_profile.get("required_skills", []),
+        "required_gates": required_gate_artifact_names(selected_profile),
         "source_location_readiness": location_status,
         "docs_readiness": docs_status,
         "docs_sync": docs_sync,
@@ -2195,12 +2368,13 @@ def run(
         "next_profile_command": selected_profile.get("next_safe_command", ""),
         "blockers": blockers,
         "inspect_status": inspect_status,
-        "next_stage": inspect_status.get("next_stage", ""),
-        "next_command": inspect_status.get("next_command", ""),
+        "next_stage": next_stage,
+        "next_command": next_command,
         "can_implement": bool(inspect_status.get("can_implement")),
         "can_release": bool(inspect_status.get("can_release")),
         "runtime_session": runtime_session,
         "safety_boundary": "analysis_and_artifact_generation_only",
+        **SUMMARY_CONTRACT.summary_fields(blockers, next_stage, next_action_type, next_command, primary_action),
     }
     write_json(out / "auto_run_summary.json", summary)
     return summary

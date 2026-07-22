@@ -6268,6 +6268,15 @@ def sync(
     inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir) if design_sync else []
     generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id) if design_sync else {"generated": False, "reason": "runtime evidence is not needed for this human section"}
     sanitized_artifacts = [] if human_section != "all" else sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
+    projection_blockers = docs_projection_state_blockers(artifact_dir) if human_section == "all" else []
+    if projection_blockers:
+        update_delivery_projection_state(docs_root, doc_id, "block", projection_blockers)
+        return {
+            "schema": "codex-docs-governor-sync-v1",
+            "decision": "block",
+            "doc_id": doc_id,
+            "blockers": projection_blockers,
+        }
     canonical = sync_canonical_delivery(docs_root, doc_id, artifact_dir, title, language, input_file) if human_section == "all" else {}
     if canonical.get("decision") == "block":
         return {
@@ -6283,15 +6292,6 @@ def sync(
             if str(item)
         ]
     render_artifact_dir = Path(str(canonical.get("canonical_artifact_dir"))) if canonical else artifact_dir
-    projection_blockers = docs_projection_state_blockers(render_artifact_dir) if human_section == "all" else []
-    if projection_blockers:
-        update_delivery_projection_state(docs_root, doc_id, "block", projection_blockers)
-        return {
-            "schema": "codex-docs-governor-sync-v1",
-            "decision": "block",
-            "doc_id": doc_id,
-            "blockers": projection_blockers,
-        }
     human_docs = render_synced_human_docs_zh(doc_id, title, render_artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, render_artifact_dir)
     human_targets = {
         "spec": docs_root / manifest["human_docs"]["spec"],

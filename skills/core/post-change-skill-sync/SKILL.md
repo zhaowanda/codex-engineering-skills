@@ -41,8 +41,17 @@ python3 scripts/sync_after_change.py \
   --doc-id REQ-001
 ```
 
+Unified CLI:
+
+```bash
+python3 scripts/codex_eng.py post-change \
+  --repo /path/to/repo \
+  --artifact-dir artifacts/REQ-001 \
+  --doc-id REQ-001
+```
+
 ## Output
 
 The output uses schema `codex-post-change-implementation-report-v1`.
 
-The artifact reports decision, changed files, file summary, validation needs, baseline update candidates, project skill sync candidates, project skill index requirements, docs binding status, blockers, and warnings.
+The artifact reports decision, changed files, file summary, validation needs, baseline update candidates, project skill sync candidates, project skill index requirements, docs binding status, push readiness projection, blockers, and warnings.

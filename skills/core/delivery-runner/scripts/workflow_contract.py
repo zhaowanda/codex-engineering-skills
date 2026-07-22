@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess  # nosec B404
 from pathlib import Path
@@ -22,6 +23,7 @@ VOLATILE_KEYS = {
     "producer_version",
 }
 LINEAGE_SCHEMA = "codex-workflow-artifact-lineage-v2"
+DEFAULT_GIT_TIMEOUT_SECONDS = 2
 DEPRECATED_LINEAGE_SCHEMAS = {"codex-workflow-artifact-lineage-v1"}
 VALIDATORS = {"builtin:artifact-contract", "builtin:artifact-contract-v2"}
 TYPE_CHECKS = {
@@ -105,13 +107,19 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def git_context(workspace: Path | None = None) -> dict[str, str]:
+    if os.environ.get("CODEX_PURE_MODE") == "1":
+        return {}
     cwd = workspace or Path.cwd()
     result: dict[str, str] = {}
+    timeout_seconds = int(os.environ.get("CODEX_GIT_TIMEOUT_SECONDS", str(DEFAULT_GIT_TIMEOUT_SECONDS)))
     for key, args in {
         "generated_from_commit": ["git", "rev-parse", "HEAD"],
         "generated_from_branch": ["git", "branch", "--show-current"],
     }.items():
-        proc = subprocess.run(args, cwd=cwd, text=True, capture_output=True)  # nosec B603
+        try:
+            proc = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=timeout_seconds)  # nosec B603
+        except subprocess.TimeoutExpired:
+            continue
         if proc.returncode == 0 and proc.stdout.strip():
             result[key] = proc.stdout.strip()
     return result

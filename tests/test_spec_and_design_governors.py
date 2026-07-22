@@ -922,6 +922,7 @@ def test_delivery_runner_allows_implementation_when_pre_edit_gates_pass() -> Non
         assert status["can_implement"] is True
         assert status["next_stage"] == "implementation"
         assert status["next_action_type"] == "ready_to_implement"
+        assert status["summary_contract_version"] == "codex-workflow-summary-v1"
 
 
 def test_delivery_runner_reads_docs_canonical_sibling_runtime() -> None:
@@ -1084,6 +1085,78 @@ def test_delivery_runner_infers_source_location_readiness_without_summary() -> N
         assert status["confirmed_anchor_count"] == 0
         assert status["rejected_candidate_count"] == 1
         assert any(item["source"] == "source_location" for item in status["blockers"])
+
+
+def test_delivery_runner_exposes_pre_push_readiness_early() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "post_change_implementation_report.json", {
+            "decision": "pass",
+            "project_skill_index_requirements": {
+                "required": True,
+                "status": "pending",
+            },
+        })
+        write_json(root / "post_implementation_traceability_matrix.json", {"decision": "pass"})
+        write_json(root / "test_evidence_gate.json", {"decision": "pass"})
+        write_json(root / "code_review_gate.json", {"decision": "pass"})
+        write_json(root / "harness/post_implementation.json", {"decision": "pass"})
+
+        status = delivery_runner.pre_push_readiness(root)
+
+        assert status["applicable"] is True
+        assert status["decision"] == "block"
+        assert any(item["source"] == "project_skill_index_sync" for item in status["blockers"])
+
+
+def test_delivery_runner_inspect_includes_pre_push_readiness() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_json(root / "post_change_implementation_report.json", {
+            "decision": "pass",
+            "project_skill_index_requirements": {
+                "required": True,
+                "status": "pending",
+            },
+        })
+        write_json(root / "post_implementation_traceability_matrix.json", {"decision": "pass"})
+        write_json(root / "test_evidence_gate.json", {"decision": "pass"})
+        write_json(root / "code_review_gate.json", {"decision": "pass"})
+        write_json(root / "harness/post_implementation.json", {"decision": "pass"})
+
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+
+        assert status["pre_push_readiness"]["applicable"] is True
+        assert status["pre_push_readiness"]["decision"] == "block"
+        assert any(item["source"] == "project_skill_index_sync" for item in status["blockers"])
+
+
+def test_delivery_runner_prioritizes_pre_push_summary_after_implementation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = make_docs_repo(root, "REQ-1")
+        write_ready_small_feature(root, docs_root)
+        write_json(root / "implementation_completion_gate.json", {"decision": "pass"})
+        write_json(root / "post_change_implementation_report.json", {
+            "decision": "pass",
+            "repo": str(root),
+            "project_skill_index_requirements": {
+                "required": True,
+                "status": "pending",
+            },
+        })
+        write_json(root / "post_implementation_traceability_matrix.json", {"decision": "pass"})
+        write_json(root / "test_evidence_gate.json", {"decision": "pass"})
+        write_json(root / "code_review_gate.json", {"decision": "pass"})
+        write_json(root / "harness/post_implementation.json", {"decision": "pass"})
+
+        status = delivery_runner.inspect(root, profile_name="small_feature")
+
+        assert status["pre_push_readiness"]["decision"] == "block"
+        assert status["primary_next_action"]["action_type"] == "fix_blocker"
+        assert status["primary_next_action"]["artifact"] == "post_change_implementation_report.json"
+        assert status["primary_next_action"]["summary"].startswith("pre_push: project_skill_index_sync:")
+        assert "scripts/codex_eng.py post-change" in status["primary_next_action"]["command"]
 
 
 def test_delivery_runner_blocks_when_docs_quality_not_pass() -> None:

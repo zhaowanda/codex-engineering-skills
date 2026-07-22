@@ -74,12 +74,12 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert (out / "technical_design.json").exists()
         assert (out / "architecture_design.json").exists()
         assert (out / "test_design.json").exists()
-        assert (out / "docs_quality.json").exists()
+        assert not (out / "docs_quality.json").exists()
         assert (out / "delivery_plan.json").exists()
         assert (out / "delivery_plan_review.json").exists()
         assert (out / "auto_run_summary.json").exists()
         assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) in {"small_feature", "cross_repo_api", "bugfix", "frontend_change", "data_migration"}
-        assert "delivery-plan-reviewer" in result["required_gates"]
+        assert "delivery_plan_review.json" in result["required_gates"]
         assert "profile_gate_gaps" in result
         assert result["profile_selection_score"] > 0
         assert result["profile_selection_confidence"] in {"high", "medium", "low"}
@@ -93,6 +93,8 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert "invalidated_artifact_count" in result["workflow_metrics"]
         assert "strictness_gate_gaps" in result
         assert result["docs_readiness"]["decision"] == "block"
+        assert result["docs_quality"]["decision"] == "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
         assert result["next_stage"]
         assert result["can_implement"] is False
 
@@ -471,10 +473,10 @@ def test_auto_runner_blocks_ready_projection_when_upstream_artifacts_are_blocked
             docs_root=docs_root,
         )
         assert result["docs_readiness"]["decision"] == "block"
-        assert result["docs_sync"]["decision"] == "block"
-        assert any(item["source"] == "docs_projection_state" for item in result["docs_sync"]["blockers"])
-        assert result["doc_language"] == "zh"
-        assert (docs_root / "deliveries/REQ-AUTO-DOCS/artifacts/spec.json").exists()
+        assert result["docs_sync"]["decision"] == "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
+        assert result["doc_language"] == "en"
+        assert not (docs_root / "deliveries/REQ-AUTO-DOCS/artifacts/spec.json").exists()
 
 
 def test_auto_runner_blocks_staging_artifact_source_before_docs_sync() -> None:
@@ -495,9 +497,8 @@ def test_auto_runner_blocks_staging_artifact_source_before_docs_sync() -> None:
 
         assert result["docs_readiness"]["decision"] == "block"
         assert any(item["source"] == "docs_source" for item in result["docs_readiness"]["blockers"])
-        assert result["docs_sync"]["decision"] == "block"
-        assert any(item["source"] == "docs_source" for item in result["docs_sync"]["blockers"])
-        assert any(item["source"] == "docs_source" for item in result["blockers"])
+        assert result["docs_sync"]["decision"] == "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
 
 
 def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
@@ -516,22 +517,10 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
             doc_language="zh",
         )
         assert result["doc_language"] == "zh"
-        assert result["docs_sync"]["decision"] == "block"
-        assert any(item["source"] == "docs_projection_state" for item in result["docs_sync"]["blockers"])
-        spec_doc = (docs_root / "human/specs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
-        design_doc = (docs_root / "human/designs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
-        test_doc = (docs_root / "human/tests/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
-        release_doc = (docs_root / "human/releases/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
-        assert "等待同步交付产物" in spec_doc
-        assert "等待同步交付产物" in design_doc
-        assert "等待同步交付产物" in test_doc
-        assert "等待同步交付产物" in release_doc
-        assert (docs_root / "deliveries/REQ-AUTO-ZH/artifacts/spec.json").exists()
-        assert "## Executive Summary" not in spec_doc + design_doc + test_doc + release_doc
-        assert "Evidence References" not in spec_doc + design_doc + test_doc + release_doc
-        assert "Role:" not in design_doc + release_doc
-        assert "edit files:" not in design_doc + release_doc
-        assert "evidence:" not in spec_doc + design_doc + test_doc + release_doc
+        assert result["docs_sync"]["decision"] == "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
+        assert not (docs_root / "human/specs/REQ-AUTO-ZH.md").exists()
+        assert not (docs_root / "deliveries/REQ-AUTO-ZH/artifacts/spec.json").exists()
 
 
 def test_auto_runner_syncs_chinese_human_docs_when_upstream_artifacts_are_consistent() -> None:
@@ -724,11 +713,65 @@ def test_auto_runner_uses_configured_docs_root_by_default() -> None:
                 out=root / "artifacts",
             )
             assert result["docs_readiness"]["decision"] == "block"
-            assert result["docs_sync"]["decision"] == "block"
-            assert any(item["source"] == "docs_projection_state" for item in result["docs_sync"]["blockers"])
+            assert result["docs_sync"]["decision"] == "not_applicable"
             assert result["docs_readiness"]["docs_root"] == str(docs_root)
         finally:
             restore_workspace_docs_config(original)
+
+
+def test_auto_runner_design_blockers_skip_docs_quality_generation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = root / "artifacts"
+
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-SHORT",
+            title="Order export",
+            out=out,
+            docs_root=docs_root,
+        )
+
+        assert result["decision"] == "block"
+        assert result["docs_sync"]["decision"] == "not_applicable"
+        assert result["docs_quality"]["decision"] == "not_applicable"
+        assert not (out / "docs_quality.json").exists()
+        assert not (out / "delivery_status.json").exists()
+
+
+def test_auto_runner_calls_docs_sync_once_when_design_path_is_consistent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text(
+            "\n".join([
+                "文档使用中文描述。",
+                "AC: exported file contains order id and status.",
+            ]),
+            encoding="utf-8",
+        )
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir()
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = root / "artifacts"
+        original = auto_runner.sync_docs_artifacts
+        calls: list[str] = []
+
+        def wrapped(*args, **kwargs):
+            calls.append("sync")
+            return original(*args, **kwargs)
+
+        auto_runner.sync_docs_artifacts = wrapped
+        try:
+            result = auto_runner.run(req, doc_id="REQ-AUTO-ONCE", out=out, docs_root=docs_root, doc_language="auto")
+        finally:
+            auto_runner.sync_docs_artifacts = original
+
+        assert result["docs_sync"]["decision"] == "pass"
+        assert calls == ["sync"]
 
 
 def test_auto_runner_is_idempotent_without_force() -> None:
@@ -858,9 +901,10 @@ def test_auto_runner_routes_one_line_request_to_small_feature() -> None:
         req.write_text("Change the checkout confirmation copy to Order received.", encoding="utf-8")
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-ONE", out=out)
-        assert result["workflow_profile"]["name"] == "small_feature"
+        assert result["workflow_profile"]["name"] == "small_feature-lite"
         assert result["profile_selection_reason"]["mode"] == "lane"
         assert result["profile_selection_reason"]["lane"] == "small_change"
+        assert result["workflow_strictness"]["tier"] == "light"
 
 
 def test_auto_runner_routes_bugfix_to_bugfix_profile() -> None:
@@ -879,8 +923,19 @@ def test_auto_runner_routes_bugfix_to_bugfix_profile() -> None:
         result = auto_runner.run(req, doc_id="REQ-AUTO-BUG", out=out)
         assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "bugfix"
         assert result["profile_selection_reason"]["mode"] == "lane"
-        assert "git-worktree-governor" in result["required_gates"]
-        assert result["workflow_strictness"]["tier"] in {"light", "standard"}
+        assert "git_worktree_evidence.json" in result["required_gates"]
+        assert result["workflow_strictness"]["tier"] == "standard"
+
+
+def test_select_workflow_profile_prefers_bugfix_lite_without_elevated_impacts() -> None:
+    spec = {
+        "lane": "bugfix",
+        "impact_applicability": [],
+    }
+    profile, reason = auto_runner.select_workflow_profile_with_reason(spec)
+    strictness = auto_runner.workflow_strictness(spec, profile, reason["profile_selection_confidence"])
+    assert profile["name"] == "bugfix-lite"
+    assert strictness["tier"] == "light"
 
 
 def test_auto_runner_elevates_bugfix_when_permission_impact_exists() -> None:
@@ -923,7 +978,7 @@ def test_auto_runner_elevates_long_prd_with_permission_rules() -> None:
         assert result["profile_selection_reason"]["lane"] == "large_prd"
         assert result["workflow_strictness"]["tier"] == "regulated"
         assert "permission" in result["workflow_strictness"]["elevation_impacts"]
-        assert "architecture-design-governor" in result["required_gates"]
+        assert "architecture_design.json" in result["required_gates"]
 
 
 def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
@@ -955,9 +1010,9 @@ def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
         assert "cross_repo_api" in result["workflow_profile"]["overlay_profiles"]
         assert result["profile_selection_reason"]["matched_impact"] == "data"
         assert result["profile_selection_reason"]["composition_mode"] == "merged"
-        assert "data-security-governor" in result["required_gates"]
-        assert "performance-governor" in result["required_gates"]
-        assert "traceability-governor" in result["required_gates"]
+        assert "data_security_review.json" in result["required_gates"]
+        assert "performance_review.json" in result["required_gates"]
+        assert "traceability_matrix.json" in result["required_gates"]
         assert (out / "frontend_implementation_plan.json").exists()
         assert not (out / "frontend_acceptance.json").exists()
 
