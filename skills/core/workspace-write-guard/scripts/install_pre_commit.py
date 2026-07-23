@@ -317,20 +317,22 @@ def load_repo_hook_policy(repo: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def infer_hook_profile(repo: Path, explicit: str | None = None) -> str:
+def infer_hook_profile(repo: Path, explicit: str | None = None) -> tuple[str, dict[str, str]]:
     if explicit:
-        return explicit
+        return explicit, {"source": "cli", "detail": explicit}
     configured = git_config(repo, "codex.hookProfile")
     if configured in HOOK_PROFILES:
-        return configured
+        return configured, {"source": "git_config", "detail": "codex.hookProfile"}
     policy = load_repo_hook_policy(repo)
     profile = str(policy.get("hook_profile") or policy.get("profile") or "")
     if profile in HOOK_PROFILES:
-        return profile
+        return profile, {"source": "repo_policy", "detail": ".codex/hook_policy.json"}
     marker = (repo / ".codex" / "current_delivery.json").exists()
-    if marker or (repo / "company-delivery-docs").exists() or (repo.parent / "company-delivery-docs").exists():
-        return "delivery_strict"
-    return DEFAULT_HOOK_PROFILE
+    if marker:
+        return "delivery_strict", {"source": "delivery_marker", "detail": ".codex/current_delivery.json"}
+    if (repo / "company-delivery-docs").exists() or (repo.parent / "company-delivery-docs").exists():
+        return "delivery_strict", {"source": "delivery_docs", "detail": "company-delivery-docs path detected"}
+    return DEFAULT_HOOK_PROFILE, {"source": "default", "detail": DEFAULT_HOOK_PROFILE}
 
 
 def dependency_blockers(hook_names: set[str], hook_profile: str) -> list[dict[str, str]]:
@@ -367,7 +369,7 @@ def backup_hook(path: Path) -> Path:
 
 def install(repo: Path, force: bool = False, hook_names: set[str] | None = None, hook_profile: str | None = None) -> dict[str, Any]:
     repo = repo.resolve()
-    resolved_profile = infer_hook_profile(repo, hook_profile)
+    resolved_profile, profile_reason = infer_hook_profile(repo, hook_profile)
     selected = hook_names or {"pre-commit"} | ({"pre-push"} if resolved_profile != "off" else set())
     invalid = selected - {"pre-commit", "pre-push"}
     if invalid:
@@ -417,6 +419,7 @@ def install(repo: Path, force: bool = False, hook_names: set[str] | None = None,
         "repo": str(repo),
         "git_dir": str(git_dir),
         "hook_profile": resolved_profile,
+        "hook_profile_reason": profile_reason,
         "status": status,
         "installed": installed,
         "repaired": repaired,

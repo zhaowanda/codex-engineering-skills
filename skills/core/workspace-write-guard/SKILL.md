@@ -104,6 +104,8 @@ python3 scripts/install_pre_commit.py \
 
 The installer resolves the actual Git directory, including linked worktrees, verifies the Harness and Agent Runtime scripts before writing a hook, and automatically repairs known Codex hooks whose absolute script target no longer exists. Replaced hooks are retained beside the active hook as timestamped `*.codex-backup.*` files. Existing non-Codex hooks are preserved unless `--force` is explicit.
 
+Installer output includes `hook_profile` and `hook_profile_reason` so repo policy, CLI overrides, and default inference are visible in the result.
+
 Hook profiles:
 
 - `framework_light`: lightweight repository pre-push guard; no delivery artifact resolution and no post-implementation evidence enforcement.

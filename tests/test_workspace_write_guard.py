@@ -76,6 +76,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "installed")
             self.assertEqual(result["hook_profile"], "framework_light")
+            self.assertEqual(result["hook_profile_reason"]["source"], "default")
             pre_commit = repo / ".git/hooks/pre-commit"
             pre_push = repo / ".git/hooks/pre-push"
             self.assertTrue(pre_commit.exists())
@@ -94,6 +95,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "installed")
             self.assertEqual(result["hook_profile"], "delivery_strict")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             pre_push = repo / ".git/hooks/pre-push"
             self.assertTrue(pre_push.exists())
             content = pre_push.read_text(encoding="utf-8")
@@ -110,6 +112,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "installed")
             self.assertEqual(result["hook_profile"], "off")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             self.assertTrue((repo / ".git/hooks/pre-commit").exists())
             self.assertFalse((repo / ".git/hooks/pre-push").exists())
 
@@ -126,6 +129,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
 
             self.assertEqual(result["status"], "repaired")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             self.assertEqual(result["repaired"], [str(pre_push.resolve())])
             self.assertEqual(len(result["backups"]), 1)
             self.assertTrue(Path(result["backups"][0]).exists())
@@ -143,6 +147,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
 
             self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             self.assertEqual(pre_push.read_text(encoding="utf-8"), "#!/bin/sh\necho custom\n")
 
     def test_pre_push_hook_resolves_artifact_dir_from_branch_and_docs_repo(self) -> None:
@@ -165,6 +170,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
 
             result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
             self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             env = os.environ.copy()
             env.pop("CODEX_ARTIFACT_DIR", None)
             env["CODEX_AGENT_RUNTIME_SCRIPT"] = str(runtime)
@@ -194,6 +200,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
 
             result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
             self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             env = os.environ.copy()
             env.pop("CODEX_ARTIFACT_DIR", None)
             env["CODEX_AGENT_RUNTIME_SCRIPT"] = str(runtime)
@@ -208,6 +215,7 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             repo = init_repo(Path(tmp))
             result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="framework_light")
             self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             (repo / "allowed.txt").write_text("base\nchange\n", encoding="utf-8")
             proc = subprocess.run([str(repo / ".git/hooks/pre-push")], cwd=repo, text=True, capture_output=True)
             self.assertNotEqual(proc.returncode, 0)
