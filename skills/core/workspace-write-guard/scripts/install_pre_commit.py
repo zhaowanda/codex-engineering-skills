@@ -14,6 +14,8 @@ WRITE_GUARD = Path(__file__).with_name("write_guard.py").resolve()
 HARNESS = (Path(__file__).parents[2] / "auto-runner/scripts/harness_validation.py").resolve()
 AGENT_RUNTIME = (Path(__file__).parents[2] / "auto-runner/scripts/agent_runtime.py").resolve()
 HARNESS_POLICY = (Path(__file__).parents[4] / "config/harness-policy.example.yaml").resolve()
+HOOK_PROFILES = {"delivery_strict", "framework_light", "off"}
+DEFAULT_HOOK_PROFILE = "framework_light"
 
 
 HOOK_TEMPLATE = """#!/usr/bin/env bash
@@ -241,6 +243,41 @@ python3 "$HARNESS" "${HARNESS_ARGS[@]}"
 """
 
 
+LIGHT_PRE_PUSH_TEMPLATE = """#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="$(git rev-parse --show-toplevel)"
+
+if [[ ! -d "$REPO/.git" && ! -f "$REPO/.git" ]]; then
+  echo "workflow-harness: git repository context is invalid" >&2
+  exit 1
+fi
+
+if [[ -n "$(git status --porcelain --untracked-files=no || true)" ]]; then
+  echo "workflow-harness: push blocked because tracked workspace changes are still present; commit or stash them first" >&2
+  exit 1
+fi
+
+if [[ -f "$REPO/.codex/current_delivery.json" ]]; then
+  python3 - "$REPO/.codex/current_delivery.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    print("workflow-harness: .codex/current_delivery.json is invalid JSON", file=sys.stderr)
+    raise SystemExit(1)
+if not isinstance(data, dict):
+    print("workflow-harness: .codex/current_delivery.json must be an object", file=sys.stderr)
+    raise SystemExit(1)
+PY
+fi
+"""
+
+
 def git_dir_for(repo: Path) -> Path | None:
     git = shutil.which("git")
     if not git:
@@ -256,13 +293,53 @@ def git_dir_for(repo: Path) -> Path | None:
     return Path(proc.stdout.strip()).resolve()
 
 
-def dependency_blockers(hook_names: set[str]) -> list[dict[str, str]]:
+def git_config(repo: Path, key: str) -> str:
+    git = shutil.which("git")
+    if not git:
+        return ""
+    proc = subprocess.run(
+        [git, "config", "--get", key],  # nosec B603
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def load_repo_hook_policy(repo: Path) -> dict[str, Any]:
+    policy_path = repo / ".codex" / "hook_policy.json"
+    if not policy_path.exists():
+        return {}
+    try:
+        data = json.loads(policy_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def infer_hook_profile(repo: Path, explicit: str | None = None) -> str:
+    if explicit:
+        return explicit
+    configured = git_config(repo, "codex.hookProfile")
+    if configured in HOOK_PROFILES:
+        return configured
+    policy = load_repo_hook_policy(repo)
+    profile = str(policy.get("hook_profile") or policy.get("profile") or "")
+    if profile in HOOK_PROFILES:
+        return profile
+    marker = (repo / ".codex" / "current_delivery.json").exists()
+    if marker or (repo / "company-delivery-docs").exists() or (repo.parent / "company-delivery-docs").exists():
+        return "delivery_strict"
+    return DEFAULT_HOOK_PROFILE
+
+
+def dependency_blockers(hook_names: set[str], hook_profile: str) -> list[dict[str, str]]:
     required = {"pre-commit": [WRITE_GUARD], "pre-push": [HARNESS, AGENT_RUNTIME]}
     return [
         {"source": name, "message": f"required hook dependency does not exist: {path}"}
         for name in sorted(hook_names)
         for path in required[name]
-        if not path.is_file()
+        if not path.is_file() and not (name == "pre-push" and hook_profile == "framework_light")
     ]
 
 
@@ -288,26 +365,38 @@ def backup_hook(path: Path) -> Path:
     return backup
 
 
-def install(repo: Path, force: bool = False, hook_names: set[str] | None = None) -> dict[str, Any]:
+def install(repo: Path, force: bool = False, hook_names: set[str] | None = None, hook_profile: str | None = None) -> dict[str, Any]:
     repo = repo.resolve()
-    selected = hook_names or {"pre-commit", "pre-push"}
+    resolved_profile = infer_hook_profile(repo, hook_profile)
+    selected = hook_names or {"pre-commit"} | ({"pre-push"} if resolved_profile != "off" else set())
     invalid = selected - {"pre-commit", "pre-push"}
     if invalid:
         return {"repo": str(repo), "status": "blocked", "blockers": [{"source": "hook", "message": f"unsupported hooks: {sorted(invalid)}"}]}
+    if resolved_profile not in HOOK_PROFILES:
+        return {"repo": str(repo), "status": "blocked", "blockers": [{"source": "hook_profile", "message": f"unsupported hook profile: {resolved_profile}"}]}
     git_dir = git_dir_for(repo)
     if git_dir is None:
         return {"repo": str(repo), "status": "skipped", "reason": "not a git repo"}
-    blockers = dependency_blockers(selected)
+    blockers = dependency_blockers(selected, resolved_profile)
     if blockers:
         return {"repo": str(repo), "status": "blocked", "blockers": blockers}
     targets = {
         "pre-commit": HOOK_TEMPLATE.replace("__WRITE_GUARD__", str(WRITE_GUARD)),
-        "pre-push": PRE_PUSH_TEMPLATE.replace("__HARNESS__", str(HARNESS)).replace("__AGENT_RUNTIME__", str(AGENT_RUNTIME)).replace("__HARNESS_POLICY__", str(HARNESS_POLICY)),
+        "pre-push": (
+            PRE_PUSH_TEMPLATE.replace("__HARNESS__", str(HARNESS)).replace("__AGENT_RUNTIME__", str(AGENT_RUNTIME)).replace("__HARNESS_POLICY__", str(HARNESS_POLICY))
+            if resolved_profile == "delivery_strict"
+            else LIGHT_PRE_PUSH_TEMPLATE
+        ),
     }
     installed: list[str] = []
     skipped: list[str] = []
     repaired: list[str] = []
     backups: list[str] = []
+    warnings: list[dict[str, str]] = []
+    if resolved_profile == "framework_light" and "pre-push" in selected:
+        warnings.append({"source": "hook_profile", "message": "framework_light installs a lightweight pre-push hook without delivery evidence enforcement"})
+    if resolved_profile == "off" and "pre-push" in selected:
+        warnings.append({"source": "hook_profile", "message": "pre-push requested while hook profile is off"})
     for name in sorted(selected):
         content = targets[name]
         target = git_dir / "hooks" / name
@@ -327,11 +416,13 @@ def install(repo: Path, force: bool = False, hook_names: set[str] | None = None)
     return {
         "repo": str(repo),
         "git_dir": str(git_dir),
+        "hook_profile": resolved_profile,
         "status": status,
         "installed": installed,
         "repaired": repaired,
         "backups": backups,
         "skipped": skipped,
+        "warnings": warnings,
         "blockers": [],
     }
 
@@ -340,10 +431,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Install workspace write guard pre-commit and Harness pre-push hooks")
     parser.add_argument("--repo", action="append", required=True)
     parser.add_argument("--hook", action="append", choices=["pre-commit", "pre-push"])
+    parser.add_argument("--hook-profile", choices=sorted(HOOK_PROFILES))
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     hook_names = set(args.hook) if args.hook else None
-    results = [install(Path(repo), args.force, hook_names) for repo in args.repo]
+    results = [install(Path(repo), args.force, hook_names, args.hook_profile) for repo in args.repo]
     decision = "block" if any(item.get("status") == "blocked" for item in results) else "pass"
     print(json.dumps({"schema": "codex-write-guard-hook-install-v1", "decision": decision, "results": results}, ensure_ascii=False, indent=2))
     return 1 if decision == "block" else 0
