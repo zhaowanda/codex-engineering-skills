@@ -439,10 +439,12 @@ def test_spec_requires_explicit_business_purpose_not_inferred_goal() -> None:
     AC: 给定运营点击导出按钮，系统生成包含订单号和状态的 Excel 文件。
     """
     spec = spec_governor.normalize("REQ-NO-GOAL", "订单导出", text)
-    assert spec["design_allowed"] is False
-    assert spec["requirements_understanding"]["level"] == "clarification_required"
+    assert spec["design_allowed"] is True
+    assert spec["requirements_understanding"]["decision"] == "pass"
+    assert spec["requirements_understanding"]["understanding_confidence"] == "medium"
     categories = {item["category"] for item in spec["ambiguities"]}
     assert "business_goal" in categories
+    assert not any(item["category"] == "business_goal" and item.get("required") is True for item in spec["ambiguities"])
 
 
 def test_spec_blocks_ambiguous_auto_processing_and_unclear_defect() -> None:
@@ -582,6 +584,29 @@ def test_spec_accepts_markdown_key_blocks_and_negated_mq_for_feishu_approval() -
     assert any("重复回调" in item or "重复建单" in item for item in spec["state_machine"]["idempotency_key"])
     assert not any(item.get("summary") in {"状态", "规则", "验收标准"} for item in spec["requirements"])
     assert not any(item.get("rule") in {"状态:", "规则", "验收标准"} for item in spec["business_rules"])
+
+
+def test_spec_infers_invalid_transition_guards_from_negative_constraints() -> None:
+    text = """
+    业务目的: 审批通过后创建结算单，避免重复建单。
+    流程: 系统发起审批；审批通过后创建结算单；审批拒绝后不创建结算单；同一审批实例重复回调不能重复建单。
+    入口: 审批结果回调。
+    状态:
+    - PENDING_APPROVAL -> APPROVED
+    - PENDING_APPROVAL -> REJECTED
+    - APPROVED -> ORDER_CREATED
+    compensation_rule:
+    - 回调处理失败时允许页面重试处理回调结果
+    AC: 审批通过后只创建一次对应批次结算单。
+    AC: 审批拒绝后不创建结算单。
+    """
+
+    spec = spec_governor.normalize("REQ-INFER-INVALID", "审批结算单创建", text)
+
+    assert spec["design_allowed"] is True
+    assert spec["state_machine"]["required"] is True
+    assert "invalid_transition_rules" not in spec["state_machine"]["missing"]
+    assert spec["state_machine"]["invalid_transitions"]
 
 
 def test_spec_uses_project_understanding_evidence_for_current_state() -> None:

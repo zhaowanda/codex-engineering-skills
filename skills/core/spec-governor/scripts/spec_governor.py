@@ -617,7 +617,9 @@ def business_goal_quality(intent: dict[str, Any], success_metrics: list[dict[str
     }
     score = sum(weight for key, weight in weights.items() if checks[key])
     missing = [key for key, passed in checks.items() if not passed]
-    blocking_missing = [key for key in missing if key not in {"measurable_metric"}]
+    blocking_missing = [key for key in missing if key not in {"measurable_metric", "explicit_goal"}]
+    if not checks["explicit_goal"] and not (checks["target_user"] and checks["testable_outcome"] and checks["flow_bound"]):
+        blocking_missing.append("explicit_goal")
     return {
         "score": score,
         "threshold": 80,
@@ -1044,6 +1046,15 @@ def state_machine_model(lines: list[str], text: str, transitions: list[dict[str,
         compensation = collect_section_items(text, ("幂等与补偿",))
     if not invalid_transitions:
         invalid_transitions = [line.strip(" -") for line in lines if any(term in line for term in ["不允许", "禁止"]) and any(token in line for token in ["状态", "终态", "建单"])]
+    if not invalid_transitions:
+        invalid_transitions = [
+            line.strip(" -")
+            for line in lines
+            if (
+                any(term in line.lower() or term in line for term in ["cannot", "must not", "should not", "forbid", "不能", "不得", "禁止", "不允许", "不创建", "只创建一次", "不能重复"])
+                and any(token in line.lower() or token in line for token in ["state", "status", "transition", "callback", "create", "order", "审批", "状态", "流转", "回调", "建单", "重复"])
+            )
+        ]
     mq_context = any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"])
     requires_state_model = bool(transitions or retry_policy or idempotency or compensation or timeout or invalid_transitions) or mq_context or any(term in lower or term in text for term in [
         "状态流转", "状态从", "状态变更", "状态更新", "异步", "幂等", "补偿", "超时", "idempot", "compensation", "timeout",
@@ -1253,7 +1264,18 @@ def detect_ambiguities(
     if not str(intent.get("intent") or "").strip():
         add("business_intent", "business_goal", "Business intent is missing; cannot tell what outcome the requirement optimizes.")
     elif intent.get("confidence") != "high":
-        add("business_intent", "business_goal", "Business intent is inferred; the real purpose, current pain point, and expected business outcome must be confirmed.")
+        inferred_goal_is_blocking = not (
+            any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict))
+            and bool(business_flow)
+            and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict))
+            and any(isinstance(item, dict) and not weak_acceptance_reason(str(item.get("criteria") or "")) for item in acceptance)
+        )
+        add(
+            "business_intent",
+            "business_goal",
+            "Business intent is inferred; the real purpose, current pain point, and expected business outcome should be confirmed.",
+            inferred_goal_is_blocking,
+        )
     if not business_flow:
         add("business_flow", "business_flow", "Business flow is missing; actor, trigger, system behavior, and outcome are unclear.")
     for issue in flow_quality_issues(business_flow):
