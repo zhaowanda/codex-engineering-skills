@@ -416,6 +416,193 @@ def load_profile_registry(path: Path = PROFILE_REGISTRY) -> dict[str, dict[str, 
     return profiles
 
 
+def project_registry_path() -> Path:
+    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    return codex_home / "skills" / "company" / "projects.yaml"
+
+
+def load_project_registry(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    raw = load_restricted_yaml(path or project_registry_path())
+    projects: dict[str, dict[str, Any]] = {}
+    for item in raw.get("projects", []) if isinstance(raw.get("projects"), list) else []:
+        if isinstance(item, dict) and item.get("name"):
+            projects[str(item["name"])] = item
+    return projects
+
+
+def project_checkout_path(project: str, registry_item: dict[str, Any] | None = None) -> Path:
+    hint = ""
+    if isinstance(registry_item, dict):
+        repo = registry_item.get("repo") if isinstance(registry_item.get("repo"), dict) else {}
+        if isinstance(repo, dict):
+            hint = str(repo.get("local_path_hint") or "")
+    candidate = Path.home() / "hl-workspace" / (hint or project)
+    return candidate
+
+
+def project_skill_dir(project: str) -> Path:
+    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    return codex_home / "skills" / "company" / project
+
+
+def project_query_terms(text: str) -> list[str]:
+    stopwords = {
+        "需求", "功能", "页面", "系统", "运营", "用户", "设备", "状态", "订单", "导出", "列表", "按钮",
+        "接口", "结果", "流程", "业务", "目标", "规则", "模块", "场景", "页面", "表单", "审批", "记录",
+        "order", "export", "page", "admin", "list", "button", "form", "result", "query", "filter",
+        "system", "user", "device", "status", "state", "task", "flow", "change", "update", "show",
+        "view", "open", "manage", "feature", "action",
+    }
+    terms: list[str] = []
+    for term in re.findall(r"(?:/[A-Za-z0-9_{}.*-]+)+|[A-Za-z_][A-Za-z0-9_]{3,}|[\u4e00-\u9fff]{2,12}", text):
+        clean = term.strip().lower()
+        if clean in stopwords:
+            continue
+        if clean not in terms:
+            terms.append(clean)
+    return terms[:40]
+
+
+def project_reference_score(text: str, project: str) -> int:
+    skill_dir = project_skill_dir(project)
+    if not skill_dir.is_dir():
+        return 0
+    terms = project_query_terms(text)
+    if not terms:
+        return 0
+    hits = 0
+    files = [skill_dir / "SKILL.md"]
+    references = skill_dir / "references"
+    if references.is_dir():
+        files.extend(sorted(path for path in references.iterdir() if path.is_file())[:12])
+    for path in files:
+        try:
+            blob = path.read_text(encoding="utf-8", errors="ignore").lower()
+        except Exception:
+            continue
+        matched = [term for term in terms if term in blob]
+        hits += min(len(matched), 6)
+    return hits * 3
+
+
+def project_signal_score(text: str, registry_item: dict[str, Any]) -> int:
+    lower = text.lower()
+    repo_type = str(registry_item.get("type") or "")
+    roles = {str(item) for item in as_list(registry_item.get("roles"))}
+    dependencies = {str(item).lower() for item in as_list(registry_item.get("dependencies"))}
+    hint = str((registry_item.get("repo") or {}).get("local_path_hint") or registry_item.get("name") or "").lower() if isinstance(registry_item.get("repo"), dict) else str(registry_item.get("name") or "").lower()
+    score = 0
+    backend_signals = {
+        "data", "database", "table", "history", "status", "state", "retry", "task", "job", "scheduler",
+        "mq", "topic", "queue", "callback", "notify", "notification", "device", "version", "approval",
+        "persistence", "storage", "sync", "bill", "settlement", "package", "历史", "状态", "重试", "任务",
+        "定时", "回调", "通知", "设备", "版本", "审批", "存储", "同步", "结算", "软件包", "升级包", "飞书",
+    }
+    frontend_signals = {
+        "ui", "page", "button", "menu", "table", "form", "route", "browser", "frontend", "dialog",
+        "list", "display", "show", "panel", "screen", "页面", "按钮", "菜单", "表单", "路由", "浏览器", "弹窗",
+    }
+    if repo_type == "backend":
+        score += 2
+    if repo_type == "frontend":
+        score += 1
+    if "backend" in roles:
+        score += 2
+    if "frontend" in roles:
+        score += 1
+    if hint and hint in lower:
+        score += 15
+    if any(term in lower for term in backend_signals):
+        score += 3 * sum(1 for term in backend_signals if term in lower)
+    if any(term in lower for term in frontend_signals):
+        score += 2 * sum(1 for term in frontend_signals if term in lower)
+    if dependencies and any(dep in lower for dep in dependencies):
+        score += 5
+    return score
+
+
+def resolve_project_binding(
+    input_text: str,
+    repo: Path | None = None,
+    project: str | None = None,
+    registry: dict[str, dict[str, Any]] | None = None,
+) -> tuple[Path | None, str | None, dict[str, Any]]:
+    registry = registry or load_project_registry()
+    if not registry:
+        return repo, project, {
+            "repo_root": str(repo) if repo else "",
+            "project": project or "",
+            "project_skill_loaded": False,
+            "project_registry_path": str(project_registry_path()),
+            "resolution_mode": "unresolved",
+            "resolution_reason": "project registry is missing",
+        }
+
+    if project and not repo:
+        registry_item = registry.get(project, {})
+        checkout = project_checkout_path(project, registry_item)
+        if checkout.exists():
+            repo = checkout
+
+    if repo and not project:
+        for name, item in registry.items():
+            checkout = project_checkout_path(name, item)
+            if checkout.exists() and checkout.resolve() == repo.resolve():
+                project = name
+                break
+
+    selected_project = project or ""
+    selected_repo = repo
+    resolution_mode = "explicit" if repo and project else "unresolved"
+    resolution_reason = "repo/project were provided explicitly" if repo and project else "repo/project were not provided"
+    candidates: list[dict[str, Any]] = []
+
+    if project:
+        current = registry.get(project, {})
+        current_type = str(current.get("type") or "")
+        backend_bias = sum(1 for term in ["历史", "重试", "回调", "通知", "结算", "软件包", "升级包", "VERSION", "deviceattribute", "task", "retry", "callback", "database", "history", "status"] if term.lower() in input_text.lower())
+        frontend_bias = sum(1 for term in ["页面", "按钮", "表单", "菜单", "route", "button", "page", "dialog", "browser"] if term.lower() in input_text.lower())
+        if current_type == "frontend" and backend_bias > frontend_bias:
+            for dep in as_list(current.get("dependencies")):
+                dep_name = str(dep)
+                dep_item = registry.get(dep_name, {})
+                if str(dep_item.get("type") or "") != "backend":
+                    continue
+                checkout = project_checkout_path(dep_name, dep_item)
+                score = project_signal_score(input_text, dep_item) + project_reference_score(input_text, dep_name)
+                candidates.append({
+                    "project": dep_name,
+                    "repo_root": str(checkout),
+                    "score": score,
+                    "repo_type": str(dep_item.get("type") or ""),
+                    "local_path_hint": str((dep_item.get("repo") or {}).get("local_path_hint") or ""),
+                    "skill": str(dep_item.get("skill") or dep_name),
+                })
+            candidates.sort(key=lambda item: (item["score"], item["project"]), reverse=True)
+            best = candidates[0] if candidates else {}
+            second = int(candidates[1]["score"]) if len(candidates) > 1 else 0
+            if best and int(best.get("score") or 0) >= 12 and int(best.get("score") or 0) >= second:
+                candidate_repo = Path(str(best.get("repo_root") or ""))
+                if candidate_repo.exists():
+                    selected_project = str(best["project"])
+                    selected_repo = candidate_repo
+                    resolution_mode = "registry_related_repo"
+                    resolution_reason = f"current project {project} is frontend but requirement signals backend-owned history/state/retry flow"
+
+    binding = {
+        "repo_root": str(selected_repo) if selected_repo else str(repo or ""),
+        "project": selected_project,
+        "project_skill_loaded": bool(selected_project and selected_project in registry),
+        "project_registry_path": str(project_registry_path()),
+        "resolution_mode": resolution_mode,
+        "resolution_reason": resolution_reason,
+        "candidates": candidates[:5],
+    }
+    if selected_project and selected_repo and selected_repo.exists():
+        return selected_repo, selected_project, binding
+    return repo, project, binding
+
+
 def run_command(name: str, args: list[str]) -> dict[str, Any]:
     record_runtime = RUNTIME_ARTIFACT_DIR is not None and name != "inspect"
     if record_runtime:
@@ -1633,6 +1820,11 @@ def run(
     out.mkdir(parents=True, exist_ok=True)
     effective_docs_root = docs_root.resolve() if docs_root else default_docs_root()
     docs_status = docs_readiness(effective_docs_root, doc_id, out)
+    resolved_repo, resolved_project, project_binding = resolve_project_binding(input_text, repo, project)
+    if resolved_repo:
+        repo = resolved_repo
+    if resolved_project:
+        project = resolved_project
     write_json(out / "auto_run_summary.json", {
         "schema": SCHEMA,
         "decision": "in_progress",
@@ -1640,6 +1832,7 @@ def run(
         "title": title,
         "out_dir": str(out),
         "docs_readiness": docs_status,
+        "local_project_binding": project_binding,
     })
 
     generated: list[str] = []
@@ -2348,6 +2541,7 @@ def run(
         "steps": steps,
         "workflow_metrics": workflow_metrics(steps, generated, skipped, selected_profile),
         "workflow_profile": selected_profile,
+        "local_project_binding": project_binding,
         "profile_selection_reason": profile_selection_reason,
         "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
         "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),

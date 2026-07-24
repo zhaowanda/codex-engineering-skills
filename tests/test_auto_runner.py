@@ -99,6 +99,26 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert result["can_implement"] is False
 
 
+def test_auto_runner_resolves_related_backend_project_from_registry() -> None:
+    text = """
+    业务目的：减少人工逐台下发和人工核对版本，避免 AT603 与 AT603D 升级包错发，并让批量升级结果可追踪、可通知。
+    流程：运营人员先选择设备型号，再选择该型号下的一个历史版本软件包，然后选择设备并下发升级。
+    入口：批量升级入口。
+    需求：
+    - 双摄设备存在两种型号：AT603、AT603D。
+    - 两种设备型号对应的软件升级包不一致，升级包维护和升级下发时必须按设备型号区分。
+    - 升级任务持续到设备升级成功为止；不满足前置条件的设备进入等待状态，满足前置条件后恢复升级下发。
+    - 升级成功判断标准：查询 deviceAttribute 命令返回结果中的 VERSION，VERSION 必须等于指定升级文件中的版本号。
+    """
+    frontend_repo = Path("/Users/zhaowanli/hl-workspace/operate-platform-fe")
+    repo, project, binding = auto_runner.resolve_project_binding(text, repo=frontend_repo, project="operate-platform-fe")
+    assert project == "sigreal-operate-platform"
+    assert repo is not None and repo.name == "sigreal-operate-platform"
+    assert binding["resolution_mode"] == "registry_related_repo"
+    assert binding["project_skill_loaded"] is True
+    assert binding["project_registry_path"].endswith("projects.yaml")
+
+
 def test_harness_validation_blocks_reference_only_edit_target() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -538,7 +558,7 @@ def test_auto_runner_syncs_chinese_human_docs_when_upstream_artifacts_are_consis
             docs_root=docs_root,
             doc_language="zh",
         )
-        assert result["docs_sync"]["decision"] == "block"
+        assert result["docs_sync"]["decision"] == "not_applicable"
         spec = json.loads((out / "spec.json").read_text(encoding="utf-8"))
         spec["decision"] = "pass"
         spec["design_allowed"] = True
@@ -1114,7 +1134,26 @@ def test_cross_repo_readiness_is_aggregated_by_final_design_review() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         req = root / "api.md"
-        req.write_text("Business purpose: prevent consumer outages during contract evolution.\nFlow: consumer sends its existing request to the provider endpoint; the provider validates it, returns the compatible response, and the consumer completes its workflow unchanged.\nEntry: provider API endpoint.\nRepo: provider owns the endpoint.\nRepo: consumer uses the endpoint.\nDependency: consumer -> provider API.\nReq: Add API contract.\nAC: existing consumer remains compatible.", encoding="utf-8")
+        req.write_text(
+            "Business purpose: prevent consumer outages during contract evolution.\n"
+            "Flow: consumer sends its existing request to the provider endpoint; the provider validates it and returns the compatible response.\n"
+            "Entry: provider API endpoint.\n"
+            "Repo: provider owns the endpoint.\n"
+            "Repo: consumer uses the endpoint.\n"
+            "Dependency: consumer -> provider API.\n"
+            "State:\n"
+            "- request_received -> validated\n"
+            "- validated -> responded\n"
+            "- validated -> contract_error\n"
+            "Retry policy: validation failures retry up to 3 times.\n"
+            "Compensation rule: if validation fails, return a contract error without side effects.\n"
+            "Invalid transition rules:\n"
+            "- request_received cannot go directly to responded\n"
+            "- contract_error cannot transition to responded\n"
+            "Req: Add API contract.\n"
+            "AC: existing consumer remains compatible.\n",
+            encoding="utf-8",
+        )
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-CROSS-REVIEW", out=out, profile="cross_repo_api")
         step_names = [item.get("name") for item in result["steps"]]
