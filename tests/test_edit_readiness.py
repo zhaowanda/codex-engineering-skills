@@ -191,6 +191,39 @@ class EditReadinessTests(unittest.TestCase):
             self.assertTrue(any("fetch evidence is missing" in item for item in result["blockers"]))
             self.assertTrue(any("pull --ff-only evidence is missing" in item for item in result["blockers"]))
 
+    def test_blocks_staging_repo_bindings_before_editing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = make_repo(root)
+            args = ready_standard_args(root, repo)
+            staging_repo = root / "_staging" / "repo"
+            write_json(
+                Path(args.git_evidence),
+                {
+                    "decision": "ready",
+                    "current_branch": "feature/req-1",
+                    "fetched": True,
+                    "base_updated": True,
+                    "repo": str(staging_repo),
+                },
+            )
+            write_json(
+                Path(args.delivery_plan),
+                {
+                    "repo_tasks": [
+                        {
+                            "role": "modify",
+                            "repo": "repo",
+                            "repo_path": str(staging_repo),
+                            "allowed_files": ["src/service.py"],
+                        }
+                    ]
+                },
+            )
+            result = edit_readiness.assert_readiness(args)
+            self.assertEqual(result["decision"], "blocked")
+            self.assertTrue(any("_staging" in item for item in result["blockers"]))
+
     def test_permit_and_verify_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

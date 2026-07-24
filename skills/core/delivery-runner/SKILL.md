@@ -33,6 +33,8 @@ python3 scripts/delivery_runner.py \
 - Block on dependency violations, including an artifact that exists while an applicable prerequisite is missing or not accepted.
 - Compare recorded `input_digests` with every declared stage input; recursively block downstream artifacts when any input is stale, removed, or replaced.
 - Validate profile digest bindings such as `open_questions.json.spec_digest` against the current `spec.json`.
+- Always run the final consistency gate during inspection. Block invalid JSON artifacts, template-heading leakage such as `需求标题` in semantic fields, cross-domain leaked terms, external provider APIs used as local API contracts, persistence-required requirements marked data-not-applicable, fixed acceptance text missing from implementation evidence, hidden blocked gates, stale docs/index bindings, and delivery state that claims ready/done while blockers exist.
+- Treat stored `delivery_status.json` as advisory. If it claims `can_implement=true` or `can_release=true` while live inspection has blockers, block on the stale ready claim and require regenerated status from the current artifacts.
 - Block implementation until spec, technical design, architecture design, test design, delivery plan, delivery plan review, design review, docs quality, delivery docs readiness, git, and edit readiness are complete.
 - Delivery docs readiness requires a docs root, doc manifest, and Git repository.
 - Git readiness requires evidence that each modify repository fetched the remote and updated the base branch with `pull --ff-only`.
@@ -44,4 +46,4 @@ python3 scripts/delivery_runner.py \
 
 ## Output
 
-The output uses schema `codex-delivery-runner-status-v1` and includes the selected profile, detected impacts, stage results, dependency/staleness blockers, next stage/action, and the final `can_implement` and `can_release` decisions.
+The output uses schema `codex-delivery-runner-status-v1` and includes the selected profile, detected impacts, stage results, dependency/staleness blockers, final consistency result, next stage/action, and the final `can_implement` and `can_release` decisions.

@@ -9,13 +9,24 @@ from typing import Any
 
 SCHEMA = "codex-configuration-readiness-v1"
 CONFIG_TERMS = {
-    "database": ["database", "db", "sql", "数据库"],
-    "mq": ["mq", "queue", "topic", "kafka", "rabbit", "消息"],
-    "email": ["email", "mail", "smtp", "邮件"],
-    "sms": ["sms", "短信"],
-    "payment": ["payment", "pay", "refund", "callback", "支付", "退款", "回调"],
-    "secret": ["secret", "token", "certificate", "cert", "key", "密钥", "证书"],
-    "feature_flag": ["feature flag", "toggle", "灰度", "开关"],
+    "database": ["datasource", "jdbc", "database_url", "db_config", "数据库配置", "数据源"],
+    "mq": ["mq_config", "queue_name", "topic_name", "kafka", "rabbit", "消息配置", "队列配置"],
+    "email": ["smtp", "mail_host", "email_config", "邮件配置"],
+    "sms": ["sms_provider", "sms_config", "短信配置"],
+    "payment": ["payment_config", "payment_provider", "支付配置", "退款配置"],
+    "callback": ["callback_url", "callback_secret", "webhook", "回调地址", "回调密钥"],
+    "secret": ["secret", "token", "certificate", "cert", "密钥", "证书"],
+    "feature_flag": ["feature_flag", "feature flag", "toggle", "灰度开关", "功能开关"],
+}
+CONFIG_KEYS = {
+    "configuration",
+    "configuration_items",
+    "configuration_requirements",
+    "runtime_configuration",
+    "environment_variables",
+    "deployment_impact",
+    "deployment_topology",
+    "provider_configuration",
 }
 
 
@@ -33,32 +44,97 @@ def text_of(*values: Any) -> str:
     return json.dumps(values, ensure_ascii=False).lower()
 
 
-def analyze(*docs: dict[str, Any]) -> dict[str, Any]:
-    text = text_of(*docs)
+def as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def configuration_context(value: Any, key: str = "") -> list[Any]:
+    rows: list[Any] = []
+    key_lower = key.lower()
+    if key_lower in CONFIG_KEYS or "config" in key_lower or "配置" in key_lower or "environment" in key_lower:
+        rows.append(value)
+    if isinstance(value, dict):
+        for child_key, child in value.items():
+            rows.extend(configuration_context(child, str(child_key)))
+    elif isinstance(value, list):
+        for child in value:
+            rows.extend(configuration_context(child, key))
+    return rows
+
+
+def explicit_configuration_items(*docs: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for doc in docs:
+        for key in ("configuration_items", "configuration_requirements", "runtime_configuration", "environment_variables"):
+            for raw in as_list(doc.get(key)):
+                if isinstance(raw, dict):
+                    item = dict(raw)
+                    item.setdefault("key", str(item.get("name") or item.get("type") or key))
+                    item.setdefault("type", str(item.get("type") or "runtime"))
+                    item.setdefault("required", True)
+                    items.append(item)
+    return items
+
+
+def inferred_configuration_items(*docs: dict[str, Any]) -> list[dict[str, Any]]:
+    context = text_of(*configuration_context(list(docs)))
     items: list[dict[str, Any]] = []
     for kind, terms in CONFIG_TERMS.items():
-        if any(term in text for term in terms):
+        if any(term in context for term in terms):
             items.append({
                 "key": f"{kind}_configuration",
                 "type": kind,
-                "required": True,
+                "required": False,
                 "owner": "",
                 "environments": ["dev", "test", "staging", "production"],
-                "secret_handling": "no secret values in artifacts; use secret manager or CI variables" if kind == "secret" else "not sensitive unless provider requires credentials",
+                "secret_handling": "no secret values in artifacts; use secret manager or CI variables" if kind in {"secret", "callback"} else "not sensitive unless provider requires credentials",
                 "default_strategy": "",
                 "rollback_strategy": "",
                 "validation_evidence": [],
+                "source": "inferred_from_configuration_context",
             })
+    return items
+
+
+def normalize_item(item: dict[str, Any]) -> dict[str, Any]:
+    kind = str(item.get("type") or "runtime")
+    return {
+        "key": str(item.get("key") or item.get("name") or f"{kind}_configuration"),
+        "type": kind,
+        "required": bool(item.get("required", True)),
+        "owner": str(item.get("owner") or ""),
+        "environments": as_list(item.get("environments") or item.get("environment_scope") or ["dev", "test", "staging", "production"]),
+        "secret_handling": str(item.get("secret_handling") or ("no secret values in artifacts; use secret manager or CI variables" if kind in {"secret", "callback"} else "not sensitive unless provider requires credentials")),
+        "default_strategy": str(item.get("default_strategy") or item.get("default") or ""),
+        "rollback_strategy": str(item.get("rollback_strategy") or item.get("rollback") or ""),
+        "validation_evidence": as_list(item.get("validation_evidence")),
+        "source": str(item.get("source") or "explicit_configuration_item"),
+    }
+
+
+def analyze(*docs: dict[str, Any]) -> dict[str, Any]:
+    items_by_key: dict[str, dict[str, Any]] = {}
+    for raw in [*explicit_configuration_items(*docs), *inferred_configuration_items(*docs)]:
+        item = normalize_item(raw)
+        items_by_key[item["key"]] = item
+    items = list(items_by_key.values())
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     for item in items:
         for key in ["owner", "default_strategy", "rollback_strategy"]:
-            if not item.get(key):
+            if item.get("required") is True and not item.get(key):
                 blockers.append({"source": item["key"], "message": f"{key} is required"})
         if not item.get("validation_evidence"):
             warnings.append({"source": item["key"], "message": "validation evidence should be attached before release"})
+    if not items:
+        warnings.append({"source": "configuration_applicability", "message": "no runtime configuration change detected from explicit configuration context"})
     return {
         "schema": SCHEMA,
+        "applicable": bool(items),
         "decision": "blocked" if blockers else "ready",
         "configuration_items": items,
         "blockers": blockers,

@@ -47,6 +47,7 @@ COMMANDS = {
     "project-runner": ["python3", "skills/core/project-runner/scripts/project_runner.py"],
     "cross-repo-plan": ["python3", "skills/core/cross-repo-planner/scripts/cross_repo_plan.py"],
     "sync-local-skills": ["python3", "scripts/sync_local_skills.py"],
+    "post-change": ["python3", "skills/core/post-change-skill-sync/scripts/sync_after_change.py"],
 }
 
 
@@ -140,6 +141,10 @@ def render_status_human(result: dict[str, Any]) -> str:
     primary_value = result.get("primary_next_action")
     primary: dict[str, Any] = dict(primary_value) if isinstance(primary_value, dict) else {}
     blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
+    primary_stage = str(result.get("primary_blocker_stage") or "")
+    primary_blockers = result.get("primary_blockers") if isinstance(result.get("primary_blockers"), list) else []
+    downstream_blockers = result.get("downstream_blockers") if isinstance(result.get("downstream_blockers"), list) else []
+    push = result.get("pre_push_readiness") if isinstance(result.get("pre_push_readiness"), dict) else {}
     lines = [
         "Codex delivery status",
         f"- artifact_dir: {result.get('artifact_dir', '')}",
@@ -148,12 +153,31 @@ def render_status_human(result: dict[str, Any]) -> str:
         f"- next_action_type: {result.get('next_action_type', '')}",
         f"- can_implement: {human_bool(bool(result.get('can_implement')))}",
         f"- can_release: {human_bool(bool(result.get('can_release')))}",
+        f"- primary_blocker_stage: {primary_stage}",
         f"- next_summary: {primary.get('summary', '')}",
         f"- next_command: {primary.get('command') or result.get('next_command') or result.get('next_profile_command') or ''}",
     ]
+    if push:
+        lines.append(f"- pre_push_readiness: {push.get('decision', '')}")
+        push_blockers = push.get("blockers") if isinstance(push.get("blockers"), list) else []
+        if push_blockers:
+            lines.append("- pre_push_blockers:")
+            for item in push_blockers[:5]:
+                if isinstance(item, dict):
+                    lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
     if blockers:
         lines.append("- blockers:")
         for item in blockers[:5]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
+    if primary_blockers:
+        lines.append("- primary_blockers:")
+        for item in primary_blockers[:5]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
+    if downstream_blockers:
+        lines.append("- downstream_blockers:")
+        for item in downstream_blockers[:5]:
             if isinstance(item, dict):
                 lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
     return "\n".join(lines) + "\n"
@@ -198,6 +222,38 @@ def render_implement_human(result: dict[str, Any]) -> str:
     if missing:
         lines.append("- missing_gates:")
         lines.extend(f"  - {item}" for item in missing[:10])
+    return "\n".join(lines) + "\n"
+
+
+def render_post_change_human(result: dict[str, Any]) -> str:
+    lines = [
+        "Codex post-change report",
+        f"- decision: {result.get('decision', '')}",
+        f"- repo: {result.get('repo', '')}",
+        f"- branch: {result.get('branch', '')}",
+        f"- head: {result.get('head', '')}",
+        f"- changed_files: {len(result.get('changed_files', [])) if isinstance(result.get('changed_files'), list) else 0}",
+    ]
+    projection = result.get("push_readiness_projection") if isinstance(result.get("push_readiness_projection"), dict) else {}
+    if projection:
+        lines.append(f"- push_readiness: {projection.get('decision', '')}")
+        lines.append(f"- worktree_clean: {human_bool(bool(projection.get('worktree_clean')))}")
+        missing = projection.get("missing_artifacts") if isinstance(projection.get("missing_artifacts"), list) else []
+        if missing:
+            lines.append("- missing_pre_push_artifacts:")
+            lines.extend(f"  - {item}" for item in missing[:10])
+        push_blockers = projection.get("blockers") if isinstance(projection.get("blockers"), list) else []
+        if push_blockers:
+            lines.append("- push_blockers:")
+            for item in push_blockers[:8]:
+                if isinstance(item, dict):
+                    lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
+    blockers = result.get("blockers") if isinstance(result.get("blockers"), list) else []
+    if blockers:
+        lines.append("- blockers:")
+        for item in blockers[:8]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('source', 'unknown')}: {item.get('message', '')}")
     return "\n".join(lines) + "\n"
 
 
@@ -301,6 +357,14 @@ def main() -> int:
     p_implement.add_argument("--doc-id")
     p_implement.add_argument("--dry-run", action="store_true", default=True)
     p_implement.add_argument("--format", choices=["json", "human"], default="human")
+    p_post_change = sub.add_parser("post-change")
+    p_post_change.add_argument("--repo", default=".")
+    p_post_change.add_argument("--artifact-dir", required=True)
+    p_post_change.add_argument("--doc-id", default="")
+    p_post_change.add_argument("--docs-root")
+    p_post_change.add_argument("--require-docs", action="store_true")
+    p_post_change.add_argument("--base-ref", default="")
+    p_post_change.add_argument("--format", choices=["json", "human"], default="human")
     p_e2e = sub.add_parser("synthetic-e2e")
     p_e2e.add_argument("--out-dir", required=True)
     p_scenarios = sub.add_parser("scenarios")
@@ -441,6 +505,28 @@ def main() -> int:
         if not result:
             return code
         return 0 if result.get("decision") == "pass" else 2
+    if args.cmd == "post-change":
+        command = COMMANDS["post-change"] + ["--repo", args.repo, "--artifact-dir", args.artifact_dir]
+        if args.doc_id:
+            command.extend(["--doc-id", args.doc_id])
+        if args.docs_root:
+            command.extend(["--docs-root", args.docs_root])
+        if args.require_docs:
+            command.append("--require-docs")
+        if args.base_ref:
+            command.extend(["--base-ref", args.base_ref])
+        code, stdout, stderr = run_capture(command)
+        result = parse_json_text(stdout)
+        if args.format == "json":
+            print(json.dumps(result, ensure_ascii=False, indent=2) if result else stdout, end="" if result else "")
+        elif result:
+            print(render_post_change_human(result), end="")
+        else:
+            print(stdout, end="")
+            print(stderr, end="", file=sys.stderr)
+        if not result:
+            return code
+        return 0 if result.get("decision") != "block" else 2
     if args.cmd == "synthetic-e2e":
         return run_command(["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", args.out_dir])
     if args.cmd == "scenarios":

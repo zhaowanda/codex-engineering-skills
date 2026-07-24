@@ -68,22 +68,53 @@ def permit(repo: Path, allowed: list[str], issued_offset_seconds: int = -60) -> 
 
 
 class WorkspaceWriteGuardTests(unittest.TestCase):
-    def test_hook_installer_adds_pre_commit_and_pre_push(self) -> None:
+    def test_hook_installer_defaults_to_pre_commit_and_light_pre_push(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = init_repo(Path(tmp))
 
             result = install_write_guard_hooks.install(repo)
 
             self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile"], "framework_light")
+            self.assertEqual(result["hook_profile_reason"]["source"], "default")
             pre_commit = repo / ".git/hooks/pre-commit"
             pre_push = repo / ".git/hooks/pre-push"
             self.assertTrue(pre_commit.exists())
             self.assertTrue(pre_push.exists())
             self.assertIn("CODEX_EDIT_PERMIT", pre_commit.read_text(encoding="utf-8"))
-            self.assertIn("CODEX_ARTIFACT_DIR", pre_push.read_text(encoding="utf-8"))
-            self.assertIn("--checkpoint pre_push", pre_push.read_text(encoding="utf-8"))
-            self.assertIn("Agent Runtime script not found", pre_push.read_text(encoding="utf-8"))
+            content = pre_push.read_text(encoding="utf-8")
+            self.assertNotIn("CODEX_ARTIFACT_DIR", content)
+            self.assertNotIn("--checkpoint pre_push", content)
+            self.assertIn("git status --porcelain", content)
+
+    def test_hook_installer_delivery_strict_adds_harness_pre_push(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = init_repo(Path(tmp))
+
+            result = install_write_guard_hooks.install(repo, hook_profile="delivery_strict")
+
+            self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile"], "delivery_strict")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
+            pre_push = repo / ".git/hooks/pre-push"
+            self.assertTrue(pre_push.exists())
+            content = pre_push.read_text(encoding="utf-8")
+            self.assertIn("CODEX_ARTIFACT_DIR", content)
+            self.assertIn("--checkpoint pre_push", content)
+            self.assertIn("Agent Runtime script not found", content)
             self.assertTrue(all(Path(path).is_file() for path in [install_write_guard_hooks.HARNESS, install_write_guard_hooks.AGENT_RUNTIME]))
+
+    def test_hook_installer_off_skips_pre_push(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = init_repo(Path(tmp))
+
+            result = install_write_guard_hooks.install(repo, hook_profile="off")
+
+            self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile"], "off")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
+            self.assertTrue((repo / ".git/hooks/pre-commit").exists())
+            self.assertFalse((repo / ".git/hooks/pre-push").exists())
 
     def test_hook_installer_repairs_legacy_missing_pre_push_path_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,9 +126,10 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"})
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
 
             self.assertEqual(result["status"], "repaired")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             self.assertEqual(result["repaired"], [str(pre_push.resolve())])
             self.assertEqual(len(result["backups"]), 1)
             self.assertTrue(Path(result["backups"][0]).exists())
@@ -112,10 +144,82 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             pre_push = repo / ".git/hooks/pre-push"
             pre_push.write_text("#!/bin/sh\necho custom\n", encoding="utf-8")
 
-            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"})
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
 
             self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
             self.assertEqual(pre_push.read_text(encoding="utf-8"), "#!/bin/sh\necho custom\n")
+
+    def test_pre_push_hook_resolves_artifact_dir_from_branch_and_docs_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = init_repo(root)
+            run(["git", "checkout", "-B", "feature/REQ-123-hook"], repo)
+            artifact_dir = root / "company-delivery-docs" / "deliveries" / "REQ-123-hook" / "artifacts"
+            artifact_dir.mkdir(parents=True)
+            runtime = root / "runtime_stub.py"
+            runtime.write_text(
+                "import sys\nfrom pathlib import Path\nargs=sys.argv\nPath(args[args.index('--artifact-dir')+1], 'runtime').mkdir(parents=True, exist_ok=True)\n",
+                encoding="utf-8",
+            )
+            harness = root / "harness_stub.py"
+            harness.write_text(
+                "import json, sys\nfrom pathlib import Path\nout=Path(sys.argv[sys.argv.index('--out')+1]); out.parent.mkdir(parents=True, exist_ok=True); out.write_text(json.dumps({'decision':'pass'}))\n",
+                encoding="utf-8",
+            )
+
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
+            self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
+            env = os.environ.copy()
+            env.pop("CODEX_ARTIFACT_DIR", None)
+            env["CODEX_AGENT_RUNTIME_SCRIPT"] = str(runtime)
+            env["CODEX_HARNESS_SCRIPT"] = str(harness)
+            proc = subprocess.run([str(repo / ".git/hooks/pre-push")], cwd=repo, env=env, text=True, capture_output=True)
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue((artifact_dir / "harness/pre_push.json").exists())
+
+    def test_pre_push_hook_resolves_unique_docs_slug_when_branch_date_drifted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = init_repo(root)
+            run(["git", "checkout", "-B", "feature/REQ-20260720-feishu-approval-capability"], repo)
+            artifact_dir = root / "company-delivery-docs" / "deliveries" / "REQ-20260717-feishu-approval-capability" / "artifacts"
+            artifact_dir.mkdir(parents=True)
+            runtime = root / "runtime_stub.py"
+            runtime.write_text(
+                "import sys\nfrom pathlib import Path\nargs=sys.argv\nPath(args[args.index('--artifact-dir')+1], 'runtime').mkdir(parents=True, exist_ok=True)\n",
+                encoding="utf-8",
+            )
+            harness = root / "harness_stub.py"
+            harness.write_text(
+                "import json, sys\nfrom pathlib import Path\nout=Path(sys.argv[sys.argv.index('--out')+1]); out.parent.mkdir(parents=True, exist_ok=True); out.write_text(json.dumps({'decision':'pass'}))\n",
+                encoding="utf-8",
+            )
+
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="delivery_strict")
+            self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
+            env = os.environ.copy()
+            env.pop("CODEX_ARTIFACT_DIR", None)
+            env["CODEX_AGENT_RUNTIME_SCRIPT"] = str(runtime)
+            env["CODEX_HARNESS_SCRIPT"] = str(harness)
+            proc = subprocess.run([str(repo / ".git/hooks/pre-push")], cwd=repo, env=env, text=True, capture_output=True)
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue((artifact_dir / "harness/pre_push.json").exists())
+
+    def test_light_pre_push_blocks_dirty_tracked_workspace_without_delivery_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = init_repo(Path(tmp))
+            result = install_write_guard_hooks.install(repo, hook_names={"pre-push"}, hook_profile="framework_light")
+            self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["hook_profile_reason"]["source"], "cli")
+            (repo / "allowed.txt").write_text("base\nchange\n", encoding="utf-8")
+            proc = subprocess.run([str(repo / ".git/hooks/pre-push")], cwd=repo, text=True, capture_output=True)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("tracked workspace changes are still present", proc.stderr)
 
     def test_allowed_change_passes_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -129,6 +233,18 @@ class WorkspaceWriteGuardTests(unittest.TestCase):
             (repo / "allowed.txt").write_text("base\nchange\n", encoding="utf-8")
             audit = write_guard.audit(Namespace(repo=str(repo), permit=str(permit_path), snapshot=str(snapshot_path), doc_id="", out=str(audit_path)))
             self.assertEqual(audit["decision"], "ready")
+
+    def test_staging_repo_or_permit_blocks_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            staging_root = Path(tmp) / "_staging"
+            staging_root.mkdir()
+            repo = init_repo(staging_root)
+            permit_path = repo / ".codex" / "permit.json"
+            snapshot_path = repo / ".codex" / "snapshot.json"
+            write_json(permit_path, permit(repo, ["allowed.txt"]))
+            snap = write_guard.create_snapshot(Namespace(repo=str(repo), permit=str(permit_path), doc_id="", require_clean=False, out=str(snapshot_path)))
+            self.assertEqual(snap["decision"], "blocked")
+            self.assertTrue(any("_staging" in item for item in snap["blockers"]))
 
     def test_out_of_scope_change_blocks_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

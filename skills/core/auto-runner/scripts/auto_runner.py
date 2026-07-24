@@ -14,6 +14,14 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[4]
 SCHEMA = "codex-auto-runner-summary-v1"
 PROFILE_REGISTRY = ROOT / "config/workflow-profiles.example.yaml"
+LOCAL_PATH_PATTERNS = [
+    re.compile(r"/private/var/folders/[^\s\"']+"),
+    re.compile(r"/var/folders/[^\s\"']+"),
+    re.compile(r"/tmp/[^\s\"']+"),
+    re.compile(r"/home/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"/" + r"Users/[^/\s\"']+(?:/[^\s\"']*)?"),
+    re.compile(r"[A-Za-z]:\\[^\s\"']+"),
+]
 
 
 def load_workflow_contract_module() -> Any:
@@ -28,6 +36,18 @@ def load_workflow_contract_module() -> Any:
 WORKFLOW_CONTRACT = load_workflow_contract_module()
 
 
+def load_summary_contract_module() -> Any:
+    path = ROOT / "skills/core/delivery-runner/scripts/summary_contract.py"
+    spec = importlib.util.spec_from_file_location("auto_runner_summary_contract", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SUMMARY_CONTRACT = load_summary_contract_module()
+
+
 def load_agent_runtime_module() -> Any:
     path = ROOT / "skills/core/auto-runner/scripts/agent_runtime.py"
     spec = importlib.util.spec_from_file_location("auto_runner_agent_runtime", path)
@@ -39,6 +59,18 @@ def load_agent_runtime_module() -> Any:
 
 AGENT_RUNTIME = load_agent_runtime_module()
 RUNTIME_ARTIFACT_DIR: Path | None = None
+
+
+def load_requirement_ingestor_module() -> Any:
+    path = ROOT / "skills/core/requirement-document-ingestor/scripts/ingest_requirement.py"
+    spec = importlib.util.spec_from_file_location("auto_runner_requirement_ingestor", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+REQUIREMENT_INGESTOR = load_requirement_ingestor_module()
 
 
 def slug(value: str) -> str:
@@ -59,9 +91,61 @@ def default_out(doc_id: str) -> Path:
     return Path("/tmp/codex-auto") / doc_id
 
 
+def canonical_docs_artifact_dir(docs_root: Path, doc_id: str) -> Path:
+    return (docs_root / "deliveries" / doc_id / "artifacts").resolve()
+
+
+def sanitize_unmatched_local_path(value: str) -> str:
+    if value.startswith(("/private/var/", "/var/folders/", "/tmp/")):
+        return "<tmp>"
+    if value.startswith(("/" + "Users/", "/home/")):
+        return "<user-home>"
+    if re.match(r"^[A-Za-z]:\\", value):
+        return "<local-path>"
+    return value
+
+
+def sanitize_local_paths(value: str, artifact_dir: Path | None = None, docs_root: Path | None = None) -> str:
+    result = value
+    replacements: list[tuple[str, str]] = []
+    if artifact_dir:
+        replacements.append((str(artifact_dir), "<artifact-dir>"))
+        replacements.append((str(artifact_dir).replace(str(Path.home()), "<user-home>"), "<artifact-dir>"))
+    if docs_root:
+        replacements.append((str(docs_root), "<docs-root>"))
+        replacements.append((str(docs_root).replace(str(Path.home()), "<user-home>"), "<docs-root>"))
+        if docs_root.parent:
+            replacements.append((str(docs_root.parent), "<workspace>"))
+            replacements.append((str(docs_root.parent).replace(str(Path.home()), "<user-home>"), "<workspace>"))
+    replacements.append((str(ROOT), "<skills-root>"))
+    replacements.append((str(Path.home()), "<user-home>"))
+    for source, target in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        if source:
+            result = result.replace(source, target)
+    for pattern in LOCAL_PATH_PATTERNS:
+        result = pattern.sub(lambda match: sanitize_unmatched_local_path(match.group(0)), result)
+    return result
+
+
+def sanitize_for_artifact(value: Any, artifact_dir: Path | None = None, docs_root: Path | None = None) -> Any:
+    if isinstance(value, str):
+        return sanitize_local_paths(value, artifact_dir, docs_root)
+    if isinstance(value, list):
+        return [sanitize_for_artifact(item, artifact_dir, docs_root) for item in value]
+    if isinstance(value, dict):
+        return {str(key): sanitize_for_artifact(item, artifact_dir, docs_root) for key, item in value.items()}
+    return value
+
+
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifact_dir = path.parent if path.name == "auto_run_summary.json" else None
+    docs_root = None
+    if path.parent.name == "artifacts" and path.parent.parent.parent.name == "deliveries":
+        artifact_dir = path.parent
+        docs_root = path.parent.parent.parent.parent
+    payload = sanitize_for_artifact(data, artifact_dir=artifact_dir, docs_root=docs_root) if artifact_dir or docs_root else data
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -108,24 +192,40 @@ def default_docs_root() -> Path | None:
         return None
 
 
-def docs_readiness(docs_root: Path | None, doc_id: str) -> dict[str, Any]:
+def docs_source_blockers(docs_root: Path | None, doc_id: str, artifact_dir: Path | None) -> list[dict[str, Any]]:
+    if not docs_root or not artifact_dir:
+        return []
+    canonical_artifact_dir = (docs_root / "deliveries" / doc_id / "artifacts").resolve()
+    resolved_artifact_dir = artifact_dir.resolve()
+    if resolved_artifact_dir != canonical_artifact_dir and "_staging" in resolved_artifact_dir.parts:
+        return [{
+            "source": "docs_source",
+            "message": "artifact_dir under _staging cannot be used as the docs readiness source; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+        }]
+    return []
+
+
+def docs_readiness(docs_root: Path | None, doc_id: str, artifact_dir: Path | None = None) -> dict[str, Any]:
     if not docs_root:
         return {
             "schema": "codex-docs-readiness-v1",
             "decision": "block",
             "required": True,
             "docs_root": "",
+            "artifact_dir": str(artifact_dir) if artifact_dir else "",
             "blockers": [{"source": "docs_root", "message": "delivery docs repository root is required before implementation"}],
             "next_command": f"python3 skills/core/docs-governor/scripts/docs_governor.py init --docs-root delivery-docs --doc-id {doc_id}",
         }
     manifest = docs_root / "indexes" / f"{doc_id}.manifest.json"
     validation = load_docs_governor_module().validate(docs_root, doc_id, require_git=True)
     blockers = [dict(item) for item in validation.get("blockers", [])]
+    blockers.extend(docs_source_blockers(docs_root, doc_id, artifact_dir))
     return {
         "schema": "codex-docs-readiness-v1",
         "decision": "pass" if not blockers else "block",
         "required": True,
         "docs_root": str(docs_root),
+        "artifact_dir": str(artifact_dir) if artifact_dir else "",
         "manifest": str(manifest),
         "canonical_delivery": str(docs_root / "deliveries" / doc_id),
         "blockers": blockers,
@@ -172,6 +272,16 @@ def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifac
         return {"decision": "block", "reason": "docs_root is not configured", "blockers": [{"source": "docs_root", "message": "docs_root is not configured"}]}
     if not docs_root.exists():
         return {"decision": "block", "reason": "docs_root does not exist", "blockers": [{"source": "docs_root", "message": "docs_root does not exist"}]}
+    canonical_artifact_dir = docs_root / "deliveries" / doc_id / "artifacts"
+    if artifact_dir.resolve() != canonical_artifact_dir.resolve() and "_staging" in artifact_dir.parts:
+        return {
+            "decision": "block",
+            "reason": "artifact_dir under _staging cannot be synced into canonical delivery",
+            "blockers": [{
+                "source": "docs_source",
+                "message": "artifact_dir under _staging cannot be synced into canonical delivery; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+            }],
+        }
     proc = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=docs_root, text=True, capture_output=True)
     if proc.returncode != 0 or proc.stdout.strip() != "true":
         return {"decision": "block", "reason": "docs_root is not a git repository", "blockers": [{"source": "docs_git", "message": "docs_root is not a git repository"}]}
@@ -184,14 +294,14 @@ def sync_docs_artifacts(docs_root: Path | None, doc_id: str, title: str, artifac
 def run_docs_quality(docs_root: Path | None, docs_sync: dict[str, Any], out: Path) -> dict[str, Any]:
     quality_path = out / "docs_quality.json"
     if not docs_root or docs_sync.get("decision") != "pass":
-        result = {
+        quality_path.unlink(missing_ok=True)
+        return {
             "schema": "codex-docs-quality-aggregate-v1",
-            "decision": "block",
-            "blockers": [{"source": "docs_sync", "message": "docs sync must pass before docs quality review"}],
+            "decision": "not_applicable",
+            "reason": "docs sync must pass before docs quality review",
+            "blockers": [],
             "reviews": [],
         }
-        write_json(quality_path, result)
-        return result
     reviews: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -308,6 +418,201 @@ def load_profile_registry(path: Path = PROFILE_REGISTRY) -> dict[str, dict[str, 
         if isinstance(item, dict) and item.get("name"):
             profiles[str(item["name"])] = item
     return profiles
+
+
+def project_registry_path() -> Path:
+    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    return codex_home / "skills" / "company" / "projects.yaml"
+
+
+def load_project_registry(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    raw = load_restricted_yaml(path or project_registry_path())
+    projects: dict[str, dict[str, Any]] = {}
+    for item in raw.get("projects", []) if isinstance(raw.get("projects"), list) else []:
+        if isinstance(item, dict) and item.get("name"):
+            projects[str(item["name"])] = item
+    return projects
+
+
+def project_checkout_path(project: str, registry_item: dict[str, Any] | None = None) -> Path:
+    hint = ""
+    if isinstance(registry_item, dict):
+        repo = registry_item.get("repo") if isinstance(registry_item.get("repo"), dict) else {}
+        if isinstance(repo, dict):
+            hint = str(repo.get("local_path_hint") or "")
+    candidate = Path.home() / "hl-workspace" / (hint or project)
+    return candidate
+
+
+def project_skill_dir(project: str) -> Path:
+    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    return codex_home / "skills" / "company" / project
+
+
+def project_query_terms(text: str) -> list[str]:
+    stopwords = {
+        "需求", "功能", "页面", "系统", "运营", "用户", "设备", "状态", "订单", "导出", "列表", "按钮",
+        "接口", "结果", "流程", "业务", "目标", "规则", "模块", "场景", "页面", "表单", "审批", "记录",
+        "order", "export", "page", "admin", "list", "button", "form", "result", "query", "filter",
+        "system", "user", "device", "status", "state", "task", "flow", "change", "update", "show",
+        "view", "open", "manage", "feature", "action",
+    }
+    terms: list[str] = []
+    for term in re.findall(r"(?:/[A-Za-z0-9_{}.*-]+)+|[A-Za-z_][A-Za-z0-9_]{3,}|[\u4e00-\u9fff]{2,12}", text):
+        clean = term.strip().lower()
+        if clean in stopwords:
+            continue
+        if clean not in terms:
+            terms.append(clean)
+    return terms[:40]
+
+
+def project_reference_score(text: str, project: str) -> int:
+    skill_dir = project_skill_dir(project)
+    if not skill_dir.is_dir():
+        return 0
+    terms = project_query_terms(text)
+    if not terms:
+        return 0
+    hits = 0
+    files = [skill_dir / "SKILL.md"]
+    references = skill_dir / "references"
+    if references.is_dir():
+        files.extend(sorted(path for path in references.iterdir() if path.is_file())[:12])
+    for path in files:
+        try:
+            blob = path.read_text(encoding="utf-8", errors="ignore").lower()
+        except Exception:
+            continue
+        matched = [term for term in terms if term in blob]
+        hits += min(len(matched), 6)
+    return hits * 3
+
+
+def project_signal_score(text: str, registry_item: dict[str, Any]) -> int:
+    lower = text.lower()
+    repo_type = str(registry_item.get("type") or "")
+    roles = {str(item) for item in as_list(registry_item.get("roles"))}
+    dependencies = {str(item).lower() for item in as_list(registry_item.get("dependencies"))}
+    hint = str((registry_item.get("repo") or {}).get("local_path_hint") or registry_item.get("name") or "").lower() if isinstance(registry_item.get("repo"), dict) else str(registry_item.get("name") or "").lower()
+    score = 0
+    backend_signals = {
+        "data", "database", "table", "history", "status", "state", "retry", "task", "job", "scheduler",
+        "mq", "topic", "queue", "callback", "notify", "notification", "device", "version", "approval",
+        "persistence", "storage", "sync", "bill", "settlement", "package", "历史", "状态", "重试", "任务",
+        "定时", "回调", "通知", "设备", "版本", "审批", "存储", "同步", "结算", "软件包", "升级包", "飞书",
+    }
+    frontend_signals = {
+        "ui", "page", "button", "menu", "table", "form", "route", "browser", "frontend", "dialog",
+        "list", "display", "show", "panel", "screen", "页面", "按钮", "菜单", "表单", "路由", "浏览器", "弹窗",
+    }
+    if repo_type == "backend":
+        score += 2
+    if repo_type == "frontend":
+        score += 1
+    if "backend" in roles:
+        score += 2
+    if "frontend" in roles:
+        score += 1
+    if hint and hint in lower:
+        score += 15
+    if any(term in lower for term in backend_signals):
+        score += 3 * sum(1 for term in backend_signals if term in lower)
+    if any(term in lower for term in frontend_signals):
+        score += 2 * sum(1 for term in frontend_signals if term in lower)
+    if dependencies and any(dep in lower for dep in dependencies):
+        score += 5
+    return score
+
+
+def resolve_project_binding(
+    input_text: str,
+    repo: Path | None = None,
+    project: str | None = None,
+    registry: dict[str, dict[str, Any]] | None = None,
+) -> tuple[Path | None, str | None, dict[str, Any]]:
+    registry = registry or load_project_registry()
+    if not registry:
+        return repo, project, {
+            "repo_root": str(repo) if repo else "",
+            "project": project or "",
+            "project_skill_loaded": False,
+            "project_registry_path": str(project_registry_path()),
+            "resolution_mode": "unresolved",
+            "resolution_reason": "project registry is missing",
+        }
+
+    if project and not repo:
+        registry_item = registry.get(project, {})
+        checkout = project_checkout_path(project, registry_item)
+        if checkout.exists():
+            repo = checkout
+
+    if repo and not project:
+        for name, item in registry.items():
+            checkout = project_checkout_path(name, item)
+            if checkout.exists() and checkout.resolve() == repo.resolve():
+                project = name
+                break
+
+    selected_project = project or ""
+    selected_repo = repo
+    resolution_mode = "explicit" if repo and project else "unresolved"
+    resolution_reason = "repo/project were provided explicitly" if repo and project else "repo/project were not provided"
+    candidates: list[dict[str, Any]] = []
+
+    if project:
+        current = registry.get(project, {})
+        current_type = str(current.get("type") or "")
+        if current_type == "frontend":
+            for dep_index, dep in enumerate(as_list(current.get("dependencies"))):
+                dep_name = str(dep)
+                dep_item = registry.get(dep_name, {})
+                if str(dep_item.get("type") or "") != "backend":
+                    continue
+                checkout = project_checkout_path(dep_name, dep_item)
+                signal_score = project_signal_score(input_text, dep_item)
+                reference_score = project_reference_score(input_text, dep_name)
+                candidates.append({
+                    "project": dep_name,
+                    "repo_root": str(checkout),
+                    "score": reference_score + signal_score,
+                    "reference_score": reference_score,
+                    "signal_score": signal_score,
+                    "dependency_index": dep_index,
+                    "repo_type": str(dep_item.get("type") or ""),
+                    "local_path_hint": str((dep_item.get("repo") or {}).get("local_path_hint") or ""),
+                    "skill": str(dep_item.get("skill") or dep_name),
+                })
+            candidates.sort(
+                key=lambda item: (
+                    -int(item.get("reference_score") or 0),
+                    -int(item.get("signal_score") or 0),
+                    int(item.get("dependency_index") or 0),
+                    item["project"],
+                ),
+            )
+            best = candidates[0] if candidates else {}
+            if best and (int(best.get("reference_score") or 0) > 0 or int(best.get("signal_score") or 0) >= 10):
+                candidate_repo = Path(str(best.get("repo_root") or ""))
+                if candidate_repo.exists():
+                    selected_project = str(best["project"])
+                    selected_repo = candidate_repo
+                    resolution_mode = "registry_related_repo"
+                    resolution_reason = f"current project {project} is frontend and the requirement maps to a direct backend dependency"
+
+    binding = {
+        "repo_root": str(selected_repo) if selected_repo else str(repo or ""),
+        "project": selected_project,
+        "project_skill_loaded": bool(selected_project and selected_project in registry),
+        "project_registry_path": str(project_registry_path()),
+        "resolution_mode": resolution_mode,
+        "resolution_reason": resolution_reason,
+        "candidates": candidates[:5],
+    }
+    if selected_project and selected_repo and selected_repo.exists():
+        return selected_repo, selected_project, binding
+    return repo, project, binding
 
 
 def run_command(name: str, args: list[str]) -> dict[str, Any]:
@@ -452,6 +757,32 @@ def run_if_needed(name: str, output: Path, command: list[str], force: bool, gene
         generated.append(output.name)
 
 
+def refresh_clarified_requirement_ir(out: Path, doc_id: str, clarified: Path, generated: list[str]) -> None:
+    text = clarified.read_text(encoding="utf-8")
+    requirement_ir = REQUIREMENT_INGESTOR.parse_markdown_ir(text, doc_id, clarified)
+    requirement_ir_path = out / "requirement_ir.json"
+    write_json(requirement_ir_path, requirement_ir)
+    if "requirement_ir.json" not in generated:
+        generated.append("requirement_ir.json")
+
+    ingestion_path = out / "requirement_ingestion.json"
+    ingestion = read_json(ingestion_path)
+    if ingestion:
+        ingestion["source_file"] = str(clarified)
+        ingestion["normalized_text"] = str(clarified)
+        ingestion["requirement_ir"] = str(requirement_ir_path)
+        ingestion["features"] = REQUIREMENT_INGESTOR.detect_features(text)
+        ingestion["next_action"] = "Run spec-governor on requirement.clarified.txt."
+        write_json(ingestion_path, ingestion)
+        WORKFLOW_CONTRACT.bind_lineage(
+            ingestion_path,
+            "ingest",
+            [clarified],
+            command=["auto-runner", "refresh-clarified-requirement-ir", str(clarified)],
+            workspace=ROOT,
+        )
+
+
 def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any], include_inspect: bool = True) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
     for step in steps:
@@ -473,6 +804,119 @@ def collect_blockers(steps: list[dict[str, Any]], inspect_status: dict[str, Any]
     return blockers
 
 
+def artifact_decision(data: dict[str, Any]) -> str:
+    return str(data.get("decision") or data.get("status") or "")
+
+
+def unique_blockers(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = (str(item.get("source") or ""), str(item.get("message") or ""))
+        if key in seen:
+            continue
+        unique.append(item)
+        seen.add(key)
+    return unique
+
+
+def not_applicable_gate(schema: str, reason: str, source: str = "workflow") -> dict[str, Any]:
+    return {
+        "schema": schema,
+        "decision": "not_applicable",
+        "reason": reason,
+        "blockers": [{"source": source, "message": reason}],
+    }
+
+
+def design_phase_blockers(out: Path, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blockers = [item for item in collect_blockers(steps, {}, include_inspect=False) if isinstance(item, dict)]
+    stage_artifacts = {
+        "spec": out / "spec.json",
+        "open_questions": out / "open_questions.json",
+        "technical_design": out / "technical_design.json",
+        "architecture_design": out / "architecture_design.json",
+        "test_design": out / "test_design.json",
+        "delivery_plan": out / "delivery_plan.json",
+        "delivery_plan_review": out / "delivery_plan_review.json",
+        "design_review": out / "design_architecture_review.json",
+        "harness_design": out / "harness_validation.json",
+    }
+    accepted = {
+        "spec": {"pass", "ready_for_design"},
+        "open_questions": {"pass", "ready", "answered"},
+        "technical_design": {"pass", "ready"},
+        "architecture_design": {"pass", "ready"},
+        "test_design": {"pass", "ready"},
+        "delivery_plan": {"pass", "ready"},
+        "delivery_plan_review": {"pass", "ready", "approved"},
+        "design_review": {"pass", "approved"},
+        "harness_design": {"pass"},
+    }
+    for source, path in stage_artifacts.items():
+        data = read_json(path)
+        if not data:
+            continue
+        decision = artifact_decision(data)
+        if decision and decision not in accepted[source]:
+            blockers.append({"source": source, "message": f"artifact decision is {decision}"})
+        for key in ["blockers", "active_blockers", "missing_evidence"]:
+            value = data.get(key)
+            if value:
+                blockers.append({"source": source, "message": f"{key} present"})
+    return unique_blockers(blockers)
+
+
+def source_location_readiness(out: Path, project_out: Path | None = None) -> dict[str, Any]:
+    source_path = (project_out / "source_location_evidence.json") if project_out else out / "source_location_evidence.json"
+    bundle_path = (project_out / "evidence_bundle.json") if project_out else out / "evidence_bundle.json"
+    harness_path = out / "harness/source_location.json"
+    source_data = read_json(source_path)
+    bundle_data = read_json(bundle_path)
+    harness_data = read_json(harness_path)
+    confirmed = [
+        str(item.get("path"))
+        for item in as_list(source_data.get("confirmed_anchors"))
+        if isinstance(item, dict) and item.get("path")
+    ]
+    rejected = [
+        str(item.get("path"))
+        for item in as_list(source_data.get("rejected_candidates"))
+        if isinstance(item, dict) and item.get("path")
+    ]
+    blockers: list[dict[str, Any]] = []
+    if project_out is None:
+        return {
+            "decision": "not_applicable",
+            "applicable": False,
+            "confirmed_anchor_count": 0,
+            "rejected_candidate_count": 0,
+            "blockers": [],
+        }
+    if source_data.get("decision") != "pass":
+        blockers.append({"source": "source_location_evidence", "message": "requirement-specific source location evidence did not pass"})
+    if harness_data and harness_data.get("decision") != "pass":
+        blockers.extend(item for item in as_list(harness_data.get("blockers")) if isinstance(item, dict))
+    if not confirmed:
+        blockers.append({"source": "source_location_evidence", "message": "no confirmed source anchors"})
+    if bundle_data.get("stale_references"):
+        blockers.append({"source": "project_overlay", "message": "project overlay contains stale references"})
+    return {
+        "decision": "pass" if not blockers else "block",
+        "applicable": True,
+        "source_location_decision": str(source_data.get("decision") or ""),
+        "harness_decision": str(harness_data.get("decision") or ""),
+        "confirmed_anchor_count": len(confirmed),
+        "confirmed_anchors": confirmed[:8],
+        "rejected_candidate_count": len(rejected),
+        "rejected_candidates": rejected[:8],
+        "local_project_binding": bundle_data.get("local_project_binding") if isinstance(bundle_data.get("local_project_binding"), dict) else {},
+        "blockers": blockers,
+    }
+
+
 def as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -485,9 +929,16 @@ def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_rep
     name = str(profile.get("name") or "")
     score = 0
     signals: list[str] = []
+    simple_defect_impacts = {"business_flow", "workflow", "state", "status"}
     if explicit_profile and explicit_profile == name:
         score += 100
         signals.append("explicit_profile")
+    if name == "small_feature-lite" and lane == "small_change" and not impacts and not has_repo:
+        score += 70
+        signals.append("lite_small_change")
+    if name == "bugfix-lite" and lane in {"bugfix", "hotfix"} and impacts.issubset(simple_defect_impacts):
+        score += 70
+        signals.append("lite_defect")
     trigger_lanes = {str(item) for item in as_list(profile.get("trigger_lanes"))}
     if lane and lane in trigger_lanes:
         score += 45
@@ -497,7 +948,7 @@ def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_rep
     if matched_impacts:
         score += 35 + (5 * len(matched_impacts))
         signals.extend(f"impact:{item}" for item in matched_impacts)
-    if has_repo and name != "small_feature":
+    if has_repo and name not in {"small_feature", "small_feature-lite"}:
         score += 5
         signals.append("repo_context")
     if {"data", "security"} & impacts and name == "data_migration":
@@ -506,7 +957,7 @@ def profile_score(profile: dict[str, Any], lane: str, impacts: set[str], has_rep
     if lane in {"bugfix", "hotfix"} and name in {"bugfix", "hotfix"}:
         score += 60
         signals.append("defect_containment")
-    if not signals and name == "small_feature":
+    if not signals and name in {"small_feature", "small_feature-lite"}:
         score += 5
         signals.append("default_fallback")
     return {"profile": name, "score": score, "signals": signals}
@@ -530,10 +981,21 @@ def workflow_strictness(spec: dict[str, Any], profile: dict[str, Any], confidenc
     impacts = required_impacts(spec)
     profile_name = str(profile.get("name") or "")
     regulated_impacts = {"data", "database", "security", "permission", "tenant", "payment", "performance", "configuration", "release"}
-    standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo", "mq", "async", "scheduler", "task", "job", "cache", "integration"}
+    standard_upgrade_impacts = {"api", "ui", "frontend", "cross_repo", "mq", "async", "scheduler", "task", "job", "cache", "integration", "business_flow", "workflow", "state", "status"}
+    workflow_surface = impacts & {"business_flow", "workflow", "state", "status"}
+    mixed_complexity = bool(workflow_surface and impacts & {"api", "cross_repo", "integration", "data", "permission"})
     reasons: list[str] = []
-    if impacts & regulated_impacts or "data_migration" in profile_name:
+    if profile_name == "small_feature-lite" and not impacts:
+        reasons.append("lite small-feature profile with no declared impact")
+        tier = "light"
+    elif profile_name == "bugfix-lite" and impacts <= workflow_surface:
+        reasons.append("lite bugfix profile without elevated impact")
+        tier = "light"
+    elif impacts & regulated_impacts or "data_migration" in profile_name:
         reasons.extend(sorted(impacts & regulated_impacts) or ["data_migration_profile"])
+        tier = "regulated"
+    elif mixed_complexity:
+        reasons.append("workflow/stateful change spans business flow with contract/data/permission impact")
         tier = "regulated"
     elif lane in {"bugfix", "hotfix"} and impacts & standard_upgrade_impacts:
         reasons.extend(f"{item} impact raises defect fix above light tier" for item in sorted(impacts & standard_upgrade_impacts))
@@ -606,6 +1068,14 @@ def effective_profile_for_strictness(profile: dict[str, Any], strictness: dict[s
     effective["expected_artifacts"] = controls["expected_artifacts"]
     effective["strictness_gate_overrides"] = controls["gate_overrides"]
     return effective
+
+
+def required_gate_artifact_names(profile: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for item in as_list(profile.get("required_gate_artifacts")):
+        if isinstance(item, dict) and item.get("artifact"):
+            names.append(str(item["artifact"]))
+    return names
 
 
 def strictness_gate_gaps(profile: dict[str, Any], strictness: dict[str, Any]) -> list[dict[str, Any]]:
@@ -725,44 +1195,54 @@ def select_workflow_profile_with_reason(spec: dict[str, Any], has_repo: bool = F
         mode = "explicit_profile"
         reason = "Profile was explicitly requested."
     elif lane in {"bugfix", "hotfix"}:
-        base_profile = profiles.get("bugfix", {})
-        for profile in profiles.values():
-            if lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
-                base_profile = profile
-                break
-        mode = "lane"
-        reason = f"Spec lane {lane} anchors defect containment; impact overlays are merged instead of replacing bugfix gates."
-    else:
-        priority = [
-            ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
-            ("database", "data_migration", "Database changes require migration, rollback, performance, and release evidence gates."),
-            ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
-            ("permission", "data_migration", "Permission changes require security, test, and release evidence gates."),
-            ("configuration", "data_migration", "Configuration changes require configuration, rollback, and release evidence gates."),
-            ("performance", "data_migration", "Performance-sensitive changes require performance and release evidence gates."),
-            ("release", "data_migration", "Release-sensitive changes require production readiness gates."),
-            ("api", "cross_repo_api", "API changes require contract and traceability gates."),
-            ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
-            ("frontend", "frontend_change", "Frontend changes require browser acceptance evidence."),
-        ]
-        base_profile = {}
-        for impact, profile_name, item_reason in priority:
-            if impact in impacts and profile_name in profiles:
-                base_profile = profiles[profile_name]
-                mode = "impact_surface"
-                reason = item_reason
-                break
-        if not base_profile:
+        simple_defect_impacts = {"business_flow", "workflow", "state", "status"}
+        if impacts.issubset(simple_defect_impacts) and "bugfix-lite" in profiles:
+            base_profile = profiles["bugfix-lite"]
+            reason = "Simple defect without declared impact uses the lite bugfix workflow."
+        else:
+            base_profile = profiles.get("bugfix", {})
             for profile in profiles.values():
-                if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
+                if lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
                     base_profile = profile
-                    mode = "lane"
-                    reason = f"Spec lane {lane} is declared in profile trigger_lanes."
                     break
-        if not base_profile:
-            base_profile = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
-            mode = "fallback"
-            reason = "No explicit, repository, impact, or lane trigger matched; using default small feature workflow."
+            reason = f"Spec lane {lane} anchors defect containment; impact overlays are merged instead of replacing bugfix gates."
+        mode = "lane"
+    else:
+        if lane == "small_change" and not impacts and not has_repo and "small_feature-lite" in profiles:
+            base_profile = profiles["small_feature-lite"]
+            mode = "lane"
+            reason = "Small single-scope request without declared impact uses the lite small-feature workflow."
+        else:
+            priority = [
+                ("data", "data_migration", "Data changes require migration, security, performance, and release evidence gates."),
+                ("database", "data_migration", "Database changes require migration, rollback, performance, and release evidence gates."),
+                ("security", "data_migration", "Security-sensitive data handling requires the high-risk data/security gate set."),
+                ("permission", "data_migration", "Permission changes require security, test, and release evidence gates."),
+                ("configuration", "data_migration", "Configuration changes require configuration, rollback, and release evidence gates."),
+                ("performance", "data_migration", "Performance-sensitive changes require performance and release evidence gates."),
+                ("release", "data_migration", "Release-sensitive changes require production readiness gates."),
+                ("api", "cross_repo_api", "API changes require contract and traceability gates."),
+                ("ui", "frontend_change", "UI changes require frontend acceptance evidence."),
+                ("frontend", "frontend_change", "Frontend changes require browser acceptance evidence."),
+            ]
+            base_profile = {}
+            for impact, profile_name, item_reason in priority:
+                if impact in impacts and profile_name in profiles:
+                    base_profile = profiles[profile_name]
+                    mode = "impact_surface"
+                    reason = item_reason
+                    break
+            if not base_profile:
+                for profile in profiles.values():
+                    if lane and lane in {str(item) for item in as_list(profile.get("trigger_lanes"))}:
+                        base_profile = profile
+                        mode = "lane"
+                        reason = f"Spec lane {lane} is declared in profile trigger_lanes."
+                        break
+            if not base_profile:
+                base_profile = profiles.get("small_feature", {"name": "small_feature", "required_skills": [], "expected_artifacts": []})
+                mode = "fallback"
+                reason = "No explicit, repository, impact, or lane trigger matched; using default small feature workflow."
     overlay_names = [name for name in impact_overlay_profile_names(impacts, has_repo) if name in profiles and name != str(base_profile.get("name") or "")]
     overlays = [profiles[name] for name in overlay_names]
     selected = merge_workflow_profiles(base_profile, overlays) if overlays else base_profile
@@ -1348,10 +1828,18 @@ def run(
     effective_doc_language = infer_doc_language(input_text, doc_language)
     doc_id = doc_id or default_doc_id(input_path)
     title = title or default_title(input_path)
-    out = (out or default_out(doc_id)).resolve()
-    out.mkdir(parents=True, exist_ok=True)
     effective_docs_root = docs_root.resolve() if docs_root else default_docs_root()
-    docs_status = docs_readiness(effective_docs_root, doc_id)
+    if docs_root:
+        out = canonical_docs_artifact_dir(docs_root.resolve(), doc_id)
+    else:
+        out = (out or default_out(doc_id)).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    docs_status = docs_readiness(effective_docs_root, doc_id, out)
+    resolved_repo, resolved_project, project_binding = resolve_project_binding(input_text, repo, project)
+    if resolved_repo:
+        repo = resolved_repo
+    if resolved_project:
+        project = resolved_project
     write_json(out / "auto_run_summary.json", {
         "schema": SCHEMA,
         "decision": "in_progress",
@@ -1359,6 +1847,7 @@ def run(
         "title": title,
         "out_dir": str(out),
         "docs_readiness": docs_status,
+        "local_project_binding": project_binding,
     })
 
     generated: list[str] = []
@@ -1403,7 +1892,7 @@ def run(
         effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
         docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
         if docs_sync.get("decision") == "pass":
-            docs_status = docs_readiness(effective_docs_root, doc_id)
+            docs_status = docs_readiness(effective_docs_root, doc_id, out)
         strictness = workflow_strictness({}, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
         effective_profile = effective_profile_for_strictness(selected_profile, strictness)
         blockers = collect_blockers(steps, inspect_status)
@@ -1435,7 +1924,7 @@ def run(
             "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
             "strictness_gate_gaps": strictness_gaps,
             "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
-            "required_gates": selected_profile.get("required_skills", []),
+            "required_gates": required_gate_artifact_names(selected_profile),
             "docs_readiness": docs_status,
             "docs_sync": docs_sync,
             "doc_language": effective_doc_language,
@@ -1474,16 +1963,6 @@ def run(
     )
     if (out / "requirement_ir.json").exists():
         generated.append("requirement_ir.json")
-    if "requirement_ingestion.json" not in skipped or not (out / "runtime/checkpoints/intake.json").exists():
-        AGENT_RUNTIME.append_event(
-            out,
-            "requirement_ingested",
-            "requirement-document-ingestor",
-            target=str(input_path),
-            evidence_refs=["requirement_ingestion.json", "requirement_ir.json"],
-        )
-        AGENT_RUNTIME.checkpoint(out, "intake", ["requirement_ingestion.json", "requirement_ir.json"])
-        generated.append("runtime/checkpoints/intake.json")
 
     spec_input = normalized
     clarification_answers = out / "clarification_answers.md"
@@ -1497,7 +1976,19 @@ def run(
             encoding="utf-8",
         )
         spec_input = clarified
+        refresh_clarified_requirement_ir(out, doc_id, clarified, generated)
         generated.append(clarified.name)
+
+    if "requirement_ingestion.json" not in skipped or not (out / "runtime/checkpoints/intake.json").exists() or spec_input.name == "requirement.clarified.txt":
+        AGENT_RUNTIME.append_event(
+            out,
+            "requirement_ingested",
+            "requirement-document-ingestor",
+            target=str(spec_input),
+            evidence_refs=["requirement_ingestion.json", "requirement_ir.json"],
+        )
+        AGENT_RUNTIME.checkpoint(out, "intake", ["requirement_ingestion.json", "requirement_ir.json"])
+        generated.append("runtime/checkpoints/intake.json")
 
     if repo and project:
         project_out = out / "project_understanding"
@@ -1539,8 +2030,7 @@ def run(
             "--bundle-out",
             str(project_out / "evidence_bundle.json"),
         ]
-        if project_skill_dir.is_dir():
-            source_location_command.extend(["--project-skill-dir", str(project_skill_dir)])
+        source_location_command.extend(["--project-skill-dir", str(project_skill_dir)])
         run_if_needed(
             "source_location_evidence",
             project_out / "source_location_evidence.json",
@@ -1610,10 +2100,11 @@ def run(
 
     if spec_data.get("decision") == "blocked" or spec_data.get("design_allowed") is False:
         strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+        location_status = source_location_readiness(out, project_out)
         effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
         docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language, human_section="spec")
         if docs_sync.get("decision") == "pass":
-            docs_status = docs_readiness(effective_docs_root, doc_id)
+            docs_status = docs_readiness(effective_docs_root, doc_id, out)
         blockers = collect_blockers(steps, {}, include_inspect=False)
         blockers.extend(
             item for item in as_list((spec_data.get("requirements_understanding") or {}).get("blockers"))
@@ -1641,7 +2132,8 @@ def run(
             "impact_applicability": applicability_decisions(spec_data),
             "workflow_strictness": strictness,
             "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
-            "required_gates": selected_profile.get("required_skills", []),
+            "required_gates": required_gate_artifact_names(selected_profile),
+            "source_location_readiness": location_status,
             "docs_readiness": docs_status,
             "docs_sync": docs_sync,
             "doc_language": effective_doc_language,
@@ -1774,6 +2266,9 @@ def run(
         "--out",
         str(design_review),
     ]
+    architecture_framing_artifact = out / "architecture_framing.json"
+    if architecture_framing_artifact.exists():
+        design_review_command.extend(["--architecture-framing", str(architecture_framing_artifact)])
     for argument, artifact_name in [
         ("--ui-ue-design", "ui_ue_design.json"),
         ("--ui-ue-review", "ui_ue_review.json"),
@@ -1920,21 +2415,86 @@ def run(
         steps,
     )
 
+    finalize_runtime_lineage(out)
     effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
     docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
     if docs_sync.get("decision") == "pass":
-        docs_status = docs_readiness(effective_docs_root, doc_id)
+        docs_status = docs_readiness(effective_docs_root, doc_id, out)
     docs_quality = run_docs_quality(effective_docs_root, docs_sync, out)
-    WORKFLOW_CONTRACT.bind_lineage(
-        out / "docs_quality.json",
-        "docs_quality",
-        workflow_stage_inputs(out / "docs_quality.json"),
-        command=["docs_quality", str(effective_docs_root or "")],
-        workspace=ROOT,
-    )
-    generated.append("docs_quality.json")
+    if (out / "docs_quality.json").exists():
+        WORKFLOW_CONTRACT.bind_lineage(
+            out / "docs_quality.json",
+            "docs_quality",
+            workflow_stage_inputs(out / "docs_quality.json"),
+            command=["docs_quality", str(effective_docs_root or "")],
+            workspace=ROOT,
+        )
+        generated.append("docs_quality.json")
 
-    finalize_runtime_lineage(out)
+    design_blockers = design_phase_blockers(out, steps)
+    if design_blockers:
+        strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+        location_status = source_location_readiness(out, project_out)
+        effective_profile = effective_profile_for_strictness(selected_profile, strictness)
+        strictness_gaps = strictness_gate_gaps(selected_profile, strictness)
+        design_blockers.extend(strictness_gaps)
+        design_blockers = unique_blockers(design_blockers)
+        primary_stage = SUMMARY_CONTRACT.primary_blocker_stage(design_blockers, "design_review")
+        next_command = "python3 scripts/codex_eng.py clarify --artifact-dir {}".format(out) if primary_stage == "requirements_clarification" else "Resolve design-stage blockers before docs sync or implementation readiness."
+        summary = {
+            "schema": SCHEMA,
+            "decision": "block",
+            "stage_result": {"decision": "block", "can_continue": False, "exit_code": 2, "blockers": design_blockers},
+            "doc_id": doc_id,
+            "title": title,
+            "input": str(input_path),
+            "out_dir": str(out),
+            "generated_artifacts": sorted(set(generated)),
+            "skipped_artifacts": skipped,
+            "steps": steps,
+            "workflow_metrics": workflow_metrics(steps, generated, skipped, selected_profile),
+            "workflow_profile": selected_profile,
+            "profile_selection_reason": profile_selection_reason,
+            "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
+            "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
+            "profile_selection_candidates": profile_selection_reason.get("profile_selection_candidates", []),
+            "workflow_strictness": strictness,
+            "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
+            "strictness_gate_gaps": strictness_gaps,
+            "required_gates": required_gate_artifact_names(selected_profile),
+            "source_location_readiness": location_status,
+            "docs_readiness": docs_status,
+            "docs_sync": docs_sync,
+            "docs_quality": docs_quality,
+            "doc_language": effective_doc_language,
+            "readiness_blockers": [],
+            "missing_profile_artifacts": [],
+            "profile_gate_gaps": [],
+            "next_profile_command": selected_profile.get("next_safe_command", ""),
+            "blockers": design_blockers,
+            "inspect_status": {},
+            "next_stage": primary_stage,
+            "next_command": next_command,
+            "can_implement": False,
+            "can_release": False,
+            "runtime_session": runtime_session,
+            "safety_boundary": "analysis_and_artifact_generation_only",
+            **SUMMARY_CONTRACT.summary_fields(
+                design_blockers,
+                primary_stage,
+                "fix_blocker",
+                next_command,
+                {
+                    "action_type": "fix_blocker",
+                    "stage": primary_stage,
+                    "summary": "resolve design-stage blockers",
+                    "command": next_command,
+                },
+            ),
+        }
+        write_json(out / "auto_run_summary.json", summary)
+        return summary
+
     delivery_status = out / "delivery_status.json"
     inspect_command = [
         "python3",
@@ -1960,6 +2520,7 @@ def run(
             inspect_status = {}
 
     strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
+    location_status = source_location_readiness(out, project_out)
     effective_profile = effective_profile_for_strictness(selected_profile, strictness)
     strictness_gaps = strictness_gate_gaps(selected_profile, strictness)
     blockers = collect_blockers(steps, inspect_status, include_inspect=False)
@@ -1976,6 +2537,11 @@ def run(
     blockers.extend(readiness_blockers)
     blockers.extend({"source": "profile_artifact", "message": f"missing required artifact {name}"} for name in missing_profile)
     blockers.extend({"source": "profile_gate", **item} for item in gate_gaps)
+    blockers = unique_blockers(blockers)
+    next_stage = str(inspect_status.get("next_stage") or "")
+    next_action_type = str(inspect_status.get("next_action_type") or "")
+    next_command = str(inspect_status.get("next_command") or "")
+    primary_action = inspect_status.get("primary_next_action") if isinstance(inspect_status.get("primary_next_action"), dict) else None
     decision = "block" if blockers or not bool(inspect_status.get("can_implement")) else "pass"
     summary = {
         "schema": SCHEMA,
@@ -1990,6 +2556,7 @@ def run(
         "steps": steps,
         "workflow_metrics": workflow_metrics(steps, generated, skipped, selected_profile),
         "workflow_profile": selected_profile,
+        "local_project_binding": project_binding,
         "profile_selection_reason": profile_selection_reason,
         "profile_selection_score": profile_selection_reason.get("profile_selection_score", 0),
         "profile_selection_confidence": profile_selection_reason.get("profile_selection_confidence", ""),
@@ -1998,7 +2565,8 @@ def run(
         "effective_workflow_controls": effective_workflow_controls(selected_profile, strictness),
         "strictness_gate_gaps": strictness_gaps,
         "fallback_reason": profile_selection_reason.get("fallback_reason", ""),
-        "required_gates": selected_profile.get("required_skills", []),
+        "required_gates": required_gate_artifact_names(selected_profile),
+        "source_location_readiness": location_status,
         "docs_readiness": docs_status,
         "docs_sync": docs_sync,
         "docs_quality": docs_quality,
@@ -2009,12 +2577,13 @@ def run(
         "next_profile_command": selected_profile.get("next_safe_command", ""),
         "blockers": blockers,
         "inspect_status": inspect_status,
-        "next_stage": inspect_status.get("next_stage", ""),
-        "next_command": inspect_status.get("next_command", ""),
+        "next_stage": next_stage,
+        "next_command": next_command,
         "can_implement": bool(inspect_status.get("can_implement")),
         "can_release": bool(inspect_status.get("can_release")),
         "runtime_session": runtime_session,
         "safety_boundary": "analysis_and_artifact_generation_only",
+        **SUMMARY_CONTRACT.summary_fields(blockers, next_stage, next_action_type, next_command, primary_action),
     }
     write_json(out / "auto_run_summary.json", summary)
     return summary

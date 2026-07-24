@@ -1,8 +1,8 @@
 service:
-  name: synthetic-orders
+  name: synthetic-tasks
 database:
   url: ${DATABASE_URL}
-payment:
-  provider: ${PAYMENT_PROVIDER}
+external_provider:
+  name: ${EXTERNAL_PROVIDER}
 features:
-  order_capture: ${FEATURE_ORDER_CAPTURE}
+  task_capture: ${FEATURE_TASK_CAPTURE}

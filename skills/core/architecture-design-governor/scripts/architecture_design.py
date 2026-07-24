@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,65 @@ def route_ref(route: dict[str, Any]) -> str:
     return f"{route.get('method', '')} {route.get('route', '')} ({route.get('file', '')})".strip()
 
 
+def normalize_repo_name(value: str) -> str:
+    value = value.strip().strip("`'\"")
+    match = re.search(r"`([^`]+)`", value)
+    if match:
+        value = match.group(1)
+    match = re.search(r"\b([A-Za-z0-9_-]+(?:-platform-fe|-operate-platform|-[Ff]rontend|-backend)?)\b", value)
+    return match.group(1) if match else value
+
+
+def declared_repo_entries(spec: dict[str, Any], technical: dict[str, Any], owner_repo: str) -> list[dict[str, Any]]:
+    repo_map_raw = spec.get("repo_impact_map")
+    repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+    if not repo_map:
+        gate_raw = technical.get("requirements_understanding_gate")
+        gate = gate_raw if isinstance(gate_raw, dict) else {}
+        repo_map_raw = gate.get("repo_impact_map")
+        repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+    design_text = json.dumps({"spec": spec, "technical": technical}, ensure_ascii=False).lower()
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in as_list(repo_map.get("repos") if isinstance(repo_map, dict) else []):
+        if not isinstance(item, dict):
+            continue
+        repo = normalize_repo_name(str(item.get("name") or ""))
+        if not repo or repo in seen:
+            continue
+        seen.add(repo)
+        relation = str(item.get("relation") or "related")
+        role = "modify" if repo == owner_repo or relation in {"owner", "downstream", "related"} else "confirm_only"
+        if repo.endswith("-fe") or "frontend" in repo.lower() or repo in design_text and any(term in design_text for term in ["页面", "前端", "button", "ui", "frontend"]):
+            role = "modify"
+        entries.append({"repo": repo, "role": role, "relation": relation, "source": item.get("source_evidence") or "repo_impact_map"})
+    if owner_repo and owner_repo not in seen:
+        entries.insert(0, {"repo": owner_repo, "role": "modify", "relation": "owner", "source": "architecture_owner"})
+    return entries
+
+
+def declared_paths_for_repo(spec: dict[str, Any], repo: str, owner_repo: str, owner_module: str) -> list[str]:
+    scope_raw = spec.get("scope")
+    scope = scope_raw if isinstance(scope_raw, dict) else {}
+    paths: list[str] = []
+    for item in as_list(scope.get("declared_roles")):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        item_repo = str(item.get("repo") or item.get("repository") or "").strip()
+        if item_repo and normalize_repo_name(item_repo) == repo:
+            paths.append(path)
+        elif repo.endswith("-fe") and path.startswith("src/"):
+            paths.append(path)
+        elif repo == owner_repo and path.startswith(("operate-", "src/main", "app/", "server/")):
+            paths.append(path)
+    if repo == owner_repo and owner_module:
+        paths.append(owner_module)
+    return sorted(dict.fromkeys(paths))
+
+
 def load_project_understanding(path: Path | None) -> dict[str, Any]:
     if not path:
         return {}
@@ -92,7 +152,14 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
         modules = sorted({str(Path(str(item["path"])).parent) for item in anchors})
         routes = [{"method": "", "route": str(contract), "file": "evidence_bundle.json"} for contract in as_list(bundle.get("contracts"))]
     tests = [str(item) for item in as_list(deps.get("test_command_hints"))] or [str(item) for item in as_list(repo.get("test_hints"))]
-    return {"project": project, "repo_path": repo_path, "modules": modules, "routes": routes, "tests": tests}
+    return {
+        "project": project,
+        "repo_path": repo_path,
+        "modules": modules,
+        "routes": routes,
+        "tests": tests,
+        "local_project_binding": bundle.get("local_project_binding") if isinstance(bundle.get("local_project_binding"), dict) else {},
+    }
 
 
 def option_score_summary(options: list[dict[str, Any]], matrix: list[dict[str, Any]]) -> dict[str, Any]:
@@ -123,8 +190,8 @@ def render_integration_sequence_diagram(integration_sequence: list[dict[str, Any
         return ""
     participants: list[str] = []
     for step in steps:
-        actor = str(step.get("actor") or "").strip()
-        target = str(step.get("target") or "").strip()
+        actor = str(step.get("from") or step.get("actor") or "").strip()
+        target = str(step.get("to") or step.get("target") or "").strip()
         if actor and actor not in participants:
             participants.append(actor)
         if target and target not in participants:
@@ -136,13 +203,14 @@ def render_integration_sequence_diagram(integration_sequence: list[dict[str, Any
     for participant, alias in aliases.items():
         lines.append(f"    participant {alias} as {mermaid_label(participant)}")
     for step in steps:
-        actor_name = str(step.get("actor") or "System")
-        target_name = str(step.get("target") or step.get("actor") or "System")
+        actor_name = str(step.get("from") or step.get("actor") or "System")
+        target_name = str(step.get("to") or step.get("target") or step.get("actor") or "System")
         actor = aliases.get(actor_name, "PX")
         target = aliases.get(target_name, "PY")
         action = mermaid_label(str(step.get("action") or "action"))
+        data = mermaid_label(str(step.get("data") or step.get("contract") or ""))
         failure = mermaid_label(str(step.get("failure_handling") or "failure handling"))
-        lines.append(f"    {actor}->>{target}: {action}")
+        lines.append(f"    {actor}->>{target}: {action}{f' | {data}' if data else ''}")
         lines.append(f"    Note over {target}: Failure: {failure}")
     lines.append("```")
     return "\n".join(lines)
@@ -522,11 +590,45 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "module": str(item.get("module")),
         "responsibility": str(item.get("responsibility") or summary),
         "depends_on": as_list(item.get("dependencies")) or ["existing API/config dependencies"],
-        "boundary_rule": "keep change inside confirmed source modules unless reviewed evidence expands scope",
-        "change_type": "modify",
+        "boundary_rule": "new planned modules are allowed only when explicitly required by the spec; otherwise keep change inside confirmed source modules unless reviewed evidence expands scope",
+        "change_type": "add" if item.get("planned_new_module") is True else "modify",
         "requirement_breakdown_id": item.get("requirement_breakdown_id"),
         "entrypoint_confidence": entrypoint_confidence.get("level"),
+        "planned_new_module": bool(item.get("planned_new_module")),
+        "source_evidence": item.get("source_evidence") or "technical_design.module_decomposition",
     } for item in technical_modules]
+    repo_entries = declared_repo_entries(spec, technical, owner_repo)
+    declared_repo_topology: list[dict[str, Any]] = []
+    for repo_entry in repo_entries:
+        repo_name = str(repo_entry.get("repo") or "")
+        for path in declared_paths_for_repo(spec, repo_name, owner_repo, owner_module):
+            declared_repo_topology.append({
+                "repo": repo_name,
+                "module": path,
+                "responsibility": summary if repo_name == owner_repo else f"Implement or verify {summary} in {repo_name}",
+                "depends_on": [owner_repo] if repo_name != owner_repo else ["existing API/config dependencies"],
+                "boundary_rule": "module path is declared by requirement scope; confirm source before editing",
+                "change_type": "modify" if repo_entry.get("role") == "modify" else "confirm",
+                "requirement_breakdown_id": breakdown[0].get("id") if breakdown else req_id,
+                "entrypoint_confidence": "requirement_declared",
+                "source_evidence": repo_entry.get("source") or "repo_impact_map",
+            })
+    merged_topology = module_topology or [{"repo": owner_repo, "module": owner_module, "responsibility": str(item.get("summary") or summary), "depends_on": ["existing API/config dependencies"], "boundary_rule": "keep change inside owner module unless this slice requires contract change", "change_type": "modify", "requirement_breakdown_id": item.get("id"), "entrypoint_confidence": entrypoint_confidence.get("level")} for item in breakdown]
+    for item in declared_repo_topology:
+        if not any(existing.get("repo") == item.get("repo") and existing.get("module") == item.get("module") for existing in merged_topology):
+            merged_topology.append(item)
+    repo_responsibilities = []
+    for repo_entry in repo_entries:
+        repo_name = str(repo_entry.get("repo") or "")
+        repo_responsibilities.append({
+            "repo": repo_name,
+            "repo_path": repo_path if repo_name == owner_repo else "",
+            "role": repo_entry.get("role") or ("modify" if repo_name == owner_repo else "confirm_only"),
+            "responsibility": summary if repo_name == owner_repo else f"Deliver declared repository scope for {summary}",
+            "requirement_breakdown_refs": [item.get("id") for item in breakdown],
+            "owner_tasks": [str(item.get("summary") or summary) for item in breakdown],
+            "source_evidence": repo_entry.get("source"),
+        })
     result = {
         "schema": "codex-architecture-design-v1",
         "decision": "pass" if design_allowed else "block",
@@ -543,10 +645,11 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "architecture_scope": {"in_scope": as_list((spec.get("scope") or {}).get("in_scope")) or [summary], "out_of_scope": as_list((spec.get("scope") or {}).get("out_of_scope")), "assumptions": as_list((spec.get("scope") or {}).get("assumptions")), "decision_drivers": ["low coupling", "clear ownership", "rollback safety"]},
         "current_architecture": {
             "system_context": f"{owner_repo} 承担本需求的初始变更边界；主入口 `{owner_module}` 的置信度为 {entrypoint_confidence.get('level', 'unknown')}。",
-            "repo_entrypoints": [owner_module, route_contract or "existing entrypoint to be confirmed"],
-            "upstream_downstream": [f"{route_contract or 'existing producer'} -> {owner_repo}"],
+            "repo_entrypoints": [owner_module, route_contract or f"{owner_repo} confirmed owner/module boundary"],
+            "upstream_downstream": [f"{route_contract or 'No additional upstream producer for this design'} -> {owner_repo}"],
             "constraints": ["keep owner boundary narrow", "preserve backward compatibility", "support rollback by reverting owner repo"],
         },
+        "local_project_binding": technical.get("local_project_binding") or ctx["local_project_binding"],
         "requirement_breakdown": breakdown,
         "code_entrypoint_confidence": entrypoint_confidence,
         "source_location_evidence": technical.get("source_location_evidence") or {},
@@ -572,8 +675,8 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             for item in reqs
         ] or [{"requirement_id": req_id, "requirement_breakdown_refs": [row.get("id") for row in breakdown], "component_boundary_refs": [f"{owner_repo} owns change"], "module_topology_refs": [owner_module], "data_flow_refs": [f"{route_contract or 'existing source'}->{owner_repo}"], "integration_sequence_refs": ["load/execute affected behavior"], "contract_refs": [route_contract or "preserve existing contracts"], "selected_architecture_option_id": selected_architecture.get("selected_option_id"), "decision_reason": selected_architecture.get("selection_reason")}],
         "component_boundaries": [{"component": owner_repo, "role": "owner", "exclusion": "do not move unrelated responsibilities"}],
-        "module_topology": module_topology or [{"repo": owner_repo, "module": owner_module, "responsibility": str(item.get("summary") or summary), "depends_on": ["existing API/config dependencies"], "boundary_rule": "keep change inside owner module unless this slice requires contract change", "change_type": "modify", "requirement_breakdown_id": item.get("id"), "entrypoint_confidence": entrypoint_confidence.get("level")} for item in breakdown],
-        "repo_responsibilities": [{"repo": owner_repo, "repo_path": repo_path, "role": "modify", "responsibility": summary, "requirement_breakdown_refs": [item.get("id") for item in breakdown], "owner_tasks": [str(item.get("summary") or summary) for item in breakdown]}],
+        "module_topology": merged_topology,
+        "repo_responsibilities": repo_responsibilities or [{"repo": owner_repo, "repo_path": repo_path, "role": "modify", "responsibility": summary, "requirement_breakdown_refs": [item.get("id") for item in breakdown], "owner_tasks": [str(item.get("summary") or summary) for item in breakdown]}],
         "cross_repo_contracts": [{"producer": producer, "consumer": owner_repo, "contract": route_contract or f"{owner_repo} internal contract", "compatibility": "backward compatible", "failure_mode": "fallback/error state"}],
         "cross_repo_dependency_graph": [{"from": producer, "to": owner_repo, "contract": route_contract or f"{owner_repo} internal contract", "change": "confirm only unless implementation proves contract change is required"}],
         "data_flow": [{"source": route_contract or "existing source", "target": owner_repo, "rule": f"{item.get('id')}: read/write only through owner boundary", "requirement_breakdown_id": item.get("id")} for item in breakdown],
@@ -581,10 +684,16 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
         "integration_sequence": [
             {
                 "step": idx,
-                "actor": owner_repo,
-                "target": route_contract or owner_module,
-                "action": str(item.get("summary") or summary),
-                "failure_handling": "preserve existing failure behavior",
+                "from": "actor/client",
+                "to": owner_repo,
+                "actor": "actor/client",
+                "target": owner_repo,
+                "owner_repo": owner_repo,
+                "entrypoint": owner_module,
+                "contract": route_contract or f"{owner_repo} internal contract",
+                "data": f"{item.get('id')}: {item.get('summary') or summary}",
+                "action": f"execute via `{owner_module}` and verify {item.get('id') or idx}",
+                "failure_handling": "preserve existing failure behavior and expose the existing user/operator error path",
                 "requirement_breakdown_id": item.get("id"),
             }
             for idx, item in enumerate(breakdown, start=1)
@@ -593,10 +702,16 @@ def render(spec: dict[str, Any], technical: dict[str, Any], project_understandin
             [
                 {
                     "step": idx,
-                    "actor": owner_repo,
-                    "target": route_contract or owner_module,
-                    "action": str(item.get("summary") or summary),
-                    "failure_handling": "preserve existing failure behavior",
+                    "from": "actor/client",
+                    "to": owner_repo,
+                    "actor": "actor/client",
+                    "target": owner_repo,
+                    "owner_repo": owner_repo,
+                    "entrypoint": owner_module,
+                    "contract": route_contract or f"{owner_repo} internal contract",
+                    "data": f"{item.get('id')}: {item.get('summary') or summary}",
+                    "action": f"execute via `{owner_module}` and verify {item.get('id') or idx}",
+                    "failure_handling": "preserve existing failure behavior and expose the existing user/operator error path",
                     "requirement_breakdown_id": item.get("id"),
                 }
                 for idx, item in enumerate(breakdown, start=1)

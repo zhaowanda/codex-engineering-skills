@@ -22,6 +22,7 @@ ALLOWED_DUPLICATE_SCHEMAS = {
     schema_name("delivery-replay-skeleton"): "case capture and example runner intentionally share replay skeleton fixtures",
     schema_name("delivery-plan"): "delivery plan reviewer validates the generated delivery plan contract",
     schema_name("delivery-runner-status"): "synthetic runner asserts delivery-runner blocking behavior",
+    schema_name("docs-governor-sync"): "auto runner can surface docs sync decisions while docs governor remains the canonical emitter",
     schema_name("edit-permit"): "write guard validates permits emitted by edit readiness",
     "codex-workflow-artifact-lineage-v2": "delivery runner owns lineage while skill health validates the same runtime contract",
     schema_name("post-change-implementation-report"): "post-change sync and synthetic runner intentionally share the implementation report contract",

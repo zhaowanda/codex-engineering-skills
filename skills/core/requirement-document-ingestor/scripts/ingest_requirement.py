@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "codex-requirement-ingestion-v1"
 IR_SCHEMA = "codex-requirement-ir-v1"
 
@@ -15,10 +14,13 @@ SECTION_KINDS = {
     "背景": "context", "说明": "context", "当前源码事实": "context",
     "纠偏说明": "correction", "更正说明": "correction",
     "原始需求": "requirements", "需求": "requirements", "需要解决的问题": "requirements",
-    "本次目标": "requirements", "目标": "requirements", "可执行需求": "requirements",
+    "本次目标": "requirements", "目标": "requirements", "业务目标": "requirements", "预期业务结果": "requirements",
+    "业务流程": "requirements", "明确入口": "requirements", "明确改动目标": "requirements", "可执行需求": "requirements",
     "goal": "requirements", "objective": "requirements",
     "验收标准": "acceptance", "验收": "acceptance", "acceptance criteria": "acceptance",
-    "约束": "constraints", "限制": "constraints",
+    "业务边界": "acceptance",
+    "约束": "constraints", "限制": "constraints", "约定": "constraints", "术语定义": "constraints", "状态机": "constraints",
+    "状态迁移规则": "constraints", "幂等与补偿": "constraints", "重试策略": "constraints",
     "非目标": "out_of_scope", "不在范围": "out_of_scope",
     "只读链路验证范围": "reference", "参考资料": "reference", "参考": "reference",
     "reference scope": "reference", "read-only scope": "reference",
@@ -131,7 +133,7 @@ def parse_markdown_ir(text: str, doc_id: str, source_file: Path) -> dict[str, An
         else:
             current["paragraphs"].append({"text": raw.strip(), "line": line_number})
 
-    executable_kinds = {"requirements", "acceptance"}
+    executable_kinds = {"requirements", "acceptance", "constraints"}
     executable_lines: list[str] = []
     for section in sections:
         if section["kind"] not in executable_kinds:

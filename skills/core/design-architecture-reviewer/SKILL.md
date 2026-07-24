@@ -38,6 +38,7 @@ spec
 - Require explicit selected option, decision criteria, tradeoffs, and rejected alternative reasoning.
 - Require current-state analysis with concrete code entrypoints, interface examples for API changes, compatibility matrix, dependency graph, failure isolation, and deployment impact matrix when relevant.
 - When source-location evidence exists, block selected entrypoints and implementation modules outside `confirmed_anchors`.
+- For repository-backed designs, block missing `local_project_binding`; it must prove repo root, Git branch/head, and local project skill overlay loading. Also block empty `repo_path` on every modify repo and any architecture risk that says owner repo is not routed.
 - Block rejected candidates that leak into modules, selected options, deployment, rollback, or implementation scope.
 - Also block rejected candidates in process flow, current-state analysis, logical data flow, API contracts, and system interaction sequences.
 - Require a multi-step business flow when multiple acceptance mappings describe an ordered user/system workflow.
@@ -53,7 +54,11 @@ spec
 - Require security, performance, rollback, observability, and test strategy to be executable, not generic.
 - Treat placeholders such as `TBD`, `unknown`, `todo`, and `confirm later` as findings unless they are inside an explicitly controlled gate.
 - Consume every applicable specialty artifact rather than treating it as advisory prose: UI/UE review, API contract design, data model design, observability design, configuration readiness, data security review, performance review, and cross-repo readiness.
-- Promote blocking specialty decisions or blockers into the total-design blockers. The aggregate review cannot pass while an applicable specialty gate is unresolved.
+- Block semantic drift before scoring: stale terms from another domain, external provider APIs placed in local `api_contracts`, persistence-required requirements marked data-not-applicable, or requirement-declared repositories missing from `repo_responsibilities` are blockers.
+- Requirement-declared frontend/backend/consumer/provider repositories must be represented with an explicit role. Do not pass a single-repo design when the spec or requirement understanding declares multiple affected repositories.
+- Consume `architecture_framing.json` explicitly when supplied; a design must not be marked as lacking pre-technical framing merely because the framing is stored as a sibling artifact rather than embedded in technical or architecture design.
+- Treat source literal rewrites as findings only when no explicit mapping exists. Mapping notes such as `source_literal_mapping_notes` may distinguish separate state machines or enums and must be honored when they clearly cover the source literal and derived/design variant.
+- Promote blocking specialty decisions or explicit blockers into the total-design blockers. `applicable=false`, `not_applicable`, and evidence-pending specialty decisions without blockers are carried as follow-up evidence, not design blockers by themselves.
 - Record `input_digests` for technical design, architecture design, and every supplied specialty artifact so orchestration can detect a stale aggregate review.
 - When cross-repo readiness is produced after the first delivery plan, rerun the aggregate review and then refresh downstream plan/traceability evidence as needed before implementation.
 
@@ -66,6 +71,7 @@ python3 scripts/design_arch_review.py \
   review \
   --technical-design artifacts/technical_design.json \
   --architecture-design artifacts/architecture_design.json \
+  --architecture-framing artifacts/architecture_framing.json \
   --ui-ue-review artifacts/ui_ue_review.json \
   --api-contract-design artifacts/api_contract_design.json \
   --data-model-design artifacts/data_model_design.json \

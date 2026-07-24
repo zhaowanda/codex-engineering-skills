@@ -53,6 +53,10 @@ def restore_workspace_docs_config(original: str | None) -> None:
         config_file.write_text(original, encoding="utf-8")
 
 
+def docs_artifacts_dir(docs_root: Path, doc_id: str) -> Path:
+    return docs_root / "deliveries" / doc_id / "artifacts"
+
+
 def test_auto_runner_generates_core_artifacts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "artifacts"
@@ -74,12 +78,12 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert (out / "technical_design.json").exists()
         assert (out / "architecture_design.json").exists()
         assert (out / "test_design.json").exists()
-        assert (out / "docs_quality.json").exists()
+        assert not (out / "docs_quality.json").exists()
         assert (out / "delivery_plan.json").exists()
         assert (out / "delivery_plan_review.json").exists()
         assert (out / "auto_run_summary.json").exists()
         assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) in {"small_feature", "cross_repo_api", "bugfix", "frontend_change", "data_migration"}
-        assert "delivery-plan-reviewer" in result["required_gates"]
+        assert "delivery_plan_review.json" in result["required_gates"]
         assert "profile_gate_gaps" in result
         assert result["profile_selection_score"] > 0
         assert result["profile_selection_confidence"] in {"high", "medium", "low"}
@@ -93,8 +97,50 @@ def test_auto_runner_generates_core_artifacts() -> None:
         assert "invalidated_artifact_count" in result["workflow_metrics"]
         assert "strictness_gate_gaps" in result
         assert result["docs_readiness"]["decision"] == "block"
+        assert result["docs_quality"]["decision"] == "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
         assert result["next_stage"]
         assert result["can_implement"] is False
+
+
+def test_auto_runner_resolves_related_backend_project_from_registry() -> None:
+    text = """
+    业务目的：减少人工逐台下发和人工核对版本，避免 AT603 与 AT603D 升级包错发，并让批量升级结果可追踪、可通知。
+    流程：运营人员先选择设备型号，再选择该型号下的一个历史版本软件包，然后选择设备并下发升级。
+    入口：批量升级入口。
+    需求：
+    - 双摄设备存在两种型号：AT603、AT603D。
+    - 两种设备型号对应的软件升级包不一致，升级包维护和升级下发时必须按设备型号区分。
+    - 升级任务持续到设备升级成功为止；不满足前置条件的设备进入等待状态，满足前置条件后恢复升级下发。
+    - 升级成功判断标准：查询 deviceAttribute 命令返回结果中的 VERSION，VERSION 必须等于指定升级文件中的版本号。
+    """
+    frontend_repo = Path("/Users/zhaowanli/hl-workspace/operate-platform-fe")
+    repo, project, binding = auto_runner.resolve_project_binding(text, repo=frontend_repo, project="operate-platform-fe")
+    assert project == "sigreal-operate-platform"
+    assert repo is not None and repo.name == "sigreal-operate-platform"
+    assert binding["resolution_mode"] == "registry_related_repo"
+    assert binding["project_skill_loaded"] is True
+    assert binding["project_registry_path"].endswith("projects.yaml")
+    assert binding["candidates"]
+    assert binding["candidates"][0]["project"] == "sigreal-operate-platform"
+
+
+def test_auto_runner_does_not_route_frontend_to_ubi_when_direct_backend_dep_exists() -> None:
+    text = """
+    业务目的：减少人工逐台下发和人工核对版本，避免 AT603 与 AT603D 升级包错发，并让批量升级结果可追踪、可通知。
+    流程：运营人员先选择设备型号，再选择该型号下的一个历史版本软件包，然后选择设备并下发升级。
+    入口：批量升级入口。
+    需求：
+    - 双摄设备存在两种型号：AT603、AT603D。
+    - 两种设备型号对应的软件升级包不一致，升级包维护和升级下发时必须按设备型号区分。
+    - 升级任务持续到设备升级成功为止；不满足前置条件的设备进入等待状态，满足前置条件后恢复升级下发。
+    - 升级成功判断标准：查询 deviceAttribute 命令返回结果中的 VERSION，VERSION 必须等于指定升级文件中的版本号。
+    """
+    frontend_repo = Path("/Users/zhaowanli/hl-workspace/operate-platform-fe")
+    _, project, binding = auto_runner.resolve_project_binding(text, repo=frontend_repo, project="operate-platform-fe")
+    assert project == "sigreal-operate-platform"
+    assert binding["resolution_mode"] == "registry_related_repo"
+    assert binding["candidates"][0]["project"] == "sigreal-operate-platform"
 
 
 def test_harness_validation_blocks_reference_only_edit_target() -> None:
@@ -124,6 +170,18 @@ def test_harness_validation_blocks_oversized_artifact() -> None:
         assert result["artifact_sizes"][0]["within_budget"] is False
 
 
+def test_harness_default_budget_soft_allows_mild_technical_design_overage() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "technical_design.json").write_text(json.dumps({"value": "x" * 333_000}), encoding="utf-8")
+        blockers, sizes = harness_validation.artifact_budget_checkpoint(root, harness_validation.DEFAULT_BUDGETS, strict=False)
+        tech_size = next(item for item in sizes if item["artifact"] == "technical_design.json")
+        assert blockers == []
+        assert tech_size["within_budget"] is False
+        assert tech_size["soft_overage"] is True
+        assert "supplemental" in tech_size["recommendation"]
+
+
 def test_harness_source_location_blocks_stale_source_digest() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -147,6 +205,72 @@ def test_harness_source_location_blocks_stale_source_digest() -> None:
 
         assert result["decision"] == "block"
         assert any(item["message"] == "source digest is missing or stale" for item in result["blockers"])
+
+
+def test_harness_source_location_blocks_requirement_irrelevant_anchor() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        source = repo / "src/views/plugIn/accidentAnalysis.vue"
+        source.parent.mkdir(parents=True)
+        source.write_text("openPlaybackDialog playbackStreamControl DualCameraLivePlayer\n", encoding="utf-8")
+        project = root / "project_understanding"
+        project.mkdir()
+        digest = harness_validation.sha256(source)
+        (root / "requirement.normalized.txt").write_text(
+            "物联网卡到期监控：前端入口为 src/views/device/iotCardMonitor.vue，后端生成 IoT 续费结算单并发送飞书通知。",
+            encoding="utf-8",
+        )
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "repo_root": str(repo),
+            "anchors": [{
+                "path": "src/views/plugIn/accidentAnalysis.vue",
+                "role": "confirmed_modify",
+                "confidence": "high",
+                "source_digest": digest,
+                "matched_symbols": ["openPlaybackDialog", "DualCameraLivePlayer"],
+                "matched_contract_terms": ["/operate/api/dualCamera/playbackStreamControl"],
+                "evidence_chain": [{"term": "playbackStreamControl", "line": 1}],
+            }],
+        }), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="source_location", repo=repo)
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "confirmed modify anchor is not supported by requirement text" for item in result["blockers"])
+
+
+def test_harness_source_location_reports_cross_repo_anchor_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        frontend_repo = root / "operate-platform-fe"
+        backend_repo = root / "sigreal-operate-platform"
+        backend_source = backend_repo / "src/main/java/IotCardMonitorServiceImpl.java"
+        backend_source.parent.mkdir(parents=True)
+        backend_source.write_text("class IotCardMonitorServiceImpl {}\n", encoding="utf-8")
+        frontend_repo.mkdir()
+        project = root / "project_understanding"
+        project.mkdir()
+        digest = harness_validation.sha256(backend_source)
+        (root / "requirement.normalized.txt").write_text("物联网卡 iot card expiry renewal monitor", encoding="utf-8")
+        (project / "evidence_bundle.json").write_text(json.dumps({
+            "repo_root": str(frontend_repo),
+            "anchors": [{
+                "path": "src/main/java/IotCardMonitorServiceImpl.java",
+                "role": "confirmed_modify",
+                "confidence": "high",
+                "repo": "sigreal-operate-platform",
+                "repo_root": str(backend_repo),
+                "source_digest": digest,
+                "matched_symbols": ["IotCardMonitorServiceImpl"],
+                "matched_requirement_terms": ["iot", "card"],
+            }],
+        }), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="source_location", repo=frontend_repo)
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "confirmed modify anchor belongs to a different repository" for item in result["blockers"])
 
 
 def test_harness_source_location_rejects_parent_traversal() -> None:
@@ -187,6 +311,65 @@ def test_harness_design_requires_sequence_for_api_change() -> None:
         assert "architecture design is missing integration_sequence" in messages
 
 
+def test_harness_design_blocks_callback_requirement_without_callback_step() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "requirement.normalized.txt").write_text("Flow: external approval callback updates backend result.", encoding="utf-8")
+        (root / "spec.json").write_text(json.dumps({
+            "impact_applicability": [{"area": "business_flow", "status": "required"}],
+        }), encoding="utf-8")
+        (root / "technical_design.json").write_text(json.dumps({
+            "process_flow": [{"steps": [{"action": "start approval"}, {"action": "persist result"}]}],
+            "process_flow_diagram": "```mermaid\nflowchart TD\nA[start approval] --> B[persist result]\n```",
+            "system_interaction_sequence": {
+                "applicable": True,
+                "participants": ["User/Client", "approval-module", "Approval Provider"],
+                "sequence": [{"from": "User/Client", "to": "approval-module", "mode": "sync", "action": "start approval", "success": "pending", "failure": "fail"}],
+            },
+            "system_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: start approval\n```",
+        }), encoding="utf-8")
+        (root / "architecture_design.json").write_text(json.dumps({
+            "integration_sequence": [{"from": "approval-module", "to": "Approval Provider", "action": "start approval"}],
+            "integration_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: start approval\n```",
+        }), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="design")
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "callback-driven requirement requires a callback step in system_interaction_sequence" for item in result["blockers"])
+
+
+def test_harness_design_blocks_stateful_workflow_with_shallow_process_flow() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "requirement.normalized.txt").write_text("业务流程：审批通过后更新状态。", encoding="utf-8")
+        (root / "spec.json").write_text(json.dumps({
+            "impact_applicability": [{"area": "business_flow", "status": "required"}],
+            "state_machine": {"states": ["pending", "approved"]},
+        }), encoding="utf-8")
+        (root / "technical_design.json").write_text(json.dumps({
+            "process_flow": [{"steps": [{"action": "update status"}]}],
+            "process_flow_diagram": "```mermaid\nflowchart TD\nA[update status]\n```",
+            "system_interaction_sequence": {
+                "applicable": True,
+                "participants": ["User/Client", "status-module"],
+                "sequence": [{"from": "User/Client", "to": "status-module", "mode": "sync", "action": "update status", "success": "updated", "failure": "failed"}],
+            },
+            "system_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: update status\n```",
+        }), encoding="utf-8")
+        (root / "architecture_design.json").write_text(json.dumps({
+            "integration_sequence": [{"from": "status-module", "to": "status-store", "action": "persist status"}],
+            "integration_sequence_diagram": "```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: persist status\n```",
+        }), encoding="utf-8")
+        (root / "delivery_plan.json").write_text(json.dumps({}), encoding="utf-8")
+
+        result = harness_validation.validate(root, checkpoint="design")
+
+        assert result["decision"] == "block"
+        assert any(item["message"] == "stateful or workflow requirement requires a multi-step business process flow" for item in result["blockers"])
+
+
 def test_harness_blocks_single_repo_multi_repo_claim() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -219,6 +402,7 @@ def test_harness_design_allows_explicit_planned_new_file() -> None:
         (root / "spec.json").write_text(json.dumps({}), encoding="utf-8")
         (root / "technical_design.json").write_text(json.dumps({
             "process_flow": [{"steps": ["create module"]}],
+            "process_flow_diagram": "```mermaid\nflowchart TD\n  A[create module] --> B[done]\n```",
             "implementation_files": [{"path": "src/new_module.py", "status": "planned_new"}],
         }), encoding="utf-8")
         (root / "architecture_design.json").write_text(json.dumps({}), encoding="utf-8")
@@ -318,7 +502,7 @@ def test_harness_pre_push_blocks_uncommitted_delivery_docs() -> None:
         assert any(item["source"] == "docs_sync" and "uncommitted" in item["message"] for item in result["blockers"])
 
 
-def test_auto_runner_accepts_ready_docs_repo() -> None:
+def test_auto_runner_blocks_ready_projection_when_upstream_artifacts_are_blocked() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         docs_root = root / "delivery-docs"
@@ -332,76 +516,32 @@ def test_auto_runner_accepts_ready_docs_repo() -> None:
             out=out,
             docs_root=docs_root,
         )
-        assert result["docs_readiness"]["decision"] == "pass"
-        assert result["docs_sync"]["decision"] == "pass"
-        assert result["doc_language"] == "zh"
-        assert (docs_root / "indexes/REQ-AUTO-DOCS.manifest.json").exists()
-        spec_doc = (docs_root / "human/specs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        design_doc = (docs_root / "human/designs/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        test_doc = (docs_root / "human/tests/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        release_doc = (docs_root / "human/releases/REQ-AUTO-DOCS.md").read_text(encoding="utf-8")
-        assert "## 一、摘要" in spec_doc
-        assert "## 二、背景与目标" in spec_doc
-        assert "## 三、范围与非目标" in spec_doc
-        assert "## 四、需求澄清" in spec_doc
-        assert "### 澄清记录" in spec_doc
-        assert "### 澄清状态" in spec_doc
-        assert "### 已确认理解" in spec_doc
-        assert "### 待澄清问题" in spec_doc
-        assert "### 工作假设" in spec_doc
-        assert "是否允许进入设计：是" in spec_doc
-        assert "## 六、验收标准" in spec_doc
-        assert "## 八、需求到验收追踪图" in spec_doc
-        assert "`AC-1` exported file contains order id and status." in spec_doc
-        assert "```mermaid" in spec_doc + design_doc + release_doc
-        assert "## 二、现状问题与设计目标" in design_doc
-        assert "## 四、候选方案、对比与决策" in design_doc
-        assert "### 技术候选方案详述" in design_doc
-        assert "### 技术方案加权对比" in design_doc
-        assert "### 技术决策结论" in design_doc
-        assert design_doc.index("### 技术候选方案详述") < design_doc.index("### 技术方案加权对比") < design_doc.index("### 技术决策结论")
-        assert "### 架构候选方案详述" in design_doc
-        assert "### 架构方案加权对比" in design_doc
-        assert "### 架构决策结论" in design_doc
-        assert design_doc.index("### 架构候选方案详述") < design_doc.index("### 架构方案加权对比") < design_doc.index("### 架构决策结论")
-        assert "## 五、决策记录" in design_doc
-        assert "## 六、业务流程" in design_doc
-        assert "### 数据模型与表结构" in design_doc
-        assert "### 多系统交互时序" in design_doc
-        assert "### MQ 上下游与触发机制" in design_doc
-        assert "### 缓存策略评估" in design_doc
-        assert "### 事务与一致性" in design_doc
-        assert "### 可观测性设计" in design_doc
-        assert "## 十三、风险与未过门禁" in design_doc
-        assert "## 十二、测试策略摘要" in design_doc
-        assert "### 测试用例" not in design_doc
-        assert "`TC-1`" not in design_doc
-        assert "Acceptance:" not in design_doc
-        assert "## 四、测试用例" in test_doc
-        assert "`TC-1`" in test_doc
-        assert "关联验收" in test_doc
-        assert "为什么测" in test_doc
-        assert "项目语义依据" in test_doc
-        assert "怎么造数" in test_doc
-        assert "怎么执行" in test_doc
-        assert "怎么判定通过" in test_doc
-        assert "清理要求" in test_doc
-        assert "## 六、回归、集成、前端与权限范围" in test_doc
-        assert "## 二、发布前检查" in release_doc
-        assert "## 三、执行步骤" in release_doc
-        assert "## 四、发布与回滚顺序图" in release_doc
-        assert "### 测试用例" in release_doc
-        assert "### 实现前必须补齐" in release_doc
-        assert "## Executive Summary" not in spec_doc + design_doc + test_doc + release_doc
-        assert "Evidence References" not in spec_doc + design_doc + test_doc + release_doc
-        assert "- -" not in spec_doc + design_doc + test_doc + release_doc
-        assert "[{\"" not in spec_doc + design_doc + test_doc + release_doc
-        assert "{\"in_scope\"" not in spec_doc
-        assert "acceptance_criteria:" not in spec_doc
-        machine_spec = json.loads((docs_root / "machine/specs/REQ-AUTO-DOCS.spec.json").read_text(encoding="utf-8"))
-        assert machine_spec["schema"] == "codex-docs-machine-bundle-v1"
-        assert "spec.json" in machine_spec["artifacts"]
-        assert (docs_root / "machine/raw/REQ-AUTO-DOCS/auto_run_summary.json").exists()
+        assert result["docs_readiness"]["decision"] == "block"
+        assert result["docs_sync"]["decision"] != "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
+        assert result["doc_language"] in {"en", "zh"}
+        assert (docs_root / "deliveries/REQ-AUTO-DOCS/artifacts/spec.json").exists()
+
+
+def test_auto_runner_blocks_staging_artifact_source_before_docs_sync() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = docs_artifacts_dir(docs_root, "REQ-AUTO-STAGING")
+
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-STAGING",
+            title="Order export",
+            out=out,
+            docs_root=docs_root,
+        )
+
+        assert result["docs_sync"]["decision"] != "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
+        assert (docs_root / "human/specs/REQ-AUTO-STAGING.md").exists()
 
 
 def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
@@ -410,7 +550,7 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
         docs_root = root / "delivery-docs"
         docs_root.mkdir(parents=True)
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
-        out = root / "artifacts"
+        out = docs_artifacts_dir(docs_root, "REQ-AUTO-ZH-PASS")
         result = auto_runner.run(
             input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
             doc_id="REQ-AUTO-ZH",
@@ -420,10 +560,57 @@ def test_auto_runner_can_generate_chinese_human_docs_when_requested() -> None:
             doc_language="zh",
         )
         assert result["doc_language"] == "zh"
-        spec_doc = (docs_root / "human/specs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
-        design_doc = (docs_root / "human/designs/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
-        test_doc = (docs_root / "human/tests/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
-        release_doc = (docs_root / "human/releases/REQ-AUTO-ZH.md").read_text(encoding="utf-8")
+        assert result["docs_sync"]["decision"] != "not_applicable"
+        assert result["primary_blocker_stage"] == "technical_design"
+        assert (docs_root / "human/specs/REQ-AUTO-ZH.md").exists()
+
+
+def test_auto_runner_syncs_chinese_human_docs_when_upstream_artifacts_are_consistent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = docs_artifacts_dir(docs_root, "REQ-AUTO-ZH-PASS")
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-ZH-PASS",
+            title="订单导出",
+            out=out,
+            docs_root=docs_root,
+            doc_language="zh",
+        )
+        assert result["docs_sync"]["decision"] != "not_applicable"
+        spec = json.loads((out / "spec.json").read_text(encoding="utf-8"))
+        spec["decision"] = "pass"
+        spec["design_allowed"] = True
+        spec["open_questions"] = []
+        (out / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+        (out / "open_questions.json").write_text(
+            json.dumps({"schema": "codex-open-questions-v1", "decision": "pass", "questions": []}),
+            encoding="utf-8",
+        )
+        review = json.loads((out / "design_architecture_review.json").read_text(encoding="utf-8"))
+        review["decision"] = "pass"
+        review["blockers"] = []
+        (out / "design_architecture_review.json").write_text(json.dumps(review), encoding="utf-8")
+
+        consistent_docs_root = root / "delivery-docs-consistent"
+        consistent_docs_root.mkdir()
+        subprocess.run(["git", "init"], cwd=consistent_docs_root, text=True, capture_output=True, check=True)
+        docs_governor = auto_runner.load_docs_governor_module()
+        sync_result = docs_governor.sync(
+            consistent_docs_root,
+            doc_id="REQ-AUTO-ZH-PASS",
+            artifact_dir=out,
+            title="订单导出",
+            doc_language="zh",
+        )
+        assert sync_result["decision"] == "pass"
+        spec_doc = (consistent_docs_root / "human/specs/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
+        design_doc = (consistent_docs_root / "human/designs/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
+        test_doc = (consistent_docs_root / "human/tests/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
+        release_doc = (consistent_docs_root / "human/releases/REQ-AUTO-ZH-PASS.md").read_text(encoding="utf-8")
         assert "## 一、摘要" in spec_doc
         assert "### 阅读与评审重点" in spec_doc
         assert "验收规模" in spec_doc
@@ -492,8 +679,10 @@ def test_auto_runner_auto_detects_chinese_doc_request() -> None:
         docs_root = root / "delivery-docs"
         docs_root.mkdir()
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
-        result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-HINT", out=root / "artifacts", docs_root=docs_root, doc_language="auto")
+        artifacts = docs_artifacts_dir(docs_root, "REQ-AUTO-ZH-HINT")
+        result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-HINT", out=artifacts, docs_root=docs_root, doc_language="auto")
         assert result["doc_language"] == "zh"
+        assert result["docs_sync"]["decision"] == "pass"
         assert "## 四、需求澄清" in (docs_root / "human/specs/REQ-AUTO-ZH-HINT.md").read_text(encoding="utf-8")
 
 
@@ -509,7 +698,7 @@ def test_auto_runner_blocked_spec_does_not_rewrite_design_doc() -> None:
         docs_governor.init(docs_root, "REQ-SPEC-ONLY", title="播放优化", doc_language="zh")
         design_path = docs_root / "human/designs/REQ-SPEC-ONLY.md"
         design_path.write_text("# existing design\n", encoding="utf-8")
-        result = auto_runner.run(req, doc_id="REQ-SPEC-ONLY", out=root / "artifacts", docs_root=docs_root, doc_language="zh")
+        result = auto_runner.run(req, doc_id="REQ-SPEC-ONLY", out=docs_artifacts_dir(docs_root, "REQ-SPEC-ONLY"), docs_root=docs_root, doc_language="zh")
         assert result["decision"] == "block"
         assert design_path.read_text(encoding="utf-8") == "# existing design\n"
 
@@ -525,8 +714,9 @@ def test_auto_runner_defaults_to_auto_doc_language_detection() -> None:
         docs_root = root / "delivery-docs"
         docs_root.mkdir()
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
-        result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-DEFAULT", out=root / "artifacts", docs_root=docs_root)
+        result = auto_runner.run(req, doc_id="REQ-AUTO-ZH-DEFAULT", out=docs_artifacts_dir(docs_root, "REQ-AUTO-ZH-DEFAULT"), docs_root=docs_root)
         assert result["doc_language"] == "zh"
+        assert result["docs_sync"]["decision"] == "pass"
         assert "## 一、摘要" in (docs_root / "human/specs/REQ-AUTO-ZH-DEFAULT.md").read_text(encoding="utf-8")
 
 
@@ -537,7 +727,7 @@ def test_auto_runner_blocks_docs_root_without_git_repo() -> None:
         manifest = docs_root / "indexes/REQ-AUTO-DOCS.manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text("{}", encoding="utf-8")
-        out = root / "artifacts"
+        out = docs_artifacts_dir(docs_root, "REQ-AUTO-DOCS")
         result = auto_runner.run(
             input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
             doc_id="REQ-AUTO-DOCS",
@@ -559,16 +749,73 @@ def test_auto_runner_uses_configured_docs_root_by_default() -> None:
         subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
         original = write_workspace_docs_config(docs_root)
         try:
+            out = docs_artifacts_dir(docs_root, "REQ-AUTO-CONFIG")
             result = auto_runner.run(
                 input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
                 doc_id="REQ-AUTO-CONFIG",
                 title="Order export",
-                out=root / "artifacts",
+                out=out,
             )
-            assert result["docs_readiness"]["decision"] == "pass"
+            assert result["docs_readiness"]["decision"] == "block"
+            assert result["docs_sync"]["decision"] != "not_applicable"
             assert result["docs_readiness"]["docs_root"] == str(docs_root)
         finally:
             restore_workspace_docs_config(original)
+
+
+def test_auto_runner_design_blockers_still_sync_docs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = docs_artifacts_dir(docs_root, "REQ-AUTO-SHORT")
+
+        result = auto_runner.run(
+            input_path=ROOT / "examples/synthetic-e2e-case/requirement.md",
+            doc_id="REQ-AUTO-SHORT",
+            title="Order export",
+            out=out,
+            docs_root=docs_root,
+        )
+
+        assert result["decision"] == "block"
+        assert result["docs_sync"]["decision"] != "not_applicable"
+        assert result["docs_quality"]["decision"] == "not_applicable"
+        assert not (out / "docs_quality.json").exists()
+        assert not (out / "delivery_status.json").exists()
+
+
+def test_auto_runner_calls_docs_sync_once_when_design_path_is_consistent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        req = root / "requirement.md"
+        req.write_text(
+            "\n".join([
+                "文档使用中文描述。",
+                "AC: exported file contains order id and status.",
+            ]),
+            encoding="utf-8",
+        )
+        docs_root = root / "delivery-docs"
+        docs_root.mkdir()
+        subprocess.run(["git", "init"], cwd=docs_root, text=True, capture_output=True, check=True)
+        out = docs_artifacts_dir(docs_root, "REQ-AUTO-ONCE")
+        original = auto_runner.sync_docs_artifacts
+        calls: list[str] = []
+
+        def wrapped(*args, **kwargs):
+            calls.append("sync")
+            return original(*args, **kwargs)
+
+        auto_runner.sync_docs_artifacts = wrapped
+        try:
+            result = auto_runner.run(req, doc_id="REQ-AUTO-ONCE", out=out, docs_root=docs_root, doc_language="auto")
+        finally:
+            auto_runner.sync_docs_artifacts = original
+
+        assert result["docs_sync"]["decision"] == "pass"
+        assert calls == ["sync"]
 
 
 def test_auto_runner_is_idempotent_without_force() -> None:
@@ -592,10 +839,12 @@ def test_auto_runner_reuses_clarification_answers_as_spec_input() -> None:
         assert first["next_command"] == f"python3 scripts/codex_eng.py clarify --artifact-dir {out.resolve()}"
         (out / "clarification_answers.md").write_text(
             "# Requirement Clarification Answers\n\n"
-            "Goal: Reduce playback recovery failures.\n"
-            "Flow: Operator seeks a playing device video; the system sends one control request, rebuilds the player after success, and shows an error after failure.\n"
-            "Entrypoint: Device playback dialog seek action.\n"
-            "AC: Playback resumes within two seconds after a successful seek.\n",
+            "## 业务目标\n\n"
+            "- Reduce playback recovery failures.\n\n"
+            "## 业务流程\n\n"
+            "- Operator seeks a playing device video; the system sends one control request, rebuilds the player after success, and shows an error after failure.\n\n"
+            "## 验收标准\n\n"
+            "- Playback resumes within two seconds after a successful seek.\n",
             encoding="utf-8",
         )
         second = auto_runner.run(requirement, doc_id="REQ-CLARIFIED", out=out)
@@ -605,6 +854,11 @@ def test_auto_runner_reuses_clarification_answers_as_spec_input() -> None:
         spec_step = next(step for step in second["steps"] if step["name"] == "spec")
         assert str(clarified.resolve()) in spec_step["command"]
         assert "requirement.clarified.txt" in second["generated_artifacts"]
+        ir = json.loads((out / "requirement_ir.json").read_text(encoding="utf-8"))
+        assert Path(ir["source_file"]).resolve() == clarified.resolve()
+        assert "Playback resumes within two seconds" in ir["executable_text"]
+        runtime_intake = json.loads((out / "runtime/checkpoints/intake.json").read_text(encoding="utf-8"))
+        assert runtime_intake["decision"] == "pass"
 
 
 def test_auto_runner_regenerates_transitive_artifacts_when_requirement_changes() -> None:
@@ -648,6 +902,9 @@ def test_auto_runner_project_understanding_optional() -> None:
         assert result["decision"] == "block"
         assert not (out / "technical_design.json").exists()
         assert any(step["name"] == "project_understanding" for step in result["steps"])
+        assert result["source_location_readiness"]["applicable"] is True
+        assert result["source_location_readiness"]["decision"] == "block"
+        assert result["source_location_readiness"]["blockers"]
 
 
 def test_auto_runner_explicit_profile_selects_required_gates() -> None:
@@ -688,9 +945,10 @@ def test_auto_runner_routes_one_line_request_to_small_feature() -> None:
         req.write_text("Change the checkout confirmation copy to Order received.", encoding="utf-8")
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-AUTO-ONE", out=out)
-        assert result["workflow_profile"]["name"] == "small_feature"
+        assert result["workflow_profile"]["name"] == "small_feature-lite"
         assert result["profile_selection_reason"]["mode"] == "lane"
         assert result["profile_selection_reason"]["lane"] == "small_change"
+        assert result["workflow_strictness"]["tier"] == "light"
 
 
 def test_auto_runner_routes_bugfix_to_bugfix_profile() -> None:
@@ -709,8 +967,19 @@ def test_auto_runner_routes_bugfix_to_bugfix_profile() -> None:
         result = auto_runner.run(req, doc_id="REQ-AUTO-BUG", out=out)
         assert result["workflow_profile"].get("base_profile", result["workflow_profile"]["name"]) == "bugfix"
         assert result["profile_selection_reason"]["mode"] == "lane"
-        assert "git-worktree-governor" in result["required_gates"]
-        assert result["workflow_strictness"]["tier"] in {"light", "standard"}
+        assert "git_worktree_evidence.json" in result["required_gates"]
+        assert result["workflow_strictness"]["tier"] == "standard"
+
+
+def test_select_workflow_profile_prefers_bugfix_lite_without_elevated_impacts() -> None:
+    spec = {
+        "lane": "bugfix",
+        "impact_applicability": [],
+    }
+    profile, reason = auto_runner.select_workflow_profile_with_reason(spec)
+    strictness = auto_runner.workflow_strictness(spec, profile, reason["profile_selection_confidence"])
+    assert profile["name"] == "bugfix-lite"
+    assert strictness["tier"] == "light"
 
 
 def test_auto_runner_elevates_bugfix_when_permission_impact_exists() -> None:
@@ -753,7 +1022,7 @@ def test_auto_runner_elevates_long_prd_with_permission_rules() -> None:
         assert result["profile_selection_reason"]["lane"] == "large_prd"
         assert result["workflow_strictness"]["tier"] == "regulated"
         assert "permission" in result["workflow_strictness"]["elevation_impacts"]
-        assert "architecture-design-governor" in result["required_gates"]
+        assert "architecture_design.json" in result["required_gates"]
 
 
 def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
@@ -785,9 +1054,9 @@ def test_auto_runner_routes_complex_multi_impact_to_high_risk_profile() -> None:
         assert "cross_repo_api" in result["workflow_profile"]["overlay_profiles"]
         assert result["profile_selection_reason"]["matched_impact"] == "data"
         assert result["profile_selection_reason"]["composition_mode"] == "merged"
-        assert "data-security-governor" in result["required_gates"]
-        assert "performance-governor" in result["required_gates"]
-        assert "traceability-governor" in result["required_gates"]
+        assert "data_security_review.json" in result["required_gates"]
+        assert "performance_review.json" in result["required_gates"]
+        assert "traceability_matrix.json" in result["required_gates"]
         assert (out / "frontend_implementation_plan.json").exists()
         assert not (out / "frontend_acceptance.json").exists()
 
@@ -889,7 +1158,26 @@ def test_cross_repo_readiness_is_aggregated_by_final_design_review() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         req = root / "api.md"
-        req.write_text("Business purpose: prevent consumer outages during contract evolution.\nFlow: consumer sends its existing request to the provider endpoint; the provider validates it, returns the compatible response, and the consumer completes its workflow unchanged.\nEntry: provider API endpoint.\nRepo: provider owns the endpoint.\nRepo: consumer uses the endpoint.\nDependency: consumer -> provider API.\nReq: Add API contract.\nAC: existing consumer remains compatible.", encoding="utf-8")
+        req.write_text(
+            "Business purpose: prevent consumer outages during contract evolution.\n"
+            "Flow: consumer sends its existing request to the provider endpoint; the provider validates it and returns the compatible response.\n"
+            "Entry: provider API endpoint.\n"
+            "Repo: provider owns the endpoint.\n"
+            "Repo: consumer uses the endpoint.\n"
+            "Dependency: consumer -> provider API.\n"
+            "State:\n"
+            "- request_received -> validated\n"
+            "- validated -> responded\n"
+            "- validated -> contract_error\n"
+            "Retry policy: validation failures retry up to 3 times.\n"
+            "Compensation rule: if validation fails, return a contract error without side effects.\n"
+            "Invalid transition rules:\n"
+            "- request_received cannot go directly to responded\n"
+            "- contract_error cannot transition to responded\n"
+            "Req: Add API contract.\n"
+            "AC: existing consumer remains compatible.\n",
+            encoding="utf-8",
+        )
         out = root / "artifacts"
         result = auto_runner.run(req, doc_id="REQ-CROSS-REVIEW", out=out, profile="cross_repo_api")
         step_names = [item.get("name") for item in result["steps"]]
@@ -950,6 +1238,14 @@ def test_workflow_strictness_classifies_light_standard_and_regulated() -> None:
     mq_bugfix = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "mq"}]}, {"name": "bugfix"}, "high")
     assert mq_bugfix["tier"] == "standard"
     assert mq_bugfix["elevated"] is True
+    workflow_bugfix = auto_runner.workflow_strictness({"lane": "bugfix", "impact_surface": [{"area": "business_flow"}]}, {"name": "bugfix"}, "high")
+    assert workflow_bugfix["tier"] == "standard"
+    complex_workflow = auto_runner.workflow_strictness(
+        {"lane": "standard_requirement", "impact_surface": [{"area": "business_flow"}, {"area": "api"}, {"area": "permission"}]},
+        {"name": "small_feature"},
+        "high",
+    )
+    assert complex_workflow["tier"] == "regulated"
     regulated = auto_runner.workflow_strictness({"lane": "standard_requirement", "impact_surface": [{"area": "data"}]}, {"name": "data_migration"}, "high")
     assert regulated["tier"] == "regulated"
     profile = {"name": "data_migration", "required_skills": ["release-evidence-binder"]}
@@ -1050,7 +1346,7 @@ def test_codex_eng_clarify_help_and_non_tty_fail_closed() -> None:
 
 def run_all() -> None:
     test_auto_runner_generates_core_artifacts()
-    test_auto_runner_accepts_ready_docs_repo()
+    test_auto_runner_blocks_ready_projection_when_upstream_artifacts_are_blocked()
     test_auto_runner_is_idempotent_without_force()
     test_auto_runner_force_regenerates_existing_artifacts()
     test_auto_runner_project_understanding_optional()

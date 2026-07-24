@@ -29,17 +29,27 @@ GENERIC_ENTRYPOINT_PARTS = {
     "node_modules",
 }
 DOMAIN_HINTS = {
-    "renewal": ["renew", "renewal", "续期", "续费", "到期", "expired", "settlement", "结算", "pool", "设备"],
-    "order": ["order", "订单", "结算订单", "回款"],
+    "lifecycle": ["lifecycle", "status", "state", "状态", "到期", "expired"],
+    "workflow": ["workflow", "process", "flow", "流程", "审批", "回调", "callback"],
     "batch": ["batch", "批量", "导入", "import"],
-    "menu": ["menu", "菜单", "click", "tracking", "埋点"],
-    "device": ["device", "设备", "imei", "terminal"],
+    "navigation": ["menu", "菜单", "click", "tracking", "埋点"],
+    "asset": ["asset", "resource", "subject", "entity", "资源", "对象"],
 }
 DATA_TERMS = ["字段", "数据库", "表", "数据", "迁移", "状态", "金额", "结算", "回填", "索引", "唯一", "外键", "月份", "历史", "database", "table", "field", "schema", "migration", "status", "amount"]
-SYSTEM_TERMS = ["跨系统", "第三方", "上下游", "调用", "接口", "api", "service", "provider", "consumer", "同步", "异步"]
+SYSTEM_TERMS = ["跨系统", "第三方", "外部平台", "上下游", "调用", "接口", "api", "service", "provider", "consumer", "同步", "异步", "审批流", "审批回调", "回调"]
 MQ_TERMS = ["mq", "消息", "topic", "queue", "producer", "consumer", "kafka", "rocketmq", "rabbitmq", "事件", "发布", "订阅", "消费"]
 CACHE_TERMS = ["缓存", "cache", "redis", "高频", "热点", "慢查询", "统计", "列表", "字典", "配置", "命中率"]
 CONSISTENCY_TERMS = ["事务", "一致性", "幂等", "重试", "补偿", "对账", "多表", "多系统", "写入", "回滚", "结算", "金额", "transaction", "consistency", "idempotency", "retry", "compensation", "rollback", "settlement", "payment", "commit"]
+PERSISTENCE_REQUIRED_TERMS = [
+    "记录", "落库", "审批状态", "审批结果", "实例号", "失败原因", "回调",
+    "建单", "结算单", "批次", "字段", "表", "数据库", "record",
+    "callback", "retry_count", "idempotency key", "instance", "failure_reason", "batch", "settlement",
+]
+EXTERNAL_PROVIDER_API_PATTERNS = (
+    "/open-apis/",
+    "external_access_token",
+    "provider_access_token",
+)
 
 
 def as_list(value: Any) -> list[Any]:
@@ -68,7 +78,15 @@ def impact_signals(spec: dict[str, Any], breakdown: list[dict[str, Any]], route_
     blob = " ".join([
         str(spec.get("title") or ""),
         str(spec.get("requirement_summary") or ""),
-        json_text(spec.get("business_objects"), spec.get("operations")),
+        json_text(
+            spec.get("business_objects"),
+            spec.get("operations"),
+            spec.get("business_flow"),
+            spec.get("business_rules"),
+            spec.get("acceptance_criteria"),
+            spec.get("source_trace"),
+            spec.get("external_references"),
+        ),
         " ".join(str(item.get("summary") or "") for item in breakdown),
         " ".join(route_refs),
     ])
@@ -76,11 +94,11 @@ def impact_signals(spec: dict[str, Any], breakdown: list[dict[str, Any]], route_
     if not applicability:
         impact_areas = {str(item.get("area") or "") for item in as_list(spec.get("impact_surface")) if isinstance(item, dict)}
     return {
-        "data": "data" in impact_areas or (not applicability and has_any_signal(blob, DATA_TERMS)),
+        "data": "data" in impact_areas or has_any_signal(blob, PERSISTENCE_REQUIRED_TERMS) or (not applicability and has_any_signal(blob, DATA_TERMS)),
         "system": "api" in impact_areas or has_any_signal(blob, SYSTEM_TERMS) or len(route_refs) > 0,
         "mq": has_any_signal(blob, MQ_TERMS),
         "cache": "performance" in impact_areas or has_any_signal(blob, CACHE_TERMS),
-        "consistency": has_any_signal(blob, CONSISTENCY_TERMS),
+        "consistency": has_any_signal(blob, CONSISTENCY_TERMS + PERSISTENCE_REQUIRED_TERMS),
         "observability": True,
     }
 
@@ -159,7 +177,7 @@ def requirement_breakdown(spec: dict[str, Any]) -> list[dict[str, Any]]:
             impact.append("data")
         if any(token in lower or token in clean for token in ["权限", "角色", "租户", "admin", "operator"]):
             impact.append("permission")
-        if any(token in lower or token in clean for token in ["导入", "批量", "结算", "回款", "续期", "续费"]):
+        if any(token in lower or token in clean for token in ["导入", "批量", "状态流转", "补偿", "审批", "回调", "workflow", "batch"]):
             impact.append("business_flow")
         rows.append({
             "id": f"BRK-{idx}",
@@ -263,7 +281,7 @@ def route_relevance_score(route: dict[str, Any], subject: str) -> int:
 def contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any]) -> str:
     """Choose an existing contract by action semantics instead of list position."""
     if not route_refs:
-        return f"{breakdown.get('id')}: No API impact confirmed yet"
+        return f"{breakdown.get('id')}: no external API contract change; use confirmed owner/module boundary"
     subject = " ".join(
         str(breakdown.get(key) or "")
         for key in ["summary", "business_goal", "behavior_change"]
@@ -291,6 +309,172 @@ def contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any]) -> 
             if matched:
                 return matched[0]
     return route_refs[0]
+
+
+def explicit_contract_refs_from_spec(spec: dict[str, Any]) -> list[str]:
+    raw = json.dumps({
+        "source_trace": spec.get("source_trace"),
+        "business_rules": spec.get("business_rules"),
+        "entrypoints": spec.get("entrypoints"),
+        "current_business_state": spec.get("current_business_state"),
+        "requirements": spec.get("requirements"),
+    }, ensure_ascii=False)
+    refs: list[str] = []
+    for method, path in re.findall(r"\b(GET|POST|PUT|DELETE|PATCH)\s+(/[A-Za-z0-9_./{}:-]+)", raw, flags=re.I):
+        ref = f"{method.upper()} {path.rstrip('`，。；;,.')}"
+        if ref not in refs:
+            refs.append(ref)
+    for path in re.findall(r"(?<![A-Za-z0-9_])(/[A-Za-z0-9_./{}:-]+)", raw):
+        clean = path.rstrip("`，。；;,.")
+        if clean and not any(clean in ref for ref in refs):
+            refs.append(clean)
+    return refs[:10]
+
+
+def is_external_provider_contract(value: str) -> bool:
+    lower = value.lower()
+    return any(pattern in lower for pattern in EXTERNAL_PROVIDER_API_PATTERNS)
+
+
+def split_provider_contracts(contracts: list[str]) -> tuple[list[str], list[str]]:
+    local: list[str] = []
+    external: list[str] = []
+    for contract in contracts:
+        if is_external_provider_contract(contract):
+            external.append(contract)
+        else:
+            local.append(contract)
+    return local, external
+
+
+def parse_contract_ref(contract: str) -> dict[str, Any]:
+    match = re.match(r"^\s*(?:(?P<method>[A-Z]+)\s+)?(?P<route>[^()\s]+)(?:\s+\((?P<file>[^)]+)\))?", contract)
+    if not match:
+        return {"contract": contract, "confirmed_contract": False}
+    route = (match.group("route") or "").strip()
+    file = (match.group("file") or "").strip()
+    return {
+        "contract": contract,
+        "method": (match.group("method") or "").strip(),
+        "endpoint": route if route.startswith("/") else "",
+        "controller_file": "" if file == "evidence_bundle.json" else file,
+        "source_evidence": file or "evidence_bundle.contracts",
+        "confirmed_contract": bool(route and not contract.endswith("use confirmed owner/module boundary")),
+    }
+
+
+def api_contract_for_breakdown(route_refs: list[str], breakdown: dict[str, Any], external_refs: list[str] | None = None) -> dict[str, Any]:
+    contract = contract_for_breakdown(route_refs, breakdown)
+    parsed = parse_contract_ref(contract)
+    if not route_refs:
+        parsed = {
+            "contract": f"{breakdown.get('id')}: local system API contract is not confirmed",
+            "method": "",
+            "endpoint": "",
+            "controller_file": "",
+            "source_evidence": "local_system_contract_missing",
+            "confirmed_contract": False,
+        }
+    return {
+        **parsed,
+        "compatibility": "preserve existing consumers unless design updates contract",
+        "old_consumer_impact": "review route consumers before implementation",
+        "requirement_breakdown_id": breakdown.get("id"),
+        "api_impact": breakdown.get("api_impact"),
+        "external_references": external_refs or [],
+        "provider_boundary": "external provider APIs are references only; implementation-ready design must bind local system APIs/controllers separately" if external_refs else "",
+        "binding_rule": "contract must come from api_surface routes or source_location evidence; guessed endpoint names are not implementation-ready",
+    }
+
+
+def extract_source_literals(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    blob = json.dumps(
+        {
+            "title": spec.get("title"),
+            "summary": spec.get("requirement_summary"),
+            "requirements": spec.get("requirements"),
+            "acceptance": spec.get("acceptance_criteria"),
+            "business_rules": spec.get("business_rules"),
+            "source_trace": spec.get("source_trace"),
+            "source": spec.get("source"),
+            "data_fields": spec.get("data_fields"),
+            "business_objects": spec.get("business_objects"),
+        },
+        ensure_ascii=False,
+    )
+    candidates = set(re.findall(r"/[A-Za-z0-9_./{}:-]+", blob))
+    candidates.update(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", blob))
+    candidates.update(re.findall(r"\b[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)+\b", blob))
+    candidates.update(re.findall(r"\b\d+\s*(?:天|日|day|days|小时|hour|hours)\b", blob, flags=re.I))
+    result: list[dict[str, Any]] = []
+    for literal in sorted(candidates):
+        clean = literal.strip(".,;:，。；：)）]】\"'")
+        if len(clean) < 2 or clean.lower() in {"api", "req", "rule"}:
+            continue
+        result.append({"literal": clean, "source": "spec.source", "required_binding": True})
+    return result[:80]
+
+
+def constraint_values(spec: dict[str, Any], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        for item in as_list(spec.get(key)):
+            if isinstance(item, dict):
+                value = item.get("pattern") or item.get("value") or item.get("path") or item.get("contract") or item.get("behavior") or item.get("summary") or item.get("name")
+                if value:
+                    values.append(str(value))
+            elif item:
+                values.append(str(item))
+    return [value for value in values if value.strip()]
+
+
+def generic_constraint_model(spec: dict[str, Any]) -> dict[str, Any]:
+    scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
+    scope_model = spec.get("scope_model") if isinstance(spec.get("scope_model"), dict) else {}
+    out_of_scope = [str(item) for item in as_list(scope.get("out_of_scope")) + as_list(scope.get("non_goals")) if str(item).strip()]
+    out_of_scope.extend(str(item) for item in as_list(scope_model.get("out_of_scope")) if str(item).strip())
+    forbidden = {
+        "forbidden_reuse_paths": constraint_values(spec, "forbidden_reuse_paths", "forbidden_paths"),
+        "forbidden_modules": constraint_values(spec, "forbidden_modules"),
+        "forbidden_contracts": constraint_values(spec, "forbidden_contracts"),
+        "forbidden_behaviors": constraint_values(spec, "forbidden_behaviors"),
+        "out_of_scope_patterns": constraint_values(spec, "out_of_scope_patterns") + out_of_scope,
+    }
+    return {
+        "schema": "codex-generic-constraint-model-v1",
+        "source": "spec",
+        **forbidden,
+        "has_constraints": any(values for values in forbidden.values()),
+        "rule": "These constraints are requirement-provided guardrails. Generic skills only propagate and validate them; they do not define domain-specific business rules.",
+    }
+
+
+def explicit_planned_new_modules(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    modules: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    source = "\n".join(source_lines(spec))
+    patterns = [
+        r"(?:新增|独立).{0,24}模块.{0,16}至少包含(?P<items>[^。\n]+)",
+        r"(?:至少包含|must include|includes at least)(?P<items>[^。\n]+)",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, source, flags=re.I):
+            raw_items = match.group("items")
+            for item in re.split(r"[、,，;；]", raw_items):
+                clean = item.strip(" `。.\t\n")
+                clean = re.sub(r"^(和|及|以及|包含)\s*", "", clean)
+                if len(clean) < 3 or clean.lower() in seen:
+                    continue
+                seen.add(clean.lower())
+                modules.append({
+                    "module": f"planned-new-module:{clean}",
+                    "label": clean,
+                    "responsibility": clean,
+                    "source_evidence": "spec.explicit_new_module_requirement",
+                    "planned_new_module": True,
+                    "confirmation_required": True,
+                })
+    return modules[:20]
 
 
 def rank_files_for_subject(subject: str, ctx: dict[str, Any]) -> list[dict[str, Any]]:
@@ -806,7 +990,7 @@ def load_project_understanding(path: Path | None) -> dict[str, Any]:
     bundle_file = base / "evidence_bundle.json"
     if bundle_file.exists():
         result["evidence_bundle"] = load_json(bundle_file)
-        for name in ["repository_analysis", "dependency_surface"]:
+        for name in ["repository_analysis", "api_surface", "config_surface", "dependency_surface", "code_index", "source_location_evidence"]:
             file = base / f"{name}.json"
             if file.exists():
                 result[name] = load_json(file)
@@ -826,7 +1010,12 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
     deps = project_understanding.get("dependency_surface", {})
     index = project_understanding.get("code_index", {})
     baseline = project_understanding.get("baseline", {})
-    source_locations = bundle or project_understanding.get("source_location_evidence", {})
+    source_locations = project_understanding.get("source_location_evidence", {})
+    if bundle:
+        merged_source_locations = dict(source_locations) if isinstance(source_locations, dict) else {}
+        for key, value in bundle.items():
+            merged_source_locations.setdefault(key, value)
+        source_locations = merged_source_locations
     project = str(bundle.get("project") or repo.get("project") or api.get("project") or baseline.get("project") or "target-repo")
     repo_root = str(bundle.get("repo_root") or index.get("repo_root") or baseline.get("repo_root") or repo.get("repo_root") or "")
     entrypoints = [str(item) for item in as_list(repo.get("entrypoint_hints"))]
@@ -851,6 +1040,7 @@ def project_context(project_understanding: dict[str, Any]) -> dict[str, Any]:
     return {
         "project": project,
         "repo_root": repo_root,
+        "local_project_binding": bundle.get("local_project_binding") if isinstance(bundle.get("local_project_binding"), dict) else {},
         "entrypoints": entrypoints,
         "modules": modules,
         "file_items": file_items,
@@ -892,7 +1082,7 @@ def render_data_model_design(signals: dict[str, bool], spec: dict[str, Any], bre
     return {
         "applicable": applicable,
         "reason": "需求涉及字段、状态、结算、历史数据或显式数据影响。" if applicable else "未识别到字段、表结构、状态或历史数据变更信号。",
-        "not_applicable_reason": "" if applicable else "本次保持现有 API 字段和持久化结构不变，仅调整前端交互与播放器生命周期。",
+        "not_applicable_reason": "" if applicable else "本次保持现有 API 字段和持久化结构不变；无记录、状态、查询、回调、重试或历史数据影响。",
         "business_objects": business_objects or [str(item.get("summary")) for item in breakdown[:3] if item.get("summary")],
         "entities": table_rows,
         "tables": table_rows,
@@ -929,12 +1119,61 @@ def render_table_schema_changes(data_model: dict[str, Any]) -> list[dict[str, An
     return rows
 
 
-def render_system_interaction_sequence(signals: dict[str, bool], route_refs: list[str], owner_file: str, summary: str, confirmed_modules: list[str] | None = None) -> dict[str, Any]:
+def external_provider_label(summary: str, route_refs: list[str], external_provider_refs: list[str] | None = None) -> str:
+    blob = " ".join([summary, *route_refs, *(external_provider_refs or [])]).lower()
+    if "approval" in blob or "审批" in summary:
+        return "Approval Provider"
+    if "callback" in blob or "回调" in summary:
+        return "External Callback Provider"
+    return "External Provider"
+
+
+def render_system_interaction_sequence(
+    signals: dict[str, bool],
+    route_refs: list[str],
+    owner_file: str,
+    summary: str,
+    confirmed_modules: list[str] | None = None,
+    external_provider_refs: list[str] | None = None,
+) -> dict[str, Any]:
     applicable = bool(signals.get("system"))
     confirmed_modules = confirmed_modules or []
     participants = ["User/Client", owner_file, *[item for item in confirmed_modules if item != owner_file]]
+    external_participants: list[str] = []
+    provider_label = external_provider_label(summary, route_refs, external_provider_refs)
+    summary_lower = summary.lower()
+    external_requested = any(term in summary_lower for term in ["external provider", "third-party", "callback", "approval"]) or any(
+        term in summary for term in ["外部平台", "第三方", "回调", "审批"]
+    )
+    route_blob = json.dumps([*route_refs, *(external_provider_refs or [])], ensure_ascii=False).lower()
+    if external_requested or any(pattern in route_blob for pattern in EXTERNAL_PROVIDER_API_PATTERNS):
+        external_participants.append(provider_label)
+    participants.extend(external_participants)
     participants.extend(item for item in route_refs if item not in participants)
     sequence = [{"step": 1, "from": "User/Client", "to": owner_file, "mode": "sync", "action": summary, "success": "页面接受操作", "failure": "保留输入并展示错误", "state_transition": "idle -> handling", "source_evidence": "spec.entrypoints"}]
+    if external_participants:
+        sequence.append({
+            "step": len(sequence) + 1,
+            "from": owner_file,
+            "to": provider_label,
+            "mode": "sync_or_async",
+            "action": "create external workflow instance for the configured scenario and template",
+            "success": "external instance id and pending status are persisted",
+            "failure": "record creation failure reason and expose retry from the operation page",
+            "state_transition": "pending_create -> pending_approval|create_failed",
+            "source_evidence": "requirement.business_flow",
+        })
+        sequence.append({
+            "step": len(sequence) + 1,
+            "from": provider_label,
+            "to": owner_file,
+            "mode": "callback",
+            "action": "send workflow result callback",
+            "success": "approved callback applies the approved action; rejected callback records rejection without side effects",
+            "failure": "record callback failure and keep an idempotent retry path",
+            "state_transition": "pending_approval -> approved|rejected|callback_failed",
+            "source_evidence": "requirement.business_flow",
+        })
     for contract in route_refs:
         sequence.append({"step": len(sequence) + 1, "from": owner_file, "to": contract, "mode": "async_response", "action": f"调用或复用已确认契约 {contract}", "success": "契约返回兼容结果并只提交当前有效响应", "failure": "超时/错误时保持当前稳定状态并展示错误", "state_transition": "handling -> success|failed", "source_evidence": "evidence_bundle.contracts"})
     for module in confirmed_modules:
@@ -943,6 +1182,7 @@ def render_system_interaction_sequence(signals: dict[str, bool], route_refs: lis
     return {
         "applicable": applicable,
         "reason": "需求涉及接口/跨模块调用或已识别业务路由。" if applicable else "未识别到跨系统或接口调用影响。",
+        "not_applicable_reason": "" if applicable else "本次只在已确认 owner 模块内处理本地行为，不新增第三方、跨仓、MQ、HTTP API 或回调交互。",
         "participants": participants if applicable else [],
         "sequence": sequence if applicable else [],
         "timeout_retry": "同步调用需确认超时、重试次数和用户可见错误；异步调用需确认补偿任务。",
@@ -1105,7 +1345,7 @@ def render_transaction_consistency(signals: dict[str, bool], summary: str) -> di
     return {
         "applicable": applicable,
         "reason": "需求涉及写入、结算、金额、多表/多系统、重试或回滚。" if applicable else "未识别多表/多系统写入或强一致风险。",
-        "not_applicable_reason": "" if applicable else "本次只调整前端交互和播放器生命周期，不新增数据写入、事务边界或跨系统一致性。",
+        "not_applicable_reason": "" if applicable else "本次不新增数据写入、事务边界、重试补偿或跨系统一致性风险。",
         "boundary": "owner service/repository transaction boundary must be confirmed" if applicable else "",
         "local_transaction_boundary": "owner service/repository transaction boundary must be confirmed" if applicable else "",
         "distributed_transaction": "avoid by default; use eventual consistency with idempotency/compensation" if applicable else "",
@@ -1158,7 +1398,12 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
     )
     location_evidence = ctx.get("source_location_evidence") if isinstance(ctx.get("source_location_evidence"), dict) else {}
     confirmed_contracts = [str(item) for item in as_list(location_evidence.get("confirmed_contracts") or location_evidence.get("contracts")) if item]
-    route_refs = confirmed_contracts or [route_ref(item) for item in business_routes[:5]]
+    local_confirmed_contracts, external_confirmed_contracts = split_provider_contracts(confirmed_contracts)
+    explicit_contracts = explicit_contract_refs_from_spec(spec)
+    local_explicit_contracts, external_explicit_contracts = split_provider_contracts(explicit_contracts)
+    local_business_routes = [route_ref(item) for item in business_routes[:5]]
+    route_refs = local_confirmed_contracts or local_explicit_contracts or local_business_routes
+    external_provider_refs = [*external_confirmed_contracts, *external_explicit_contracts]
     config_refs = [str(item.get("path")) for item in ctx["config_items"][:5]]
     test_evidence = [f"{cmd} evidence" for cmd in ctx["test_hints"][:3]] or ["test evidence"]
     applicability = {str(item.get("area")): str(item.get("status")) for item in as_list(spec.get("impact_applicability")) if isinstance(item, dict)}
@@ -1209,10 +1454,18 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         decision_confidence = "high"
     problem = build_problem_analysis(spec, ctx, summary, breakdown, owner_file, read_first, route_refs, entrypoint_confidence)
     technical_options, comparison_matrix, score_summary, selected_solution = build_technical_options(spec, summary, owner_file, breakdown, route_refs, test_evidence, problem)
-    signals = impact_signals(spec, breakdown, route_refs)
+    signals = impact_signals(spec, breakdown, [*route_refs, *external_provider_refs])
     data_model_design = render_data_model_design(signals, spec, breakdown, owner_file)
     process_flow = render_process_flow(spec, breakdown, actors, summary)
-    system_interaction_sequence = render_system_interaction_sequence(signals, route_refs, owner_file, summary, [str(item) for item in as_list(entrypoint_confidence.get("confirmed_anchors"))])
+    system_interaction_sequence = render_system_interaction_sequence(
+        signals,
+        route_refs,
+        owner_file,
+        summary,
+        [str(item) for item in as_list(entrypoint_confidence.get("confirmed_anchors"))],
+        external_provider_refs,
+    )
+    planned_new_modules = explicit_planned_new_modules(spec)
     module_decomposition = [{
         "module": owner_file,
         "responsibility": str(item.get("summary") or summary),
@@ -1224,6 +1477,21 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "requirement_breakdown_id": item.get("id"),
         "entrypoint_confidence": entrypoint_confidence.get("level"),
     } for item in breakdown]
+    for planned in planned_new_modules:
+        module_decomposition.append({
+            "module": planned["module"],
+            "responsibility": planned["responsibility"],
+            "input": "business request or callback data defined by the requirement",
+            "output": "new capability behavior defined by the requirement",
+            "dependencies": [owner_file] if owner_file else ["existing owner entrypoint"],
+            "cohesion_reason": "Requirement explicitly requires this as part of a new independent module boundary.",
+            "coupling_control": "Keep new-module responsibilities separate from existing source anchors; use existing anchors only as callers or integration points.",
+            "requirement_breakdown_id": breakdown[0].get("id") if breakdown else "BRK-1",
+            "entrypoint_confidence": "planned_new_module",
+            "planned_new_module": True,
+            "source_evidence": planned["source_evidence"],
+            "confirmation_required": planned["confirmation_required"],
+        })
     for path in as_list(entrypoint_confidence.get("confirmed_anchors")):
         if path and path != owner_file:
             module_decomposition.append({
@@ -1237,6 +1505,12 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
                 "requirement_breakdown_id": breakdown[0].get("id") if breakdown else "BRK-1",
                 "entrypoint_confidence": entrypoint_confidence.get("level"),
             })
+    source_literals = extract_source_literals(spec)
+    known_literals = {str(item.get("literal")) for item in source_literals if isinstance(item, dict)}
+    for contract in confirmed_contracts:
+        if contract not in known_literals:
+            source_literals.append({"literal": contract, "source": "source_location_evidence.confirmed_contracts", "required_binding": True})
+    constraint_model = generic_constraint_model(spec)
     return {
         "schema": "codex-technical-design-v1",
         "decision": "pass" if design_allowed else "block",
@@ -1246,12 +1520,29 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "project_context": {
             "project": ctx["project"],
             "repo_root": ctx["repo_root"],
+            "local_project_binding": ctx["local_project_binding"],
             "framework_hints": ctx["framework_hints"],
             "read_first": read_first,
             "test_command_hints": ctx["test_hints"],
             "test_file_hints": ctx["test_file_hints"],
         },
         "source_location_evidence": location_evidence,
+        "local_project_binding": ctx["local_project_binding"],
+        "source_literals": source_literals,
+        "external_provider_contracts": [
+            {
+                "contract": contract,
+                "classification": "external_provider_reference",
+                "rule": "Do not use this as a local system API/controller route; bind local APIs separately.",
+            }
+            for contract in external_provider_refs
+        ],
+        "constraint_model": constraint_model,
+        "forbidden_reuse_paths": constraint_model["forbidden_reuse_paths"],
+        "forbidden_modules": constraint_model["forbidden_modules"],
+        "forbidden_contracts": constraint_model["forbidden_contracts"],
+        "forbidden_behaviors": constraint_model["forbidden_behaviors"],
+        "out_of_scope_patterns": constraint_model["out_of_scope_patterns"],
         "design_scope": spec.get("scope") or {"in_scope": [summary], "out_of_scope": [], "assumptions": [], "non_goals": []},
         "impact_applicability": as_list(spec.get("impact_applicability")),
         "scope_model": spec.get("scope_model") or {},
@@ -1278,13 +1569,14 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
         "process_flow": process_flow,
         "process_flow_diagram": render_process_flow_diagram(process_flow),
         "module_decomposition": module_decomposition,
+        "planned_new_modules": planned_new_modules,
         "logical_data_flow": [{"source": route_refs[0] if route_refs else "existing source", "transform": str(item.get("summary") or summary), "destination": owner_file, "owner": ctx["project"], "data_security": "classify during security review", "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "target_behavior": [{"requirement_id": str(item.get("id") or req_id), "behavior": str(item.get("summary") or summary)} for item in requirements] or [{"requirement_id": req_id, "behavior": summary}],
-        "api_contracts": [{"contract": contract_for_breakdown(route_refs, item), "compatibility": "preserve existing consumers unless design updates contract", "old_consumer_impact": "review route consumers before implementation", "requirement_breakdown_id": item.get("id"), "api_impact": item.get("api_impact")} for item in breakdown],
+        "api_contracts": [api_contract_for_breakdown(route_refs, item, external_provider_refs) for item in breakdown],
         "interface_examples": [] if applicability.get("api") in {"excluded", "not_applicable"} else [{"name": route_refs[0] if route_refs else "no API request expected", "request": route_refs[0] if route_refs else "no API request expected", "response": f"response contract for {route_refs[0]}" if route_refs else "no API response change expected", "error_response": f"error contract for {route_refs[0]}" if route_refs else "no API error contract change expected"}],
         "compatibility_strategy": [{"old_consumer": "existing consumers", "old_data": "existing data", "rollback": "revert changed behavior", "behavior": "preserve backward compatibility"}],
         "compatibility_matrix": [{"consumer": "existing consumers", "old_behavior": "current behavior before this requirement", "new_behavior": summary, "compatibility": "backward compatible by default", "rollback_behavior": "revert changed behavior"}],
-        "data_design": [] if applicability.get("data") in {"excluded", "not_applicable"} else [{"read_rule": f"{item.get('id')}: read through {owner_file}", "write_rule": f"{item.get('id')}: write through {owner_file} only if this slice changes state", "migration": "none unless this slice changes schema/data backfill", "field_impact": item.get("field_impact"), "requirement_breakdown_id": item.get("id")} for item in breakdown],
+        "data_design": [] if not signals.get("data") else [{"read_rule": f"{item.get('id')}: read through {owner_file}", "write_rule": f"{item.get('id')}: write through {owner_file} only if this slice changes state", "migration": "none unless this slice changes schema/data backfill", "field_impact": item.get("field_impact"), "requirement_breakdown_id": item.get("id")} for item in breakdown],
         "data_model_design": data_model_design,
         "table_schema_changes": render_table_schema_changes(data_model_design),
         "system_interaction_sequence": system_interaction_sequence,
@@ -1346,7 +1638,8 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
                 "process_flow_refs": [title or summary],
                 "module_refs": list(dict.fromkeys(str(mod.get("module")) for mod in as_list([{"module": owner_file}]) if mod.get("module"))),
                 "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"],
-                "api_contract_refs": route_refs or ["No API impact confirmed yet"],
+                "api_contract_refs": route_refs or ["Local system API contract must be confirmed before implementation"],
+                "external_provider_refs": external_provider_refs,
                 "ui_ue_refs": ["affected UI if any"],
                 "test_refs": [f"TEST-{item.get('id') or req_id}"],
                 "acceptance_refs": [str(ac.get("id") or ac_id) for ac in acceptance] or [ac_id],
@@ -1354,9 +1647,9 @@ def render(spec: dict[str, Any], project_understanding: dict[str, Any] | None = 
                 "decision_reason": selected_solution.get("selection_reason"),
             }
             for item in requirements
-        ] or [{"requirement_id": req_id, "requirement_breakdown_refs": [row.get("id") for row in breakdown], "process_flow_refs": [title or summary], "module_refs": [owner_file], "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"], "api_contract_refs": route_refs or ["No API impact confirmed yet"], "ui_ue_refs": ["affected UI if any"], "test_refs": [f"TEST-{req_id}"], "acceptance_refs": [ac_id], "selected_option_id": selected_solution.get("selected_option_id"), "decision_reason": selected_solution.get("selection_reason")}],
+        ] or [{"requirement_id": req_id, "requirement_breakdown_refs": [row.get("id") for row in breakdown], "process_flow_refs": [title or summary], "module_refs": [owner_file], "data_flow_refs": [f"{route_refs[0] if route_refs else 'existing source'}->{owner_file}"], "api_contract_refs": route_refs or ["Local system API contract must be confirmed before implementation"], "external_provider_refs": external_provider_refs, "ui_ue_refs": ["affected UI if any"], "test_refs": [f"TEST-{req_id}"], "acceptance_refs": [ac_id], "selected_option_id": selected_solution.get("selected_option_id"), "decision_reason": selected_solution.get("selection_reason")}],
         "acceptance_mapping": [{"acceptance_id": str(item.get("id") or ac_id), "design_refs": [summary], "evidence_required": as_list(item.get("evidence_required")) or test_evidence} for item in acceptance] or [{"acceptance_id": ac_id, "design_refs": [summary], "evidence_required": test_evidence}],
-        "ui_ue_design": [{"page_or_route": route_refs[0] if route_refs else "confirm if UI is affected", "user_goal": summary, "entry_point": "existing entry", "layout": "preserve existing layout unless requirement changes it", "interaction_flow": ["open affected behavior", "perform action", "verify result"], "states": ["loading", "success", "error"], "field_rules": ["preserve existing field validation and visibility"], "permission_visibility": "preserve role visibility", "acceptance_evidence": "browser evidence if UI changed"}],
+        "ui_ue_design": [{"page_or_route": "confirm local page/route from frontend repository" if external_provider_refs and not route_refs else route_refs[0] if route_refs else "confirm if UI is affected", "user_goal": summary, "entry_point": "existing entry", "layout": "preserve existing layout unless requirement changes it", "interaction_flow": ["open affected behavior", "perform action", "verify result"], "states": ["loading", "success", "error"], "field_rules": ["preserve existing field validation and visibility"], "permission_visibility": "preserve role visibility", "acceptance_evidence": "browser evidence if UI changed"}],
         "test_strategy": [{"summary": f"Validate acceptance criteria for {summary}; detailed cases belong in test_design.json.", "evidence": test_evidence, "type": "strategy_summary", "test_design_ref": "test_design.json"}],
         "test_design_ref": "test_design.json",
         "open_questions": spec.get("open_questions", []),

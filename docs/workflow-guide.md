@@ -83,18 +83,21 @@ requirement-document-ingestor
 -> delivery-plan-reviewer
 ```
 
+<!-- GENERATED:WORKFLOW_PROFILES:START -->
 ## Workflow Profiles
 
 | Scenario | Required path |
 | --- | --- |
-| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> test-design-governor -> design-architecture-reviewer -> test-data-governor -> delivery-plan-templates -> traceability-governor initial pass -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo/MQ/async/scheduler/task/job/cache/integration/permission/security signals elevate above the light path. |
+| `small_feature-lite` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> architecture-design-governor -> design-architecture-reviewer -> test-design-governor -> delivery-plan-templates -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; use only for a small single-scope request with no declared API, UI, cross-repo, data, permission, or runtime integration impact. |
 | `small_feature` | Standard design-first profile, then Git/edit readiness gates. |
+| `bugfix` | `requirement-document-ingestor -> spec-governor -> requirement-question-governor -> technical-design-governor -> test-design-governor -> design-architecture-reviewer -> test-data-governor -> delivery-plan-templates -> traceability-governor initial pass -> delivery-plan-reviewer -> git-worktree-governor -> edit-readiness-governor`; API/data/UI/cross-repo/MQ/async/scheduler/task/job/cache/integration/permission/security signals elevate above the light path. |
 | `frontend_change` | Standard design-first profile plus pre-technical `ui-ue-design-governor`, `ui-ue-reviewer`, and `frontend-implementation-planner`. Real `frontend-acceptance-runner -> test-evidence-gate` evidence is collected after implementation, before release. UI/UE design must name concrete user entry surfaces and cover loading, empty, success, validation error, permission denied, and dependency error states. |
 | `cross_repo_api` | API/cross-repo contract profile with project understanding, pre-technical API/observability design, delivery plan, cross-repo execution graph/readiness before delivery plan review, initial traceability, and release evidence gates. |
 | `data_migration` | Standard design-first profile plus configuration, security, and performance design gates before design approval; release gates run only after implementation evidence exists. |
 | `release_readiness` | `implementation-completion-gate -> post-change-skill-sync -> workspace-write-guard audit -> diff-impact-analyzer -> change-risk-governor -> evidence-auto-collector -> code-design-quality-reviewer -> frontend-acceptance-runner when UI changed -> test-evidence-gate -> post-implementation traceability -> code-review-gate -> environment-promotion-governor -> uat-acceptance-governor -> release-change-governor -> release-evidence-binder`. |
 
 Profiles use schema `codex-workflow-profiles-v3` and select scenario skills and impacts; they do not define execution order. Stage order, schemas, required fields, decisions, dependencies, lineage inputs, Runtime gates, conditional skills, conditional impacts, and next commands are defined by the `codex-workflow-stages-v4` registry in `config/workflow-stages.example.yaml`.
+<!-- GENERATED:WORKFLOW_PROFILES:END -->
 
 Harness policy uses `config/harness-policy.example.yaml`. The lifecycle checkpoints are source location, design, post implementation, and pre-push. They are normal DAG stages with lineage, so changing a code index, confirmed source file, design, plan, diff, test result, or review evidence invalidates the applicable downstream checkpoint.
 

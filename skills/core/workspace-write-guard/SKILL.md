@@ -29,6 +29,7 @@ edit-readiness-governor permit
 - Audit after edits and before review, commit, push, or release evidence.
 - Changed files must stay inside `permit.allowed_files` when the permit binds file scope.
 - Current repo, branch, doc id, permit decision, and permit expiry must still match.
+- Repo and permit repo must not point to `_staging`; write evidence is valid only from the registered project checkout.
 - Files modified before the permit was issued are suspicious and block the audit.
 - If `decision=blocked`, do not commit, push, or count the change as delivery evidence.
 - Treat built-in editor and MCP writes as imported Runtime events, then use the write audit as the authoritative filesystem backstop.
@@ -74,17 +75,42 @@ python3 scripts/install_pre_commit.py \
   --repo /path/to/repo
 ```
 
+Default installation uses hook profile `framework_light`: install `pre-commit` plus a lightweight `pre-push` hook that checks repository context and blocks pushes with tracked workspace changes, but does not require delivery evidence artifacts.
+
+Install strict delivery pre-push enforcement only for delivery repositories:
+
+```bash
+python3 scripts/install_pre_commit.py \
+  --repo /path/to/repo \
+  --hook-profile delivery_strict
+```
+
+Disable pre-push installation and keep only `pre-commit`:
+
+```bash
+python3 scripts/install_pre_commit.py \
+  --repo /path/to/repo \
+  --hook-profile off
+```
+
 Repair only a missing or stale pre-push hook without installing pre-commit:
 
 ```bash
 python3 scripts/install_pre_commit.py \
   --repo /path/to/repo \
-  --hook pre-push
+  --hook pre-push \
+  --hook-profile delivery_strict
 ```
 
 The installer resolves the actual Git directory, including linked worktrees, verifies the Harness and Agent Runtime scripts before writing a hook, and automatically repairs known Codex hooks whose absolute script target no longer exists. Replaced hooks are retained beside the active hook as timestamped `*.codex-backup.*` files. Existing non-Codex hooks are preserved unless `--force` is explicit.
 
-The pre-push hook requires `CODEX_ARTIFACT_DIR`. It advances the Runtime `pre_push` checkpoint, then runs the `pre_push` Harness against the current repository and blocks missing post-implementation Harness evidence, project-skill-index synchronization, incomplete review/test evidence, or test evidence bound to another commit.
+Installer output includes `hook_profile` and `hook_profile_reason` so repo policy, CLI overrides, and default inference are visible in the result.
+
+Hook profiles:
+
+- `framework_light`: lightweight repository pre-push guard; no delivery artifact resolution and no post-implementation evidence enforcement.
+- `delivery_strict`: full delivery pre-push Harness. It uses `CODEX_ARTIFACT_DIR` when set. If it is not set, it resolves artifacts from `git config codex.artifactDir`, `.codex/current_delivery.json`, `CODEX_DOC_ID`, `git config codex.docId`, or a branch/doc id such as `REQ-001` under `company-delivery-docs/deliveries/<doc-id>/artifacts`. For historical doc-id drift, it may resolve a unique `REQ-YYYYMMDD-<slug>` match in the unified docs repo; multiple matches remain blocked. It advances the Runtime `pre_push` checkpoint, then runs the `pre_push` Harness against the current repository and blocks missing post-implementation Harness evidence, project-skill-index synchronization, incomplete review/test evidence, or test evidence bound to another commit.
+- `off`: do not install `pre-push`.
 
 At commit time set:
 

@@ -11,6 +11,31 @@ from pathlib import Path
 from typing import Any, Callable
 
 SCHEMA = "codex-open-questions-v1"
+PLACEHOLDER_QUESTIONS = {
+    "待确认问题",
+    "确认问题",
+    "clarification question",
+    "question",
+    "tbd",
+    "to be confirmed",
+}
+ENGLISH_TEMPLATE_PREFIXES = (
+    "what is ",
+    "what are ",
+    "which ",
+    "confirm ",
+    "clarify ",
+    "resolve ",
+)
+GENERIC_LOW_QUALITY_TERMS = {
+    "功能正常",
+    "是否合理",
+    "怎么处理",
+    "待确认",
+    "confirm later",
+    "clarify requirement",
+    "to be confirmed",
+}
 
 
 def as_list(value: Any) -> list[Any]:
@@ -39,6 +64,52 @@ def question_key(question: dict[str, Any]) -> str:
     return str(question.get("question") or "").strip().lower()
 
 
+def has_cjk(value: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in value)
+
+
+def spec_prefers_zh(spec: dict[str, Any]) -> bool:
+    payload = json.dumps(spec, ensure_ascii=False)
+    return has_cjk(payload)
+
+
+def is_placeholder_question(value: str) -> bool:
+    normalized = value.strip().lower()
+    return not normalized or normalized in PLACEHOLDER_QUESTIONS or normalized.rstrip("？?") in PLACEHOLDER_QUESTIONS
+
+
+def localize_question(question: str, category: str, spec: dict[str, Any]) -> str:
+    if not spec_prefers_zh(spec) or has_cjk(question):
+        return question
+    translations = {
+        "business_goal": "这个需求的真实业务目标、当前痛点、受影响用户和可观察成功信号分别是什么？",
+        "business_flow": "完整业务流程是什么，包括参与者、前置条件、入口、触发方式、系统行为、成功结果和失败处理？",
+        "actor_entrypoint": entrypoint_question(spec),
+        "acceptance": "哪些可执行的正向和反向验收用例能够证明每个业务分支都满足？",
+        "state_transition": "准确的状态流转、触发时机、非法流转和下游影响是什么？",
+        "ambiguous_action": "本次到底需要改变什么具体行为，哪些既有行为必须保持不变？",
+        "ambiguous_flow": "这条流程的来源、目标、触发时机、重试、幂等和完成条件分别是什么？",
+        "ambiguous_defect": "实际观察到的问题、期望行为、影响数据/用户、复现或检测条件分别是什么？",
+        "ambiguous_scope": "哪些对象、用户、系统和场景在本次范围内，哪些明确不在范围内？",
+        "ambiguous_rule": "具体规则、默认值、优先级、例外情况和回滚行为是什么？",
+        "ambiguous_exception": "哪些异常场景需要处理、忽略、重试，或者暴露给用户/运营？",
+        "ambiguous_state": "哪个状态由谁在什么时机更新，会产生哪些下游影响？",
+        "business_closure": business_closure_question(spec),
+        "state_machine": "本需求涉及的状态机、重试策略、幂等键、超时规则、补偿规则和非法流转是什么？",
+        "dependency_chain": "按顺序排列的上下游系统、消息 topic、API 契约、消费者和联调证据是什么？",
+        "repo_impact": "哪些仓库/服务分别负责本需求的各部分，哪些是一度或多度依赖？",
+        "understanding_score": "当前理解薄弱点需要补齐哪些业务目标、流程、入口、证据或状态规则？",
+        "success_metric": "这个需求需要观察什么量化成功阈值？",
+        "scope_boundary": "本次变更明确不包含哪些范围？",
+        "current_business_state": current_state_evidence_question(spec),
+        "api_contract": "本次涉及哪些端点、请求/响应字段、错误码、兼容规则和既有消费者？",
+        "data_rule": "涉及哪些数据字段、定义、筛选、空值/默认值和排序规则？",
+        "configuration": "配置默认值、环境覆盖、灰度范围和回滚行为是什么？",
+        "permission": "哪些未授权角色、租户/数据范围和反向权限用例必须失败？",
+    }
+    return translations.get(category, f"请澄清需求歧义：{question}")
+
+
 def semantic_question_key(question: dict[str, Any]) -> str:
     category = str(question.get("category") or "general")
     aliases = {
@@ -50,6 +121,35 @@ def semantic_question_key(question: dict[str, Any]) -> str:
         "acceptance": "acceptance",
     }
     return aliases.get(category, category)
+
+
+def question_quality(question: dict[str, Any], spec: dict[str, Any] | None = None, existing_questions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    text = str(question.get("question") or "").strip()
+    lower = text.lower()
+    category = str(question.get("category") or "")
+    source = str(question.get("source") or "")
+    owner = str(question.get("owner") or "")
+    existing_questions = existing_questions or []
+    duplicate_count = sum(1 for item in existing_questions if item is not question and question_key(item) == lower)
+    actionable = text.endswith(("?", "？")) and len(text) >= 8 and not any(term in lower or term in text for term in GENERIC_LOW_QUALITY_TERMS)
+    domain_specific = any(token in lower or token in text for token in [
+        "api", "endpoint", "contract", "field", "state", "permission", "tenant", "role", "repo", "entrypoint", "retry", "idempotency", "接口", "字段", "状态", "权限", "租户", "角色", "仓库", "入口", "重试", "幂等", "验收", "流程", "数据",
+    ]) or category not in {"general", "ambiguity", ""}
+    not_template = not is_placeholder_question(text) and not lower.startswith(("clarify requirement ambiguity", "clarification question", "what needs to be confirmed"))
+    if spec is not None and spec_prefers_zh(spec) and not has_cjk(text) and lower.startswith(ENGLISH_TEMPLATE_PREFIXES):
+        not_template = False
+    non_duplicate = duplicate_count == 0
+    answerable_by_owner = bool(owner.strip()) and owner not in {"unknown", "tbd", "待确认"}
+    dimensions = {
+        "actionable": actionable,
+        "domain_specific": domain_specific,
+        "not_template": not_template,
+        "non_duplicate": non_duplicate,
+        "answerable_by_owner": answerable_by_owner,
+        "has_source": bool(source.strip()),
+    }
+    score = sum(1 for value in dimensions.values() if value) * 100 // len(dimensions)
+    return {**dimensions, "score": score}
 
 
 def canonical_spec_digest(spec: dict[str, Any]) -> str:
@@ -113,10 +213,12 @@ def risk_for_category(category: str) -> str:
 
 
 def add_question(questions: list[dict[str, Any]], question: str, owner: str, required: bool, source: str, category: str = "general", risk: str | None = None) -> None:
+    if is_placeholder_question(question):
+        return
     candidate = {"question": question, "category": category, "source": source}
     if question.lower() in {question_key(item) for item in questions} or semantic_question_key(candidate) in {semantic_question_key(item) for item in questions}:
         return
-    questions.append({
+    row = {
         "id": f"Q-{len(questions) + 1}",
         "question": question,
         "owner": owner,
@@ -126,7 +228,19 @@ def add_question(questions: list[dict[str, Any]], question: str, owner: str, req
         "source": source,
         "category": category,
         "risk_if_unanswered": risk or risk_for_category(category),
-    })
+    }
+    row["quality"] = question_quality(row, existing_questions=questions)
+    questions.append(row)
+
+
+def spec_blocks_design(spec: dict[str, Any]) -> bool:
+    understanding = as_dict(spec.get("requirements_understanding"))
+    if spec.get("design_allowed") is False or understanding.get("design_allowed") is False:
+        return True
+    decision = str(spec.get("decision") or understanding.get("decision") or "").lower()
+    if "design_allowed" not in spec and "requirements_understanding" not in spec and decision not in {"ready_for_design", "pass"}:
+        return True
+    return decision in {"blocked", "block", "needs_clarification", "insufficient_context"}
 
 
 def impact_areas(spec: dict[str, Any]) -> set[str]:
@@ -162,6 +276,8 @@ def entrypoint_question(spec: dict[str, Any]) -> str:
     if is_area_applicable(spec, "api"):
         options.append("backend APIs")
     options.extend(["scheduled jobs", "MQ consumers", "manual tasks", "external callbacks"])
+    if spec_prefers_zh(spec):
+        return f"哪些准确入口会触发本次变更，包括{', '.join(options[:-1])}，或 {options[-1]}？"
     return f"Which exact entrypoints trigger the change, including {', '.join(options[:-1])}, or {options[-1]}?"
 
 
@@ -172,6 +288,8 @@ def current_state_evidence_question(spec: dict[str, Any]) -> str:
     if is_area_applicable(spec, "data"):
         evidence.append("persistence/data ownership")
     evidence.extend(["runtime tasks or consumers only when in scope", "downstream dependencies only when in scope"])
+    if spec_prefers_zh(spec):
+        return f"哪些当前状态证据能证明{', '.join(evidence[:-1])}，以及{evidence[-1]}？"
     return f"Which current-state evidence proves the {', '.join(evidence[:-1])}, and {evidence[-1]}?"
 
 
@@ -182,6 +300,8 @@ def business_closure_question(spec: dict[str, Any]) -> str:
     nodes.extend(["task/consumer only when in scope", "domain behavior", "visible result"])
     if is_area_applicable(spec, "data"):
         nodes.insert(-1, "persistence/cache")
+    if spec_prefers_zh(spec):
+        return f"从{' -> '.join(nodes)}的完整业务闭环是什么？"
     return f"What is the full business closure chain from {' through '.join(nodes)}?"
 
 
@@ -240,11 +360,15 @@ def merge_existing_answers(
 
 def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
     questions: list[dict[str, Any]] = []
+    design_blocked = spec_blocks_design(spec)
     for item in as_list(spec.get("open_questions")):
         if isinstance(item, dict):
-            questions.append({
+            raw_question = str(item.get("question") or "")
+            if is_placeholder_question(raw_question):
+                continue
+            row = {
                 "id": item.get("id") or f"Q-{len(questions) + 1}",
-                "question": item.get("question") or str(item),
+                "question": localize_question(raw_question or str(item), str(item.get("category") or "general"), spec),
                 "owner": item.get("owner") or "product/engineering",
                 "required": True,
                 "answer": item.get("answer", ""),
@@ -252,7 +376,9 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
                 "source": "spec.open_questions",
                 "category": item.get("category", "general"),
                 "risk_if_unanswered": item.get("risk_if_unanswered") or risk_for_category(str(item.get("category") or "general")),
-            })
+            }
+            row["quality"] = question_quality(row, spec, questions)
+            questions.append(row)
     for conflict in as_list(spec.get("rule_conflicts")):
         if isinstance(conflict, dict):
             add_question(questions, f"Resolve rule conflict: {conflict.get('message')}", "product/engineering", True, "spec.rule_conflicts", "business_rule")
@@ -301,7 +427,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
     for dimension in sorted({str(item) for item in weak_dimensions if item}):
         question_text = score_questions.get(dimension, "")
         if question_text:
-            add_question(questions, question_text, "product/engineering", True, f"requirements_understanding.{dimension}", "understanding_score")
+            add_question(questions, question_text, "product/engineering", design_blocked, f"requirements_understanding.{dimension}", "understanding_score")
     for advisory in as_list(as_dict(spec.get("business_goal_quality")).get("advisories")):
         if isinstance(advisory, dict) and advisory.get("source") == "measurable_metric":
             add_question(questions, "What quantitative success threshold should be observed for this requirement?", "product/engineering", False, "business_goal_quality.measurable_metric", "success_metric")
@@ -322,7 +448,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             questions,
             "What state transitions, retry policy, idempotency key, timeout rule, compensation rule, and invalid transitions are required?",
             "product/engineering",
-            True,
+            design_blocked,
             "state_machine.missing",
             "state_machine",
         )
@@ -332,7 +458,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
                 questions,
                 business_closure_question(spec),
             "engineering/product",
-            True,
+            design_blocked,
             "business_closure_model.missing_nodes",
             "business_closure",
         )
@@ -342,7 +468,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             questions,
             "What ordered upstream/downstream dependency chain, message topics, API contracts, and repository ownership must be followed?",
             "engineering",
-            True,
+            design_blocked,
             "dependency_chain.missing",
             "dependency_chain",
         )
@@ -352,7 +478,7 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             questions,
             "Which repositories and services are owner, upstream, downstream, or confirm-only dependencies for this requirement?",
             "engineering",
-            True,
+            design_blocked,
             "repo_impact_map.missing_repo_evidence",
             "repo_impact",
         )
@@ -368,22 +494,32 @@ def generate(spec: dict[str, Any], existing: dict[str, Any] | None = None) -> di
             area = str(constraint.get("area") or "")
             if area and not is_area_applicable(spec, area):
                 continue
-            add_question(questions, str(constraint["question"]), "product/engineering", True, f"implicit.{constraint.get('area', 'constraint')}", str(constraint.get("area") or "implicit_constraint"))
+            add_question(questions, str(constraint["question"]), "product/engineering", design_blocked, f"implicit.{constraint.get('area', 'constraint')}", str(constraint.get("area") or "implicit_constraint"))
     areas = applicable_impact_areas(spec)
     if "permission" in areas and not as_list(spec.get("negative_acceptance_criteria")):
-        add_question(questions, "Which unauthorized roles, tenant/data-scope cases, and negative permission tests must fail?", "product/security", True, "impact.permission", "permission")
+        add_question(questions, "Which unauthorized roles, tenant/data-scope cases, and negative permission tests must fail?", "product/security", design_blocked, "impact.permission", "permission")
     if "data" in areas and not as_list(spec.get("data_fields")):
-        add_question(questions, "Which data fields, definitions, filters, null/default rules, and export ordering are required?", "product/data-owner", True, "impact.data", "data_rule")
+        add_question(questions, "Which data fields, definitions, filters, null/default rules, and export ordering are required?", "product/data-owner", design_blocked, "impact.data", "data_rule")
     if "api" in areas:
-        add_question(questions, "Which endpoint, request/response fields, error codes, compatibility rules, and old consumers are in scope?", "engineering", True, "impact.api", "api_contract")
+        add_question(questions, "Which endpoint, request/response fields, error codes, compatibility rules, and old consumers are in scope?", "engineering", design_blocked, "impact.api", "api_contract")
     if "performance" in areas:
-        add_question(questions, "What latency, throughput, batch size, export volume, and performance evidence thresholds are required?", "product/engineering", True, "impact.performance", "performance")
+        add_question(questions, "What latency, throughput, batch size, export volume, and performance evidence thresholds are required?", "product/engineering", design_blocked, "impact.performance", "performance")
     if "security" in areas:
-        add_question(questions, "Which sensitive fields require masking, authorization checks, audit logs, retention limits, or privacy review?", "security/product", True, "impact.security", "security")
+        add_question(questions, "Which sensitive fields require masking, authorization checks, audit logs, retention limits, or privacy review?", "security/product", design_blocked, "impact.security", "security")
     if "config" in areas:
-        add_question(questions, "What are the configuration defaults, environment overrides, rollout scope, and rollback behavior?", "engineering/release", True, "impact.config", "configuration")
+        add_question(questions, "What are the configuration defaults, environment overrides, rollout scope, and rollback behavior?", "engineering/release", design_blocked, "impact.config", "configuration")
+    for question in questions:
+        if isinstance(question, dict):
+            question["question"] = localize_question(
+                str(question.get("question") or ""),
+                str(question.get("category") or "general"),
+                spec,
+            )
     finalize_question_ids(questions)
     questions = merge_existing_answers(questions, existing, spec)
+    for question in questions:
+        if isinstance(question, dict):
+            question["quality"] = question_quality(question, spec, questions)
     decision = "block" if any(q["required"] and q["status"] != "closed" for q in questions) else "pass"
     return {
         "schema": SCHEMA,
@@ -405,12 +541,30 @@ def validate_questions(data: dict[str, Any], spec: dict[str, Any] | None = None)
         if data.get("spec_digest") != expected_digest:
             blockers.append({"source": "spec_digest", "message": "open questions were not generated from the current spec"})
     for question in as_list(data.get("questions")):
+        question_text = str(question.get("question") or "") if isinstance(question, dict) else ""
+        if isinstance(question, dict) and "question" in question and is_placeholder_question(question_text):
+            blockers.append({"source": question.get("id", "question"), "message": "question is a placeholder and must be regenerated"})
+        if (
+            isinstance(question, dict)
+            and spec is not None
+            and spec_prefers_zh(spec)
+            and not has_cjk(question_text)
+            and question_text.lower().startswith(ENGLISH_TEMPLATE_PREFIXES)
+        ):
+            blockers.append({"source": question.get("id", "question"), "message": "Chinese requirement generated an English template question"})
         if isinstance(question, dict) and question.get("required") and question.get("status") != "closed":
             blockers.append({"source": question.get("id", "question"), "message": "required question is not closed"})
         if isinstance(question, dict) and question.get("required") and question.get("status") == "closed" and not str(question.get("answer") or "").strip():
             blockers.append({"source": question.get("id", "question"), "message": "required closed question must include an answer"})
         if isinstance(question, dict) and question.get("required") and not str(question.get("risk_if_unanswered") or "").strip():
             blockers.append({"source": question.get("id", "question"), "message": "required question must include risk_if_unanswered"})
+        if isinstance(question, dict) and question.get("required") and (spec is not None or isinstance(question.get("quality"), dict)):
+            quality = question.get("quality") if isinstance(question.get("quality"), dict) else question_quality(question, spec, as_list(data.get("questions")))
+            if int(quality.get("score") or 0) < 80:
+                blockers.append({"source": question.get("id", "question"), "message": "required question quality score is below policy", "quality": quality})
+            for key in ["actionable", "not_template", "answerable_by_owner", "has_source"]:
+                if quality.get(key) is not True:
+                    blockers.append({"source": question.get("id", "question"), "message": f"required question quality check failed: {key}", "quality": quality})
     return {"schema": "codex-open-questions-validation-v1", "decision": "block" if blockers else "pass", "blockers": blockers}
 
 

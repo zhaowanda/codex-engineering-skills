@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[4]
 
 
 def load_module(name: str, path: Path):
@@ -17,37 +19,41 @@ def load_module(name: str, path: Path):
     return module
 
 
+def load_synthetic_runner() -> Any:
+    return load_module("forward_synthetic_e2e_runner", ROOT / "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py")
+
+
 def requirement_shape_results(root: Path) -> dict[str, object]:
     governor = load_module("forward_spec_governor", root / "skills/core/spec-governor/scripts/spec_governor.py")
-    one_line = governor.normalize("REQ-FWD-ONE", "Order confirmation", "Optimize order confirmation.")
+    one_line = governor.normalize("REQ-FWD-ONE", "Task confirmation", "Optimize task confirmation.")
     long_prd = governor.normalize(
         "REQ-FWD-PRD",
-        "Order confirmation",
+        "Task confirmation",
         "\n".join([
-            "Goal: reduce buyer support tickets by 20 percent.",
+            "Goal: reduce user support tickets by 20 percent.",
             "Metric: support tickets decrease by 20 percent.",
-            "Flow: buyer submits an order and receives a confirmation.",
-            "Entrypoint: buyer submits the checkout form.",
-            "Requirement: completed orders show Order received.",
-            "Acceptance: a completed order shows Order received.",
+            "Flow: user submits a task and receives a confirmation.",
+            "Entrypoint: user submits the task form.",
+            "Requirement: completed tasks show Task received.",
+            "Acceptance: a completed task shows Task received.",
         ]),
     )
-    vague_bugfix = governor.normalize("REQ-FWD-BUG-BLOCK", "Order bug", "Fix the order confirmation bug.")
+    vague_bugfix = governor.normalize("REQ-FWD-BUG-BLOCK", "Task bug", "Fix the task confirmation bug.")
     resolved_bugfix = governor.normalize(
         "REQ-FWD-BUG-READY",
-        "Order bug correction",
+        "Task bug correction",
         "\n".join([
-            "Defect: completed orders show an empty confirmation message.",
-            "Goal: reduce buyer tickets caused by an empty order confirmation by 20 percent.",
-            "Metric: order-confirmation tickets decrease by 20 percent.",
-            "Current: completed orders show an empty confirmation message.",
-            "Flow: buyer submits an order and receives the completed-order confirmation.",
-            "Entrypoint: buyer submits the checkout form.",
+            "Defect: completed tasks show an empty confirmation message.",
+            "Goal: reduce user tickets caused by an empty task confirmation by 20 percent.",
+            "Metric: task-confirmation tickets decrease by 20 percent.",
+            "Current: completed tasks show an empty confirmation message.",
+            "Flow: user submits a task and receives the completed-task confirmation.",
+            "Entrypoint: user submits the task form.",
             "Observed: the confirmation message is empty.",
-            "Expected: the confirmation message shows Order received.",
-            "Reproduction: submit a valid order and wait for completion.",
-            "Requirement: completed orders show Order received.",
-            "Acceptance: after a valid order completes, the confirmation shows Order received.",
+            "Expected: the confirmation message shows Task received.",
+            "Reproduction: submit a valid task and wait for completion.",
+            "Requirement: completed tasks show Task received.",
+            "Acceptance: after a valid task completes, the confirmation shows Task received.",
         ]),
     )
     return {
@@ -69,21 +75,12 @@ def requirement_shape_results(root: Path) -> dict[str, object]:
     }
 
 
-def run(root: Path) -> dict:
+def run(root: Path, pure_mode: bool = False) -> dict:
     cases = []
     requirement_shapes = requirement_shape_results(root)
+    synthetic_runner = load_synthetic_runner()
     with tempfile.TemporaryDirectory() as tmp:
-        proc = subprocess.run(
-            ["python3", "skills/templates/synthetic-e2e-runner/scripts/run_synthetic_e2e.py", "--out-dir", tmp],
-            cwd=root,
-            text=True,
-            capture_output=True,
-        )
-        data = {}
-        try:
-            data = json.loads(proc.stdout)
-        except Exception:
-            pass
+        data = synthetic_runner.run(Path(tmp), pure_mode=pure_mode)
         synthetic_cases = data.get("cases", []) if isinstance(data.get("cases"), list) else []
         case_map = {item.get("case"): item for item in synthetic_cases if isinstance(item, dict)}
         required_cases = [
@@ -108,7 +105,7 @@ def run(root: Path) -> dict:
         }
         cases.append({
             "case": "synthetic-e2e",
-            "returncode": proc.returncode,
+            "returncode": 0 if data.get("decision") == "pass" else 1,
             "schema": data.get("schema"),
             "decision": data.get("decision"),
             "case_results": case_results,
@@ -121,7 +118,7 @@ def run(root: Path) -> dict:
             "release_readiness_blocked_path_passed": case_results["release_readiness_blocked_path"],
             "release_readiness_happy_path_passed": case_results["release_readiness_happy_path"],
             "release_followup_chain_path_passed": case_results["release_followup_chain_path"],
-            "passed": proc.returncode == 0 and data.get("schema") == "codex-synthetic-e2e-run-v1" and data.get("decision") == "pass" and all(case_results.values()) and all(scenario_results.values()),
+            "passed": data.get("schema") == "codex-synthetic-e2e-run-v1" and data.get("decision") == "pass" and all(case_results.values()) and all(scenario_results.values()),
         })
     blockers = [{"source": item["case"], "message": "forward test failed"} for item in cases if not item["passed"]]
     return {
@@ -135,8 +132,9 @@ def run(root: Path) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run forward tests")
     parser.add_argument("--root", required=True)
+    parser.add_argument("--pure-mode", action="store_true")
     args = parser.parse_args()
-    result = run(Path(args.root))
+    result = run(Path(args.root), pure_mode=args.pure_mode)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["decision"] == "pass" else 1
 

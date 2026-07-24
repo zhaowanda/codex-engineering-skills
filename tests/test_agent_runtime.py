@@ -75,6 +75,10 @@ def test_runtime_detects_tampered_event() -> None:
 
         assert result["decision"] == "block"
         assert any(item["message"] == "event digest does not match content" for item in result["blockers"])
+        session = json.loads((root / "runtime/session.json").read_text(encoding="utf-8"))
+        assert session["decision"] == "block"
+        assert session["verification_decision"] == "block"
+        assert session["verification_blockers"]
 
 
 def test_runtime_redacts_secrets_from_imported_event() -> None:

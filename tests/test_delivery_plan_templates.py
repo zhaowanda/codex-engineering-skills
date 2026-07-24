@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import tempfile
 from pathlib import Path
 
@@ -61,6 +62,60 @@ def test_project_understanding_fills_repo_path_files_and_tests() -> None:
     assert not any("repo_path is required" in item for item in plan["open_gates"])
 
 
+def test_registered_project_checkout_overrides_staging_repo_path() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        codex_home = root / ".codex"
+        checkout = root / "workspace" / "billing-service"
+        checkout.mkdir(parents=True)
+        (checkout / ".git").mkdir()
+        registry = codex_home / "skills" / "company" / "projects.yaml"
+        registry.parent.mkdir(parents=True)
+        registry.write_text(
+            "\n".join(
+                [
+                    'schema: "codex-project-registry-v1"',
+                    "projects:",
+                    '  - name: "billing-service"',
+                    '    default_branch: "develop"',
+                    "    repo:",
+                    f'      local_path_hint: "{checkout}"',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        old_codex_home = os.environ.get("CODEX_HOME")
+        os.environ["CODEX_HOME"] = str(codex_home)
+        try:
+            understanding = {
+                "repository_analysis": {"project": "billing-service", "test_hints": ["pytest"]},
+                "code_index": {"repo_root": str(root / "_staging" / "billing-service"), "files": [{"path": "src/service.py"}]},
+            }
+            technical = {
+                "doc_id": "REQ-STAGING",
+                "test_strategy": [{"case": "case", "evidence": ["pytest"]}],
+                "acceptance_mapping": [{"acceptance_id": "AC-1", "evidence_required": ["pytest"]}],
+            }
+            architecture = {
+                "doc_id": "REQ-STAGING",
+                "repo_responsibilities": [{"repo": "billing-service", "role": "modify", "responsibility": "change service"}],
+                "module_topology": [{"repo": "billing-service", "module": "src/service.py", "change_type": "modify"}],
+            }
+            plan = render_delivery_plan.render_from_design("REQ-STAGING", technical, architecture, understanding)
+        finally:
+            if old_codex_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = old_codex_home
+
+    task = plan["repo_tasks"][0]
+    assert task["repo_path"] == str(checkout.resolve())
+    assert task["base_branch"] == "develop"
+    assert "_staging" not in task["repo_path"]
+    assert not any("repo_path points to _staging" in item for item in plan["open_gates"])
+
+
 def test_delivery_plan_excludes_unconfirmed_and_rejected_files() -> None:
     technical = {
         "doc_id": "REQ-LOC",
@@ -113,6 +168,40 @@ def test_requirement_understanding_gate_keeps_delivery_plan_incomplete() -> None
     assert any("requirements_understanding_gate" in item for item in plan["open_gates"])
 
 
+def test_requirement_declared_repo_missing_from_architecture_keeps_plan_incomplete() -> None:
+    repo_map = {
+        "multi_repo_required": True,
+        "repos": [
+            {"name": "sigreal-operate-platform", "relation": "owner"},
+            {"name": "operate-platform-fe", "relation": "downstream"},
+        ],
+    }
+    technical = {
+        "doc_id": "REQ-FEISHU",
+        "requirements_understanding_gate": {
+            "design_allowed": True,
+            "implementation_allowed": True,
+            "business_intent": "接入飞书审批能力",
+            "business_flow": ["后端创建审批实例", "前端展示审批状态"],
+            "entrypoints": ["审批入口"],
+            "repo_impact_map": repo_map,
+        },
+        "repo_impact_map": repo_map,
+        "test_strategy": [{"case": "approval", "evidence": ["unit"]}],
+        "acceptance_mapping": [{"acceptance_id": "AC-1", "evidence_required": ["unit"]}],
+    }
+    architecture = {
+        "doc_id": "REQ-FEISHU",
+        "repo_responsibilities": [{"repo": "sigreal-operate-platform", "repo_path": "/workspace/sigreal-operate-platform", "role": "modify", "responsibility": "backend approval"}],
+        "module_topology": [{"repo": "sigreal-operate-platform", "module": "operate-provider/src/main/java/approval", "change_type": "modify"}],
+    }
+
+    plan = render_delivery_plan.render_from_design("REQ-FEISHU", technical, architecture)
+
+    assert plan["decision"] == "needs_completion"
+    assert any("operate-platform-fe: requirement-declared repository is missing" in item for item in plan["open_gates"])
+
+
 def test_render_and_validate_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "delivery_plan.json"
@@ -127,6 +216,7 @@ def run_all() -> None:
     test_example_plan_is_valid()
     test_missing_repo_path_keeps_plan_incomplete()
     test_project_understanding_fills_repo_path_files_and_tests()
+    test_registered_project_checkout_overrides_staging_repo_path()
     test_requirement_understanding_gate_keeps_delivery_plan_incomplete()
     test_render_and_validate_file()
 

@@ -27,7 +27,8 @@ canonical spec + project registry + optional delivery_plan
 - Treat provider repositories as upstream of consumers when dependencies or contract hints exist.
 - Mark API, event, schema, shared dependency, database, permission, and configuration changes as contract freeze points.
 - Split work into `parallel_safe`, `contract_blocked`, and `serial_required` groups.
-- Block dependency cycles, unknown registry repositories, and single-repository inputs.
+- Block dependency cycles and unknown registry repositories.
+- For single-repository inputs, emit `applicable=false` with a passing readiness/release decision and a not-applicable reason; do not block implementation merely because the cross-repo gate was invoked by a broad profile.
 - Treat missing per-repo delivery tasks as readiness blockers even when the graph shape can be generated.
 - Require per-repo edit permits before implementation; require integration evidence before release.
 - Keep project-specific details in private overlays; open-core replay cases must be anonymized.

@@ -40,17 +40,20 @@ def test_cross_repo_planner_example_generates_ready_graph() -> None:
         assert validation["decision"] == "pass"
 
 
-def test_cross_repo_planner_blocks_single_repo_graph() -> None:
+def test_cross_repo_planner_skips_single_repo_graph() -> None:
     graph, readiness, release = cross_repo_plan.render(
         "REQ-SINGLE",
         {"doc_id": "REQ-SINGLE", "summary": "single repo change"},
         {"app": {"name": "app", "dependencies": []}},
         {"repo_tasks": [{"repo": "app", "role": "modify", "tasks": ["edit"]}]},
     )
-    assert graph["decision"] == "blocked"
-    assert readiness["decision"] == "blocked"
-    assert release["decision"] == "blocked"
-    assert cross_repo_plan.validate_graph(graph)["decision"] == "block"
+    assert graph["decision"] == "ready"
+    assert graph["applicable"] is False
+    assert readiness["decision"] == "pass"
+    assert readiness["applicable"] is False
+    assert release["decision"] == "pass"
+    assert release["applicable"] is False
+    assert cross_repo_plan.validate_graph(graph)["decision"] == "pass"
 
 
 def test_cross_repo_planner_blocks_dependency_cycles() -> None:

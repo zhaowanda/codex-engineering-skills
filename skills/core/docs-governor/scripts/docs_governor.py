@@ -14,7 +14,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[4]
 DIRS = ["human/specs", "human/designs", "human/tests", "human/releases", "machine/specs", "machine/designs", "machine/reviews", "machine/releases", "baseline", "indexes"]
 DELIVERY_DIRS = ["input", "artifacts", "evidence", "runtime"]
-DELIVERY_TEXT_SUFFIXES = {".json", ".md", ".txt", ".log", ".diff", ".yaml", ".yml"}
+DELIVERY_TEXT_SUFFIXES = {".json", ".jsonl", ".md", ".txt", ".log", ".diff", ".yaml", ".yml"}
 MACHINE_ARTIFACTS = {
     "spec": ("machine/specs", ".spec.json"),
     "design": ("machine/designs", ".design.json"),
@@ -24,6 +24,18 @@ MACHINE_ARTIFACTS = {
 EXPERT_SUPPLEMENTAL_ARTIFACTS = [
     "runtime_sequence_evidence.json",
 ]
+VOLATILE_DIGEST_KEYS = {
+    "artifact_digest",
+    "command_digest",
+    "generated_at",
+    "generated_from_branch",
+    "generated_from_commit",
+    "input_digests",
+    "lineage_schema",
+    "permit_id",
+    "producer",
+    "producer_version",
+}
 LOCAL_PATH_PATTERNS = [
     re.compile(r"/private/var/folders/[^\s\"']+"),
     re.compile(r"/var/folders/[^\s\"']+"),
@@ -72,11 +84,32 @@ DOC_MODEL = load_doc_model_module()
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    json.loads(payload)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    json.loads(tmp.read_text(encoding="utf-8"))
+    tmp.replace(path)
 
 
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def canonical_artifact_digest(data: Any) -> str:
+    def strip_volatile(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: strip_volatile(item)
+                for key, item in sorted(value.items())
+                if key not in VOLATILE_DIGEST_KEYS
+            }
+        if isinstance(value, list):
+            return [strip_volatile(item) for item in value]
+        return value
+
+    payload = json.dumps(strip_volatile(data), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def delivery_paths(docs_root: Path, doc_id: str) -> dict[str, Path]:
@@ -105,10 +138,18 @@ def write_sanitized_copy(source: Path, target: Path, docs_root: Path, artifact_d
         except Exception:
             target.write_text(sanitize_local_paths(source.read_text(encoding="utf-8", errors="ignore"), docs_root, artifact_dir), encoding="utf-8")
             return
-        write_json(target, sanitize_for_docs(payload, docs_root, artifact_dir))
+        sanitized_payload = sanitize_for_docs(payload, docs_root, artifact_dir)
+        if isinstance(sanitized_payload, dict) and "artifact_digest" in sanitized_payload:
+            sanitized_payload["artifact_digest"] = canonical_artifact_digest(sanitized_payload)
+        write_json(target, sanitized_payload)
         return
     text = source.read_text(encoding="utf-8", errors="ignore")
     target.write_text(sanitize_local_paths(text, docs_root, artifact_dir), encoding="utf-8")
+
+
+def write_canonical_copy(source: Path, target: Path, docs_root: Path, artifact_dir: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_sanitized_copy(source, target, docs_root, artifact_dir)
 
 
 def artifact_doc_id_blockers(artifact_dir: Path, doc_id: str) -> list[dict[str, str]]:
@@ -141,16 +182,17 @@ def sync_canonical_delivery(
     previous_managed = [str(item) for item in as_list(previous.get("managed_files"))]
     managed: list[str] = []
     source_is_canonical = artifact_dir == paths["artifacts"]
+    if not source_is_canonical and "_staging" in artifact_dir.parts:
+        return {
+            "decision": "block",
+            "blockers": [{
+                "source": "artifact_dir",
+                "message": "artifact_dir under _staging cannot be synced into canonical delivery; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+            }],
+        }
+    sanitized_artifacts: list[str] = []
     if source_is_canonical:
-        local_path_files = sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
-        if local_path_files:
-            return {
-                "decision": "block",
-                "blockers": [{
-                    "source": "privacy",
-                    "message": "active canonical artifacts contain local paths; sync from external staging so the canonical copy can be sanitized without changing active evidence",
-                }],
-            }
+        sanitized_artifacts = sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=True)
         managed.extend(
             str(path.relative_to(paths["root"]))
             for path in sorted(paths["artifacts"].rglob("*"))
@@ -167,22 +209,25 @@ def sync_canonical_delivery(
                 target = paths["evidence"].joinpath(*relative.parts[1:])
             else:
                 target = paths["artifacts"] / relative
-            write_sanitized_copy(source, target, docs_root, artifact_dir)
+            write_canonical_copy(source, target, docs_root, artifact_dir)
             managed.append(str(target.relative_to(paths["root"])))
 
     normalized = paths["artifacts"] / "requirement.normalized.txt"
     if normalized.exists():
         input_target = paths["input"] / "requirement.normalized.txt"
-        write_sanitized_copy(normalized, input_target, docs_root, artifact_dir)
+        write_canonical_copy(normalized, input_target, docs_root, artifact_dir)
         managed.append(str(input_target.relative_to(paths["root"])))
     if input_file and input_file.is_file():
         input_target = paths["input"] / ("requirement" + input_file.suffix.lower())
-        write_sanitized_copy(input_file, input_target, docs_root, artifact_dir)
+        write_canonical_copy(input_file, input_target, docs_root, artifact_dir)
         managed.append(str(input_target.relative_to(paths["root"])))
-    for relative in sorted(set(previous_managed) - set(managed)):
-        stale = paths["root"] / relative
-        if stale.is_file():
-            stale.unlink()
+    current_managed = set(managed)
+    preserved_managed = {
+        relative
+        for relative in previous_managed
+        if relative not in current_managed and (paths["root"] / relative).is_file()
+    }
+    managed = sorted(current_managed | preserved_managed)
 
     digest = managed_digest(paths["root"], managed)
     delivery = {
@@ -191,10 +236,17 @@ def sync_canonical_delivery(
         "title": title,
         "doc_language": language,
         "status": "synced",
+        "projection_decision": "pending",
+        "projection_blockers": [],
+        "projection_digest": "",
         "artifact_digest": digest,
         "managed_files": sorted(set(managed)),
         "directories": {name: str(paths[name].relative_to(docs_root)) for name in DELIVERY_DIRS},
-        "privacy": {"local_paths_sanitized": True, "binary_files_copied": False},
+        "privacy": {
+            "canonical_artifacts_preserve_lineage": True,
+            "projection_outputs_sanitized": True,
+            "binary_files_copied": False,
+        },
     }
     write_json(paths["manifest"], delivery)
     return {
@@ -203,8 +255,63 @@ def sync_canonical_delivery(
         "canonical_artifact_dir": str(paths["artifacts"]),
         "artifact_digest": digest,
         "managed_files": delivery["managed_files"],
+        "sanitized_artifacts": sanitized_artifacts,
         "blockers": [],
     }
+
+
+def update_delivery_projection_state(
+    docs_root: Path,
+    doc_id: str,
+    decision: str,
+    blockers: list[dict[str, Any]] | None = None,
+    projection_digest: str = "",
+) -> None:
+    manifest_path = delivery_paths(docs_root, doc_id)["manifest"]
+    delivery = read_json(manifest_path)
+    if not delivery:
+        return
+    delivery["projection_decision"] = decision
+    delivery["projection_blockers"] = blockers or []
+    delivery["projection_digest"] = projection_digest
+    write_json(manifest_path, delivery)
+
+
+def artifact_decision(data: dict[str, Any]) -> str:
+    return str(data.get("decision") or data.get("status") or "").lower()
+
+
+def docs_projection_state_blockers(artifact_dir: Path) -> list[dict[str, Any]]:
+    artifacts = {
+        name: read_json(artifact_dir / filename)
+        for name, filename in {
+            "spec": "spec.json",
+            "open_questions": "open_questions.json",
+            "technical_design": "technical_design.json",
+            "architecture_design": "architecture_design.json",
+            "design_review": "design_architecture_review.json",
+        }.items()
+        if (artifact_dir / filename).exists()
+    }
+    blockers: list[dict[str, Any]] = []
+    upstream_blocks = {
+        name: artifact_decision(data)
+        for name, data in artifacts.items()
+        if artifact_decision(data) in {"block", "blocked", "needs_clarification", "needs_revision", "failed", "fail"}
+    }
+    downstream_pass = {
+        name: artifact_decision(data)
+        for name, data in artifacts.items()
+        if name not in {"spec", "open_questions"} and artifact_decision(data) in {"pass", "ready", "approved", "expert_ready"}
+    }
+    if upstream_blocks and downstream_pass:
+        blockers.append({
+            "source": "docs_projection_state",
+            "message": "upstream blocking artifact conflicts with downstream pass artifact",
+            "upstream_blocks": upstream_blocks,
+            "downstream_pass": downstream_pass,
+        })
+    return blockers
 
 
 def sanitize_unmatched_local_path(value: str) -> str:
@@ -224,8 +331,10 @@ def sanitize_local_paths(value: str, docs_root: Path | None = None, artifact_dir
         replacements.append((str(artifact_dir), "<artifact-dir>"))
     if docs_root:
         replacements.append((str(docs_root), "<docs-root>"))
+        replacements.append((str(docs_root).replace(str(Path.home()), "<user-home>"), "<docs-root>"))
         if docs_root.parent:
             replacements.append((str(docs_root.parent), "<workspace>"))
+            replacements.append((str(docs_root.parent).replace(str(Path.home()), "<user-home>"), "<workspace>"))
     replacements.append((str(Path.home()), "<user-home>"))
     for source, target in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
         if source:
@@ -263,7 +372,10 @@ def sanitize_artifact_tree_local_paths(artifact_dir: Path, docs_root: Path, muta
             except Exception:
                 updated = sanitize_local_paths(original, docs_root, artifact_dir)
             else:
-                updated = json.dumps(sanitize_for_docs(payload, docs_root, artifact_dir), ensure_ascii=False, indent=2) + "\n"
+                sanitized_payload = sanitize_for_docs(payload, docs_root, artifact_dir)
+                if isinstance(sanitized_payload, dict) and "artifact_digest" in sanitized_payload:
+                    sanitized_payload["artifact_digest"] = canonical_artifact_digest(sanitized_payload)
+                updated = json.dumps(sanitized_payload, ensure_ascii=False, indent=2) + "\n"
         else:
             updated = sanitize_local_paths(original, docs_root, artifact_dir)
         if updated != original:
@@ -1040,12 +1152,21 @@ def render_requirement_clarification(spec: dict[str, Any]) -> str:
     questions: list[str] = []
     for item in as_list(spec.get("open_questions")):
         if isinstance(item, dict):
-            questions.append(text(item.get("question") or item.get("summary") or item))
+            required = item.get("required", True) is not False
+            status = str(item.get("status") or "open").lower()
+            if required and status != "closed":
+                questions.append(text(item.get("question") or item.get("summary") or item))
         else:
             questions.append(text(item))
 
-    decision = str(spec.get("decision") or "")
-    blocked = bool(questions) or decision in {"needs_clarification", "blocked"}
+    understanding = spec.get("requirements_understanding") if isinstance(spec.get("requirements_understanding"), dict) else {}
+    spec_decision = str(spec.get("decision") or "").lower()
+    blocked = (
+        bool(questions)
+        or str(understanding.get("decision") or "").lower() in {"needs_clarification", "block", "blocked"}
+        or spec_decision in {"blocked", "block", "needs_clarification"}
+        or spec.get("design_allowed") is False
+    )
     return (
         "### Clarification Status\n\n"
         f"- Status: {'blocked pending answer' if blocked else 'no blocking clarification recorded'}\n"
@@ -1086,6 +1207,8 @@ def render_open_questions(*documents: dict[str, Any], language: str = "en") -> s
     for data in documents:
         for item in as_list(data.get("open_questions")):
             if isinstance(item, dict):
+                if item.get("required", True) is not False and str(item.get("status") or "open").lower() == "closed":
+                    continue
                 lines.append(text(item.get("question") or item.get("summary") or item))
             else:
                 lines.append(text(item))
@@ -2174,7 +2297,7 @@ def render_engineering_sequence_summary(
             return "\n".join(
                 [
                     (
-                        "- 时序口径：以下图表达用户操作、前端组件、既有 API 契约和控制成功后的播放器状态更新；服务端不在修改范围。"
+                        "- 时序口径：以下图表达用户操作、前端组件、既有 API 契约和操作成功后的页面状态更新；服务端不在修改范围。"
                         if api_excluded and not backend
                         else "- 时序口径：以下图优先使用源码/项目证据，表达真实入口、责任模块和已确认的下游处理。"
                     ),
@@ -2946,7 +3069,10 @@ def render_blockers(*documents: dict[str, Any], language: str = "en") -> str:
 def render_review_context(spec: dict[str, Any], language: str = "en") -> str:
     summary = spec.get("requirement_summary") or spec.get("summary") or spec.get("title")
     acceptance_count = len([item for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)])
-    question_count = len(as_list(spec.get("open_questions")))
+    question_count = len([
+        item for item in as_list(spec.get("open_questions"))
+        if not isinstance(item, dict) or (item.get("required", True) is not False and str(item.get("status") or "open").lower() != "closed")
+    ])
     if language == "zh":
         return (
             f"- 需求核心：{zh_text(summary, '未同步到需求摘要')}\n"
@@ -2969,7 +3095,11 @@ def render_spec_review_narrative(spec: dict[str, Any], language: str = "en") -> 
     out_scope = "、".join(zh_text(item) for item in as_list(scope.get("out_of_scope"))) or "未声明额外范围外事项，评审时仍需确认是否存在隐含排除项"
     acceptance = [clean_acceptance_text(item.get("criteria"), "zh") for item in as_list(spec.get("acceptance_criteria")) if isinstance(item, dict)]
     acceptance_text = "；".join(acceptance) or "未同步到明确验收标准"
-    questions = [zh_text(item.get("question") or item.get("summary") or item) if isinstance(item, dict) else zh_text(item) for item in as_list(spec.get("open_questions"))]
+    questions = [
+        zh_text(item.get("question") or item.get("summary") or item) if isinstance(item, dict) else zh_text(item)
+        for item in as_list(spec.get("open_questions"))
+        if not isinstance(item, dict) or (item.get("required", True) is not False and str(item.get("status") or "open").lower() != "closed")
+    ]
     question_text = "；".join(questions) or "当前没有记录阻塞性澄清问题"
     if language == "zh":
         return (
@@ -3908,6 +4038,135 @@ def runtime_contract_by_api(runtime_evidence: dict[str, Any], language: str = "e
     return contracts
 
 
+def technical_breakdown_by_id(technical: dict[str, Any], language: str = "en") -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(as_list(technical.get("requirement_breakdown")), start=1):
+        if not isinstance(item, dict):
+            continue
+        brk = human_value(item.get("id"), language, f"BRK-{index}")
+        if brk:
+            result[brk] = item
+    return result
+
+
+def technical_contracts_by_brk(technical: dict[str, Any], language: str = "en") -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for item in as_list(technical.get("api_contracts")):
+        if not isinstance(item, dict):
+            continue
+        brk = human_value(item.get("requirement_breakdown_id"), language, "")
+        if brk:
+            result.setdefault(brk, []).append(item)
+    return result
+
+
+def contract_label(contract: dict[str, Any], language: str = "en") -> str:
+    raw = human_value(contract.get("contract") or contract.get("endpoint") or contract.get("path") or contract.get("api"), language, "")
+    method = human_value(contract.get("method"), language, "").upper()
+    endpoint = human_value(contract.get("endpoint") or contract.get("path"), language, "")
+    if method and endpoint:
+        return f"{method} {endpoint}"
+    method_from_raw, path_from_raw = parse_contract_method_path(raw)
+    if method_from_raw and path_from_raw:
+        return f"{method_from_raw} {path_from_raw}"
+    return raw
+
+
+def contract_is_external_reference(label: str) -> bool:
+    value = label.strip().lower()
+    return value.startswith("//") or value.startswith("http://") or value.startswith("https://")
+
+
+def brk_api_applicability(
+    brk_id: str,
+    breakdown: dict[str, Any],
+    contracts: list[dict[str, Any]],
+    runtime_items: list[dict[str, Any]],
+    language: str = "en",
+) -> dict[str, Any]:
+    api_impact = human_value(breakdown.get("api_impact"), language, "")
+    impact_lower = api_impact.lower()
+    contract_labels: list[str] = []
+    evidence_refs: list[str] = []
+    for contract in contracts:
+        label = contract_label(contract, language)
+        if label and label not in contract_labels:
+            contract_labels.append(label)
+        evidence = human_value(contract.get("source_evidence") or contract.get("controller_file") or contract.get("binding_rule"), language, "")
+        if evidence and evidence not in evidence_refs:
+            evidence_refs.append(evidence)
+    for item in runtime_items:
+        api = runtime_item_api(item, language)
+        if api and api not in contract_labels:
+            contract_labels.append(api)
+        entrypoint = item.get("entrypoint") if isinstance(item.get("entrypoint"), dict) else {}
+        evidence = human_value(entrypoint.get("source_file") or item.get("source_evidence"), language, "")
+        if evidence and evidence not in evidence_refs:
+            evidence_refs.append(evidence)
+
+    no_api_change = any(term in impact_lower for term in ("no api change", "no api", "not_applicable", "excluded", "不涉及", "无接口", "不修改接口"))
+    confirm_only = "confirm existing" in impact_lower or "确认" in api_impact
+    concrete_internal = [label for label in contract_labels if label and not contract_is_external_reference(label)]
+    external_refs = [label for label in contract_labels if contract_is_external_reference(label)]
+    if concrete_internal and not no_api_change:
+        status = "required" if not confirm_only else "confirm_existing"
+        reason = api_impact or "contract is bound to this BRK"
+    elif no_api_change:
+        status = "not_applicable"
+        reason = api_impact or "no API path, field, or response-shape change is required for this BRK"
+    elif external_refs:
+        status = "external_reference"
+        reason = "external/provider documentation reference; not a local API contract to implement"
+    else:
+        status = "needs_confirmation"
+        reason = api_impact or "no concrete API contract was bound to this BRK"
+    return {
+        "brk_id": brk_id,
+        "status": status,
+        "reason": reason,
+        "contracts": concrete_internal,
+        "external_references": external_refs,
+        "evidence_refs": evidence_refs,
+    }
+
+
+def render_brk_api_binding(binding: dict[str, Any], language: str = "en") -> str:
+    status = text(binding.get("status"), "")
+    reason = human_value(binding.get("reason"), language, "")
+    contracts = [human_value(value, language, "") for value in as_list(binding.get("contracts")) if human_value(value, language, "")]
+    external_refs = [human_value(value, language, "") for value in as_list(binding.get("external_references")) if human_value(value, language, "")]
+    evidence_refs = [human_value(value, language, "") for value in as_list(binding.get("evidence_refs")) if human_value(value, language, "")]
+    if language == "zh":
+        status_label = {
+            "required": "required",
+            "confirm_existing": "confirm_existing",
+            "not_applicable": "不适用/not_applicable",
+            "external_reference": "external_reference",
+            "needs_confirmation": "needs_confirmation",
+        }.get(status, status or "needs_confirmation")
+        lines = [f"- API 适用性：{status_label}；原因：{reason or '未同步原因'}。"]
+        if contracts:
+            lines.append("- BRK 绑定契约：" + "、".join(f"`{item}`" for item in contracts[:6]) + "。")
+        elif external_refs:
+            lines.append("- 外部参考契约：" + "、".join(f"`{item}`" for item in external_refs[:4]) + "；该链接只作为 provider 接入参考，不等同于本地待实现 API；本子需求不修改 API 路径、请求字段或响应字段。")
+        else:
+            lines.append("- BRK 绑定契约：`not_applicable`；本子需求不修改 API 路径、请求字段或响应字段。")
+        if evidence_refs:
+            lines.append("- 契约证据：" + "；".join(f"`{item}`" for item in evidence_refs[:4]) + "。")
+        return "\n".join(lines)
+    status_text = "excluded (`not_applicable`)" if status == "not_applicable" else status or "needs_confirmation"
+    lines = [f"- API applicability: {status_text}; reason: {reason or 'not synced'}."]
+    if contracts:
+        lines.append("- BRK-bound contracts: " + ", ".join(f"`{item}`" for item in contracts[:6]) + ".")
+    elif external_refs:
+        lines.append("- External contract reference: " + ", ".join(f"`{item}`" for item in external_refs[:4]) + "; this is provider onboarding reference, not a local API to implement; local API path, request fields, and response fields remain unchanged for this BRK.")
+    else:
+        lines.append("- BRK-bound contracts: `not_applicable`; this slice does not change API path, request fields, or response fields.")
+    if evidence_refs:
+        lines.append("- Contract evidence: " + "; ".join(f"`{item}`" for item in evidence_refs[:4]) + ".")
+    return "\n".join(lines)
+
+
 def runtime_model_field_names(models: list[dict[str, Any]], language: str = "en") -> list[str]:
     names: list[str] = []
     for model in models:
@@ -4120,8 +4379,14 @@ def runtime_related_for_acceptance(related: list[dict[str, Any]], ac_id: str, la
     return matched or related
 
 
-def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence: dict[str, Any], language: str = "en") -> str:
+def render_runtime_subrequirement_design(
+    spec: dict[str, Any],
+    runtime_evidence: dict[str, Any],
+    language: str = "en",
+    technical: dict[str, Any] | None = None,
+) -> str:
     runtime_evidence = runtime_evidence if isinstance(runtime_evidence, dict) else {}
+    technical = technical if isinstance(technical, dict) else {}
     interactions = [item for item in as_list(runtime_evidence.get("interactions")) if isinstance(item, dict)]
     if not interactions:
         return ""
@@ -4154,6 +4419,8 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         if part
     )
     contract_map = runtime_contract_by_api(runtime_evidence, language)
+    breakdown_by_id = technical_breakdown_by_id(technical, language)
+    contracts_by_brk = technical_contracts_by_brk(technical, language)
     api_excluded = runtime_area_excluded(runtime_evidence, "api")
     data_excluded = runtime_area_excluded(runtime_evidence, "data")
     if language == "zh":
@@ -4187,7 +4454,23 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
             ac_ids = ac_map.get(brk_id, [])
             ac_text = "；".join(f"{ac_id}: {ac_by_id.get(ac_id, '')}" for ac_id in ac_ids if ac_by_id.get(ac_id))
             representative = items[0]
-            api_text = ", ".join(f"`{api}`" for api in apis) if apis else "未同步接口"
+            api_binding = brk_api_applicability(
+                brk_id,
+                breakdown_by_id.get(brk_id, {}),
+                contracts_by_brk.get(brk_id, []),
+                items,
+                language,
+            )
+            bound_contracts = [human_value(value, language, "") for value in as_list(api_binding.get("contracts")) if human_value(value, language, "")]
+            external_refs = [human_value(value, language, "") for value in as_list(api_binding.get("external_references")) if human_value(value, language, "")]
+            if bound_contracts:
+                api_text = ", ".join(f"`{api}`" for api in bound_contracts)
+            elif apis:
+                api_text = ", ".join(f"`{api}`" for api in apis)
+            elif external_refs:
+                api_text = "外部参考：" + "、".join(f"`{api}`" for api in external_refs[:3])
+            else:
+                api_text = "`not_applicable`"
             contract_names = []
             for api in apis:
                 contract = contract_map.get(api, {})
@@ -4210,6 +4493,7 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
             lines.append(f"- 目标调整：{'；'.join(responses) or title}。")
             action_label = "前端做法" if has_frontend_evidence else "调用方/入口"
             lines.append(f"- {action_label}：{runtime_frontend_action(representative, frontend_file, api_text, language)}")
+            lines.append(render_brk_api_binding(api_binding, language))
             if backend_owner or not api_excluded:
                 lines.append(f"- 后端做法：{runtime_backend_action(representative, backend_owner, backend_actions, language)}")
             else:
@@ -4217,7 +4501,7 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
             if contract_names:
                 lines.append(f"- 契约绑定：{'；'.join(contract_names[:4])}。")
             if data_excluded:
-                lines.append("- 数据影响：不涉及数据库表、迁移或持久化字段变更；仅处理前端运行时状态和播放器资源。")
+                lines.append("- 数据影响：不涉及数据库表、迁移或持久化字段变更；仅处理前端运行时状态。")
             else:
                 lines.append(f"- 数据影响：{runtime_data_impact_sentence(models, representative, language)}")
             lines.append(f"- 异常边界：{'；'.join(failures) or '保留既有错误语义和页面提示'}。")
@@ -4254,7 +4538,23 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         ac_ids = ac_map.get(brk_id, [])
         ac_text = "; ".join(f"{ac_id}: {ac_by_id.get(ac_id, '')}" for ac_id in ac_ids if ac_by_id.get(ac_id))
         representative = items[0]
-        api_text = ", ".join(f"`{api}`" for api in apis) if apis else "synced APIs"
+        api_binding = brk_api_applicability(
+            brk_id,
+            breakdown_by_id.get(brk_id, {}),
+            contracts_by_brk.get(brk_id, []),
+            items,
+            language,
+        )
+        bound_contracts = [human_value(value, language, "") for value in as_list(api_binding.get("contracts")) if human_value(value, language, "")]
+        external_refs = [human_value(value, language, "") for value in as_list(api_binding.get("external_references")) if human_value(value, language, "")]
+        if bound_contracts:
+            api_text = ", ".join(f"`{api}`" for api in bound_contracts)
+        elif apis:
+            api_text = ", ".join(f"`{api}`" for api in apis)
+        elif external_refs:
+            api_text = "external reference: " + ", ".join(f"`{api}`" for api in external_refs[:3])
+        else:
+            api_text = "`not_applicable`"
         contract_names = []
         for api in apis:
             contract = contract_map.get(api, {})
@@ -4274,6 +4574,7 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         lines.append(f"- Gap: {runtime_gap_sentence(representative, ac_ids, language)}")
         lines.append(f"- Target change: {'; '.join(responses) or title}.")
         lines.append(f"- Frontend approach: {runtime_frontend_action(representative, frontend_file, api_text, language)}")
+        lines.append(render_brk_api_binding(api_binding, language))
         if backend_owner or not api_excluded:
             lines.append(f"- Backend approach: {runtime_backend_action(representative, backend_owner, backend_actions, language)}")
         else:
@@ -4281,7 +4582,7 @@ def render_runtime_subrequirement_design(spec: dict[str, Any], runtime_evidence:
         if contract_names:
             lines.append(f"- Contract binding: {'; '.join(contract_names[:4])}.")
         if data_excluded:
-            lines.append("- Data impact: no database table, migration, or persistence-field changes; only frontend runtime state and player resources change.")
+            lines.append("- Data impact: no database table, migration, or persistence-field changes; only frontend runtime state changes.")
         else:
             lines.append(f"- Data impact: {runtime_data_impact_sentence(models, representative, language)}")
         lines.append(f"- Exception boundary: {'; '.join(failures) or 'preserve existing error semantics'}.")
@@ -4308,7 +4609,7 @@ def render_runtime_process_flows(runtime_evidence: dict[str, Any], language: str
             request_label = "前端请求" if text(entrypoint.get("kind"), "") == "frontend_action" else "入口载荷/请求"
             lines.append(f"- {request_label}：{api or '未同步接口'}；{human_value(item.get('request'), language, '未同步请求参数')}")
             if runtime_area_excluded(runtime_evidence, "api") and not runtime_evidence.get("backend"):
-                lines.append("- 契约边界：调用既有 API，路径、字段和响应结构保持不变；控制成功后由前端执行播放器状态重建或清理。")
+                lines.append("- 契约边界：调用既有 API，路径、字段和响应结构保持不变；操作成功后由前端更新页面状态或清理局部资源。")
             else:
                 lines.append(f"- 后端处理：{human_value(item.get('backend_action'), language, '需结合责任模块证据确认')}")
             lines.append(f"- 正常结果：{human_value(item.get('response'), language, '页面刷新或提示成功')}")
@@ -4402,7 +4703,7 @@ def render_runtime_process_mermaid(runtime_evidence: dict[str, Any], language: s
         lines.append(f'  U{index}["{trigger or entry_default}"]:::actor')
         lines.append(f'  A{index}["{api or api_default}"]:::api')
         if frontend_only:
-            local_action = action or ("前端更新播放器状态并清理资源" if language == "zh" else "Frontend updates player state and cleans resources")
+            local_action = action or ("前端更新页面状态并清理局部资源" if language == "zh" else "Frontend updates page state and cleans local resources")
             lines.append(f'  B{index}["{local_action}"]:::frontend')
         else:
             lines.append(f'  B{index}["{action or ("后端处理" if language == "zh" else "Backend handling")}"]:::backend')
@@ -4740,7 +5041,7 @@ def render_runtime_architecture_operations(runtime_evidence: dict[str, Any], lan
             f"- 集成边界：`{frontend_repo or '前端仓库'}` 调用既有 API；接口路径、字段和响应结构保持不变，不产生服务端发布单元。",
             f"- 既有 API：{', '.join(f'`{api}`' for api in apis[:10]) or '以技术设计中的引用清单为准'}",
             "- 发布顺序：仅发布前端仓库；发布前验证既有接口兼容性和浏览器回归证据。",
-            "- 回滚口径：回滚前端提交并复核播放器资源清理；不需要数据库或服务端回滚。",
+            "- 回滚口径：回滚前端提交并复核页面状态恢复；不需要数据库或服务端回滚。",
         ])
     if language != "zh" and frontend_only:
         return "\n".join([
@@ -4748,7 +5049,7 @@ def render_runtime_architecture_operations(runtime_evidence: dict[str, Any], lan
             f"- Integration boundary: `{frontend_repo or 'frontend repository'}` calls existing APIs whose paths, fields, and response shapes remain unchanged; no server release unit is created.",
             f"- Existing APIs: {', '.join(f'`{api}`' for api in apis[:10]) or 'see referenced contracts in the technical design'}",
             "- Release order: release only the frontend repository after existing-contract compatibility and browser regression evidence pass.",
-            "- Rollback: revert the frontend commit and verify player-resource cleanup; no database or server rollback is required.",
+            "- Rollback: revert the frontend commit and verify page-state recovery; no database or server rollback is required.",
         ])
     if language == "zh":
         lines = ["### 集成、发布与回滚口径"]
@@ -4806,7 +5107,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
             )
         lines.append("- 交付顺序：按仓库角色和依赖图执行；confirm-only 依赖不进入修改范围。")
         lines.append(
-            "- 回滚策略：回滚前端提交并验证播放器资源清理；既有 API 和数据结构未变，不需要服务端或数据回滚。"
+            "- 回滚策略：回滚前端提交并验证页面状态恢复；既有 API 和数据结构未变，不需要服务端或数据回滚。"
             if frontend_only
             else "- 回滚策略：前端回滚页面提交；后端回滚接口/服务提交；若引入 DDL 或回填，必须执行配套数据回滚或兼容脚本。"
         )
@@ -4831,7 +5132,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
                 "",
                 "- Read first: " + ", ".join(f"`{item}`" for item in backend_files),
                 "- Allowed files: listed controller/service/DTO/VO and direct tests; mapper/SQL/migration changes need data rollback notes.",
-                "- Core tasks: calibrate status filtering, month derivation, filter propagation, reason-required checks, and renewal-pool writes.",
+                "- Core tasks: calibrate status filtering, month derivation, filter propagation, reason-required checks, and status-pool writes.",
                 "- Test command: `mvn -pl operate-provider -DskipTests compile`, plus relevant service/API tests or environment blocker notes.",
                 "",
             ]
@@ -4842,7 +5143,7 @@ def render_runtime_delivery_tasks(delivery_plan: dict[str, Any], runtime_evidenc
         else "- Delivery order: backend contract/data semantics first, frontend adaptation second; if backend does not change, evidence must prove the existing API already satisfies the target."
     )
     lines.append(
-        "- Rollback: revert the frontend commit and verify player-resource cleanup; unchanged APIs and data structures need no server or data rollback."
+        "- Rollback: revert the frontend commit and verify page-state recovery; unchanged APIs and data structures need no server or data rollback."
         if frontend_only
         else "- Rollback: revert frontend page commit and backend API/service commit; DDL/backfill requires paired rollback or compatibility script."
     )
@@ -5018,7 +5319,40 @@ def runtime_evidence_source_paths(payload: dict[str, Any]) -> set[str]:
     return paths
 
 
+def technical_contract_set(artifact_dir: Path) -> set[str]:
+    technical = read_json(artifact_dir / "technical_design.json")
+    result: set[str] = set()
+    for item in as_list(technical.get("api_contracts")):
+        if not isinstance(item, dict):
+            continue
+        method, path = parse_contract_method_path(text(item.get("contract"), ""))
+        if method and path and not path.startswith("BRK-"):
+            result.add(f"{method} {path}")
+    return result
+
+
+def runtime_contract_set(payload: dict[str, Any]) -> set[str]:
+    result: set[str] = set()
+    for item in as_list(payload.get("api_contracts")):
+        if not isinstance(item, dict):
+            continue
+        method = text(item.get("method"), "").upper()
+        path = text(item.get("path") or item.get("api"), "")
+        if method and path and not path.startswith("BRK-"):
+            result.add(f"{method} {path}")
+    for item in as_list(payload.get("interactions")):
+        if not isinstance(item, dict):
+            continue
+        method, path = parse_contract_method_path(text(item.get("api"), ""))
+        if method and path and not path.startswith("BRK-"):
+            result.add(f"{method} {path}")
+    return result
+
+
 def runtime_evidence_matches_current_anchors(payload: dict[str, Any], artifact_dir: Path) -> bool:
+    current_contracts = technical_contract_set(artifact_dir)
+    if current_contracts and not (current_contracts & runtime_contract_set(payload)):
+        return False
     confirmed = current_confirmed_modify_paths(artifact_dir)
     if not confirmed:
         return True
@@ -5518,12 +5852,13 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
         for item in as_list(spec.get("business_objectives"))
         if isinstance(item, dict)
     ] + [text(item) for item in as_list(spec.get("business_objectives")) if not isinstance(item, dict)]
+    spec_decision_display = spec.get("decision")
     return {
         "spec": (
             f"# {heading} 需求说明\n\n"
             "## 一、摘要\n\n"
             f"- 文档编号：`{doc_id}`\n"
-            f"- 当前结论：`{zh_text(spec.get('decision'), '未知')}`\n"
+            f"- 当前结论：`{zh_text(spec_decision_display, '未知')}`\n"
             f"- 是否涉及权限敏感场景：{zh_text((spec.get('permission_scope') or {}).get('sensitive'), '未知')}\n"
             "- 本文面向需求评审、技术设计和交付计划使用，机器可读依据见证据引用章节。\n\n"
             "### 阅读与评审重点\n\n"
@@ -5569,7 +5904,7 @@ def render_synced_human_docs_zh(doc_id: str, title: str, artifact_dir: Path) -> 
             f"{render_problem_analysis(technical, 'zh', runtime_evidence)}\n\n"
             f"{render_current_architecture_context(architecture, runtime_evidence, 'zh')}\n\n"
             "## 三、子需求设计矩阵\n\n"
-            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'zh') or render_requirement_breakdown_table(technical, 'zh')}\n\n"
+            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'zh', technical) or render_requirement_breakdown_table(technical, 'zh')}\n\n"
             "### 代码入口置信度\n\n"
             f"{render_runtime_entrypoint_confidence(runtime_evidence, 'zh') or render_entrypoint_confidence(technical, 'zh')}\n\n"
             "### 字段/接口/权限影响表\n\n"
@@ -5780,7 +6115,7 @@ def render_synced_human_docs(doc_id: str, title: str, artifact_dir: Path) -> dic
             f"{render_problem_analysis(technical, 'en', runtime_evidence)}\n\n"
             f"{render_current_architecture_context(architecture, runtime_evidence, 'en')}\n\n"
             "## Sub-Requirement Design Matrix\n\n"
-            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'en') or render_requirement_breakdown_table(technical, 'en')}\n\n"
+            f"{render_runtime_subrequirement_design(spec, runtime_evidence, 'en', technical) or render_requirement_breakdown_table(technical, 'en')}\n\n"
             "### Code Entrypoint Confidence\n\n"
             f"{render_runtime_entrypoint_confidence(runtime_evidence, 'en') or render_entrypoint_confidence(technical, 'en')}\n\n"
             "### Field / API / Permission Impact\n\n"
@@ -5933,6 +6268,15 @@ def sync(
     inherited_supplemental_artifacts = inherit_expert_supplemental_artifacts(docs_root, doc_id, artifact_dir) if design_sync else []
     generated_runtime_evidence = ensure_runtime_sequence_evidence(artifact_dir, doc_id) if design_sync else {"generated": False, "reason": "runtime evidence is not needed for this human section"}
     sanitized_artifacts = [] if human_section != "all" else sanitize_artifact_tree_local_paths(artifact_dir, docs_root, mutate=False)
+    projection_blockers = docs_projection_state_blockers(artifact_dir) if human_section == "all" else []
+    if projection_blockers:
+        update_delivery_projection_state(docs_root, doc_id, "block", projection_blockers)
+        return {
+            "schema": "codex-docs-governor-sync-v1",
+            "decision": "block",
+            "doc_id": doc_id,
+            "blockers": projection_blockers,
+        }
     canonical = sync_canonical_delivery(docs_root, doc_id, artifact_dir, title, language, input_file) if human_section == "all" else {}
     if canonical.get("decision") == "block":
         return {
@@ -5941,6 +6285,12 @@ def sync(
             "doc_id": doc_id,
             "blockers": canonical.get("blockers", []),
         }
+    if canonical.get("sanitized_artifacts"):
+        sanitized_artifacts = [
+            str(item)
+            for item in as_list(canonical.get("sanitized_artifacts"))
+            if str(item)
+        ]
     render_artifact_dir = Path(str(canonical.get("canonical_artifact_dir"))) if canonical else artifact_dir
     human_docs = render_synced_human_docs_zh(doc_id, title, render_artifact_dir) if language == "zh" else render_synced_human_docs(doc_id, title, render_artifact_dir)
     human_targets = {
@@ -6029,6 +6379,7 @@ def sync(
     manifest["projection_schema"] = "codex-docs-projection-v1"
     manifest = sanitize_for_docs(manifest, docs_root, artifact_dir)
     write_json(docs_root / "indexes" / f"{doc_id}.manifest.json", manifest)
+    update_delivery_projection_state(docs_root, doc_id, "pass", [], str(manifest.get("projection_source_digest") or ""))
     return sanitize_for_docs({
         "schema": "codex-docs-governor-sync-v1",
         "decision": "pass",
@@ -6123,6 +6474,9 @@ def init(docs_root: Path, doc_id: str, git_url: str = "", title: str = "", doc_l
             "title": title,
             "doc_language": language,
             "status": "initialized",
+            "projection_decision": "pending",
+            "projection_blockers": [],
+            "projection_digest": "",
             "artifact_digest": "",
             "managed_files": [],
             "directories": {name: str(delivery[name].relative_to(docs_root)) for name in DELIVERY_DIRS},
@@ -6255,8 +6609,13 @@ def validate(docs_root: Path, doc_id: str, require_git: bool = False, require_gi
             expected_digest = str(delivery.get("artifact_digest") or "")
             if not expected_digest or actual_digest != expected_digest:
                 blockers.append({"source": "delivery", "message": "canonical delivery artifact digest is stale"})
+            projection_decision = str(delivery.get("projection_decision") or "").lower()
+            if projection_decision in {"block", "blocked", "failed", "fail"}:
+                blockers.append({"source": "delivery", "message": "canonical delivery projection is blocked"})
             if manifest.get("projection_source_digest") != expected_digest:
                 blockers.append({"source": "projection", "message": "manifest projection digest does not match canonical delivery"})
+            if projection_decision == "pass" and str(delivery.get("projection_digest") or "") != expected_digest:
+                blockers.append({"source": "delivery", "message": "canonical delivery projection digest does not match artifacts"})
             marker = f"<!-- codex:projection-source-digest:{expected_digest} -->"
             for name, rel_path in (manifest.get("human_docs") or {}).items():
                 target = docs_root / str(rel_path)

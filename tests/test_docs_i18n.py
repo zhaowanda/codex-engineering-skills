@@ -19,6 +19,8 @@ def load_module(name: str, path: Path):
 docs_i18n = load_module("docs_i18n", ROOT / "skills/core/docs-governor/scripts/docs_i18n.py")
 doc_model = load_module("doc_model", ROOT / "skills/core/docs-governor/scripts/doc_model.py")
 docs_governor = load_module("docs_governor", ROOT / "skills/core/docs-governor/scripts/docs_governor.py")
+human_doc_review = load_module("human_doc_review", ROOT / "skills/core/human-doc-reviewer/scripts/human_doc_review.py")
+workflow_contract = load_module("workflow_contract", ROOT / "skills/core/delivery-runner/scripts/workflow_contract.py")
 render_design_templates = load_module("render_design_templates", ROOT / "skills/templates/design-doc-templates/scripts/render_design_templates.py")
 
 
@@ -855,6 +857,128 @@ def test_sync_sanitizes_local_absolute_paths_in_machine_outputs() -> None:
         assert str(repo_root) in (artifact_dir / "architecture_design.json").read_text(encoding="utf-8")
 
 
+def test_sync_sanitizes_canonical_artifacts_and_refreshes_digest() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "artifacts"
+        repo_root = root / "repo"
+        doc_id = "REQ-CANONICAL-LINEAGE"
+        spec = {
+            "schema": "codex-spec-v1",
+            "doc_id": doc_id,
+            "title": "Lineage",
+            "repo_root": str(repo_root),
+            "decision": "ready_for_design",
+            "acceptance_criteria": [{"id": "AC-1", "criteria": "canonical digest remains valid", "type": "positive"}],
+        }
+        spec["artifact_digest"] = workflow_contract.canonical_digest(spec)
+        write_json(artifact_dir / "spec.json", spec)
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Lineage")
+
+        canonical_spec = json.loads((docs_root / "deliveries" / doc_id / "artifacts/spec.json").read_text(encoding="utf-8"))
+        raw_spec = json.loads((docs_root / "machine/raw" / doc_id / "spec.json").read_text(encoding="utf-8"))
+        machine_spec = json.loads((docs_root / "machine/specs" / f"{doc_id}.spec.json").read_text(encoding="utf-8"))
+        assert result["decision"] == "pass"
+        assert canonical_spec != spec
+        assert canonical_spec["artifact_digest"] == workflow_contract.canonical_digest(canonical_spec)
+        assert str(repo_root) not in json.dumps(canonical_spec, ensure_ascii=False)
+        assert str(repo_root) not in json.dumps(raw_spec, ensure_ascii=False)
+        assert str(repo_root) not in json.dumps(machine_spec, ensure_ascii=False)
+        assert result["sanitized_artifacts"]
+
+
+def test_sync_sanitizes_active_canonical_artifacts_without_staging_block() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        doc_id = "REQ-CANONICAL-SANITIZE"
+        artifact_dir = docs_root / "deliveries" / doc_id / "artifacts"
+        repo_root = root / "repo"
+        spec = {
+            "schema": "codex-spec-v1",
+            "doc_id": doc_id,
+            "title": "Canonical sanitize",
+            "repo_root": str(repo_root),
+            "decision": "ready_for_design",
+            "acceptance_criteria": [{"id": "AC-1", "criteria": "canonical docs sanitize local paths", "type": "positive"}],
+        }
+        spec["artifact_digest"] = workflow_contract.canonical_digest(spec)
+        write_json(artifact_dir / "spec.json", spec)
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Canonical sanitize")
+
+        canonical_spec = json.loads((artifact_dir / "spec.json").read_text(encoding="utf-8"))
+        combined = json.dumps(result, ensure_ascii=False) + "\n" + json.dumps(canonical_spec, ensure_ascii=False)
+        assert result["decision"] == "pass"
+        assert not any(item.get("source") == "privacy" for item in result.get("blockers", []))
+        assert str(repo_root) not in combined
+        assert canonical_spec["artifact_digest"] == workflow_contract.canonical_digest(canonical_spec)
+        assert "spec.json" in result["sanitized_artifacts"]
+
+
+def test_sync_blocks_non_canonical_staging_artifact_dir() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        artifact_dir = root / "_staging" / "REQ-STAGING" / "artifacts"
+        doc_id = "REQ-STAGING"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "acceptance_criteria": []})
+        write_json(artifact_dir / "technical_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
+        write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+
+        result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Staging blocked")
+
+        assert result["decision"] == "block"
+        assert any("_staging" in item["message"] for item in result["blockers"])
+
+
+def test_partial_pre_edit_sync_preserves_existing_canonical_design_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        docs_root = root / "docs"
+        full_artifacts = root / "full-artifacts"
+        pre_edit_artifacts = root / "pre-edit-artifacts"
+        doc_id = "REQ-PRE-EDIT-PRESERVE"
+        write_json(full_artifacts / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "acceptance_criteria": []})
+        write_json(full_artifacts / "technical_design.json", {"doc_id": doc_id, "decision": "pass"})
+        write_json(full_artifacts / "architecture_design.json", {"doc_id": doc_id, "decision": "pass"})
+        write_json(full_artifacts / "test_design.json", {"doc_id": doc_id, "decision": "pass"})
+        write_json(full_artifacts / "delivery_plan.json", {"doc_id": doc_id, "decision": "ready"})
+
+        initial = docs_governor.sync(docs_root, doc_id, full_artifacts, "Pre edit preserve")
+        assert initial["decision"] == "pass"
+        canonical_design = docs_root / "deliveries" / doc_id / "artifacts/technical_design.json"
+        assert canonical_design.exists()
+
+        write_json(pre_edit_artifacts / "edit_permit.json", {"schema": "codex-edit-permit-v1", "doc_id": doc_id, "decision": "ready"})
+        write_json(pre_edit_artifacts / "write_guard_snapshot.json", {"schema": "codex-write-guard-snapshot-v1", "doc_id": doc_id, "decision": "ready"})
+        second = docs_governor.sync(docs_root, doc_id, pre_edit_artifacts, "Pre edit preserve")
+
+        delivery = json.loads((docs_root / "deliveries" / doc_id / "delivery.json").read_text(encoding="utf-8"))
+        managed = set(delivery["managed_files"])
+        assert second["decision"] == "pass"
+        assert canonical_design.exists()
+        assert json.loads(canonical_design.read_text(encoding="utf-8"))["decision"] == "pass"
+        assert "artifacts/technical_design.json" in managed
+        assert "artifacts/architecture_design.json" in managed
+        assert "artifacts/test_design.json" in managed
+        assert "artifacts/delivery_plan.json" in managed
+        assert "artifacts/edit_permit.json" in managed
+        assert "artifacts/write_guard_snapshot.json" in managed
+
+
 def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -866,6 +990,8 @@ def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> 
         write_json(artifact_dir / "architecture_design.json", {"doc_id": doc_id})
         write_json(artifact_dir / "test_design.json", {"doc_id": doc_id})
         write_json(artifact_dir / "delivery_plan.json", {"doc_id": doc_id})
+        (artifact_dir / "runtime").mkdir()
+        (artifact_dir / "runtime/events.jsonl").write_text('{"event":"created"}\n', encoding="utf-8")
         (artifact_dir / "requirement.normalized.txt").write_text("Canonical requirement\n", encoding="utf-8")
 
         result = docs_governor.sync(docs_root, doc_id, artifact_dir, "Canonical")
@@ -877,11 +1003,55 @@ def test_sync_materializes_canonical_delivery_and_digest_bound_projections() -> 
         human = (docs_root / "human/specs" / f"{doc_id}.md").read_text(encoding="utf-8")
         assert result["decision"] == "pass"
         assert delivery["artifact_digest"] == digest
+        assert delivery["projection_decision"] == "pass"
+        assert delivery["projection_digest"] == digest
+        assert delivery["projection_blockers"] == []
         assert manifest["projection_source_digest"] == digest
         assert machine["source_digest"] == digest
         assert f"codex:projection-source-digest:{digest}" in human
         assert (docs_root / "deliveries" / doc_id / "input/requirement.normalized.txt").exists()
+        assert (docs_root / "deliveries" / doc_id / "runtime/events.jsonl").read_text(encoding="utf-8").strip()
         assert docs_governor.validate(docs_root, doc_id)["decision"] == "pass"
+
+
+def test_sync_blocks_upstream_block_with_downstream_pass_projection() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-STATE-DRIFT"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "open_questions.json", {"schema": "codex-open-questions-v1", "doc_id": doc_id, "decision": "block", "questions": [{"id": "Q-1", "required": True, "status": "open"}]})
+        write_json(artifact_dir / "technical_design.json", {"schema": "codex-technical-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "architecture_design.json", {"schema": "codex-architecture-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "design_architecture_review.json", {"schema": "codex-design-architecture-review-v1", "doc_id": doc_id, "decision": "pass", "blockers": []})
+
+        result = docs_governor.sync(root / "docs", doc_id, artifact_dir, "State drift")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in result["blockers"])
+        delivery = json.loads((root / "docs" / "deliveries" / doc_id / "delivery.json").read_text(encoding="utf-8"))
+        assert delivery["status"] == "synced"
+        assert delivery["projection_decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in delivery["projection_blockers"])
+        assert docs_governor.validate(root / "docs", doc_id)["decision"] == "block"
+
+
+def test_sync_projection_precheck_skips_canonical_write_on_state_conflict() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        artifact_dir = root / "artifacts"
+        doc_id = "REQ-STATE-PRECHECK"
+        write_json(artifact_dir / "spec.json", {"schema": "codex-spec-v1", "doc_id": doc_id, "decision": "block"})
+        write_json(artifact_dir / "open_questions.json", {"schema": "codex-open-questions-v1", "doc_id": doc_id, "decision": "pass", "questions": []})
+        write_json(artifact_dir / "technical_design.json", {"schema": "codex-technical-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "architecture_design.json", {"schema": "codex-architecture-design-v1", "doc_id": doc_id, "decision": "pass"})
+        write_json(artifact_dir / "design_architecture_review.json", {"schema": "codex-design-architecture-review-v1", "doc_id": doc_id, "decision": "pass", "blockers": []})
+
+        result = docs_governor.sync(root / "docs", doc_id, artifact_dir, "State precheck")
+
+        assert result["decision"] == "block"
+        assert any(item["source"] == "docs_projection_state" for item in result["blockers"])
+        assert not (root / "docs" / "deliveries" / doc_id / "artifacts" / "spec.json").exists()
 
 
 def test_validate_blocks_stale_canonical_delivery_projection() -> None:
@@ -913,7 +1083,7 @@ def test_sync_blocks_artifacts_bound_to_another_doc_id() -> None:
         assert any("does not match" in item["message"] for item in result["blockers"])
 
 
-def test_sync_blocks_active_canonical_artifacts_with_local_paths() -> None:
+def test_sync_sanitizes_active_canonical_artifacts_with_local_paths() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         docs_root = Path(tmp) / "docs"
         doc_id = "REQ-CANONICAL-PRIVACY"
@@ -923,8 +1093,10 @@ def test_sync_blocks_active_canonical_artifacts_with_local_paths() -> None:
 
         result = docs_governor.sync(docs_root, doc_id, canonical, "Privacy")
 
-        assert result["decision"] == "block"
-        assert any(item["source"] == "privacy" for item in result["blockers"])
+        canonical_spec = json.loads((canonical / "spec.json").read_text(encoding="utf-8"))
+        assert result["decision"] == "pass"
+        assert canonical_spec["repo_root"] == "<user-home>"
+        assert "spec.json" in result["sanitized_artifacts"]
 
 
 def test_validate_git_sync_blocks_uncommitted_and_unpushed_delivery_docs() -> None:
@@ -1838,6 +2010,67 @@ def test_runtime_entrypoint_confidence_derives_legacy_frontend_entrypoint() -> N
     assert "运行时入口：未同步" not in rendered
 
 
+def test_runtime_subrequirement_design_distinguishes_external_contract_reference_from_local_api() -> None:
+    spec = {
+        "acceptance_criteria": [
+            {"id": "AC-1", "criteria": "物联网卡即将到期时先发起审批。"},
+            {"id": "AC-2", "criteria": "配置项抽到 yaml 占位，不写死在业务代码中。"},
+        ]
+    }
+    runtime_evidence = {
+        "interactions": [
+            {"scenario": "BRK-1 发起审批", "trigger": "到期续费流程触发", "response": "生成审批实例"},
+            {"scenario": "BRK-2 配置占位", "trigger": "系统启动加载配置", "response": "读取 yaml 配置"},
+        ]
+    }
+    technical = {
+        "requirement_breakdown": [
+            {"id": "BRK-1", "summary": "发起审批", "api_impact": "confirm existing route or contract for this slice"},
+            {"id": "BRK-2", "summary": "配置占位", "api_impact": "no API change confirmed"},
+        ],
+        "api_contracts": [
+            {
+                "requirement_breakdown_id": "BRK-1",
+                "contract": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "endpoint": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "source_evidence": "evidence_bundle.contracts",
+            },
+            {
+                "requirement_breakdown_id": "BRK-2",
+                "contract": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "endpoint": "//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide",
+                "source_evidence": "evidence_bundle.contracts",
+            },
+        ],
+    }
+
+    rendered = docs_governor.render_runtime_subrequirement_design(spec, runtime_evidence, "zh", technical)
+
+    assert "#### BRK-1 发起审批" in rendered
+    assert "API 适用性：external_reference" in rendered
+    assert "外部参考契约：`//open.feishu.cn/document/server-docs/approval-v4/development-guide/native-approval-access-guide`" in rendered
+    assert "不等同于本地待实现 API" in rendered
+    assert "#### BRK-2 配置占位" in rendered
+    assert "API 适用性：不适用/not_applicable" in rendered
+    assert "本子需求不修改 API 路径、请求字段或响应字段" in rendered
+    assert "未同步接口" not in rendered
+
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "human/designs/REQ-FEISHU.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(
+            "# 飞书审批能力 技术设计\n\n"
+            "## 四、候选方案、对比与决策\n\n"
+            "#### Option `A1`: 接入外部审批 provider\n\n"
+            "## 五、决策记录\n\n选择 A1。\n\n"
+            "## 三、子需求设计矩阵\n\n"
+            f"{rendered}\n",
+            encoding="utf-8",
+        )
+        result = human_doc_review.review(doc)
+        assert not any(item["source"] == "brk_api_binding" for item in result["blockers"])
+
+
 def test_runtime_module_and_ui_design_replace_template_placeholders() -> None:
     evidence = {
         "frontend": {
@@ -2162,3 +2395,23 @@ def test_expert_design_sections_are_language_neutral() -> None:
     assert "renewal_order" in en_doc
     assert "needs_confirmation" not in zh_doc
     assert "{\"" not in zh_doc
+
+
+def test_docs_clarification_status_uses_unresolved_required_questions_only() -> None:
+    spec = {
+        "decision": "blocked",
+        "open_questions": [
+            {"question": "已确认的问题", "required": True, "status": "closed", "answer": "已确认"},
+            {"question": "建议问题", "required": False, "status": "open"},
+        ],
+        "requirements_understanding": {"decision": "pass"},
+    }
+
+    rendered = docs_governor.render_requirement_clarification_zh(spec)
+    open_questions = docs_governor.render_open_questions(spec, language="zh")
+    context = docs_governor.render_review_context(spec, "zh")
+
+    assert "状态：等待答复，暂时阻塞" in rendered
+    assert "是否允许进入设计：否" in rendered
+    assert "已确认的问题" not in open_questions
+    assert "当前记录 0 个未决问题" in context

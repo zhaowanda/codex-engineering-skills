@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,12 @@ DEFAULT_BUDGETS = {
 EDIT_KEYS = {"allowed_files", "files_to_edit", "modify_files", "implementation_files"}
 OWNER_KEYS = {"owner_file", "selected_entrypoint", "primary_file"}
 CONFIDENCE = {"low": 0, "medium": 1, "high": 2}
+GENERIC_RELEVANCE_TERMS = {
+    "add", "change", "device", "feature", "fix", "page", "service", "update",
+    "api", "http", "true", "false", "query", "list", "detail", "paging",
+    "修改", "功能", "优化", "页面", "设备", "需求", "用户", "接口", "查询",
+}
+TEMPLATE_LEAK_TERMS = {"需求标题", "requirement title"}
 
 
 def load_agent_runtime_module() -> Any:
@@ -69,6 +76,13 @@ def read_json(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def read_text_if_exists(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+    except Exception:
+        return ""
 
 
 def parse_scalar(value: str) -> Any:
@@ -196,7 +210,81 @@ def add_blocker(blockers: list[dict[str, Any]], source: str, message: str, **det
     blockers.append({"source": source, "message": message, **details})
 
 
-def artifact_budget_checkpoint(artifact_dir: Path, budgets: dict[str, int]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def walk_values(value: Any, path: str = "") -> list[tuple[str, Any]]:
+    rows = [(path, value)]
+    if isinstance(value, dict):
+        for key, child in value.items():
+            rows.extend(walk_values(child, f"{path}.{key}" if path else str(key)))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            rows.extend(walk_values(child, f"{path}[{index}]"))
+    return rows
+
+
+def template_leak_paths(data: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for path, value in walk_values(data):
+        if not isinstance(value, str):
+            continue
+        if path.endswith(("source_text", "raw_text", "text", "source_lines")):
+            continue
+        if any(term.lower() in value.lower() for term in TEMPLATE_LEAK_TERMS):
+            paths.append(path)
+    return paths
+
+
+def requirement_context(artifact_dir: Path) -> str:
+    parts = [
+        read_text_if_exists(artifact_dir / "requirement.normalized.txt"),
+        read_text_if_exists(artifact_dir / "requirement.md"),
+        json.dumps(read_json(artifact_dir / "spec.json"), ensure_ascii=False),
+    ]
+    return "\n".join(part for part in parts if part).lower()
+
+
+def is_mermaid_diagram(value: Any, diagram_type: str) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text) and "```mermaid" in text and diagram_type.lower() in text
+
+
+def relevance_terms(anchor: dict[str, Any]) -> list[str]:
+    raw_terms: list[str] = []
+    for key in ("matched_symbols", "matched_contract_terms", "matched_requirement_terms"):
+        value = anchor.get(key)
+        if isinstance(value, list):
+            raw_terms.extend(str(item) for item in value)
+    for item in anchor.get("evidence_chain", []) if isinstance(anchor.get("evidence_chain"), list) else []:
+        if isinstance(item, dict) and item.get("term"):
+            raw_terms.append(str(item["term"]))
+    terms: list[str] = []
+    for term in raw_terms:
+        normalized = term.strip().lower()
+        if not normalized or normalized in GENERIC_RELEVANCE_TERMS:
+            continue
+        if normalized not in terms:
+            terms.append(normalized)
+    return terms
+
+
+def path_tokens(path: str) -> list[str]:
+    basename = Path(path).name.lower()
+    stem = Path(path).stem.lower()
+    split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", Path(path).stem).lower()
+    tokens = [basename, stem, *re.split(r"[^a-z0-9\u4e00-\u9fff]+", split)]
+    return [token for token in tokens if len(token) >= 4 and token not in GENERIC_RELEVANCE_TERMS]
+
+
+def anchor_requirement_relevance(anchor: dict[str, Any], requirement_lower: str) -> tuple[bool, list[str]]:
+    if not requirement_lower:
+        return True, []
+    matched: list[str] = []
+    for term in [*path_tokens(str(anchor.get("path") or "")), *relevance_terms(anchor)]:
+        if term and term in requirement_lower and term not in matched:
+            matched.append(term)
+    return bool(matched), matched
+
+
+def artifact_budget_checkpoint(artifact_dir: Path, budgets: dict[str, int], strict: bool = True) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     blockers: list[dict[str, Any]] = []
     sizes: list[dict[str, Any]] = []
     for name, maximum in budgets.items():
@@ -206,8 +294,18 @@ def artifact_budget_checkpoint(artifact_dir: Path, budgets: dict[str, int]) -> t
         if not path.exists():
             continue
         size = path.stat().st_size
-        sizes.append({"artifact": name, "bytes": size, "max_bytes": maximum, "within_budget": size <= maximum})
+        soft_overage = not strict and name == "technical_design.json" and size <= int(maximum * 1.5)
+        sizes.append({
+            "artifact": name,
+            "bytes": size,
+            "max_bytes": maximum,
+            "within_budget": size <= maximum,
+            "soft_overage": soft_overage,
+            "recommendation": "split verbose evidence into supplemental artifacts and keep technical_design.json decision-focused" if soft_overage else "",
+        })
         if size > maximum:
+            if soft_overage:
+                continue
             add_blocker(blockers, "artifact_budget", f"artifact is {size} bytes; budget is {maximum}", artifact=name)
     return blockers, sizes
 
@@ -233,11 +331,14 @@ def source_location_checkpoint(
     minimum = str(policy.get("minimum_confidence") or "medium")
     blockers: list[dict[str, Any]] = []
     checked: list[dict[str, Any]] = []
+    requirement_lower = requirement_context(artifact_dir)
     if not modify:
         add_blocker(blockers, "source_location", "no confirmed modify anchor exists")
     for anchor in modify:
         relative = normalize_path(str(anchor.get("path") or ""))
         confidence = str(anchor.get("confidence") or "low")
+        anchor_repo_root = str(anchor.get("repo_root") or anchor.get("repository_root") or "").strip()
+        anchor_repo = str(anchor.get("repo") or anchor.get("repository") or "").strip()
         if not relative:
             add_blocker(blockers, "source_location", "confirmed modify anchor has no path")
             continue
@@ -247,7 +348,38 @@ def source_location_checkpoint(
         if CONFIDENCE.get(confidence, -1) < CONFIDENCE.get(minimum, 1):
             add_blocker(blockers, "source_location", "anchor confidence is below policy", path=relative, confidence=confidence, minimum=minimum)
         row: dict[str, Any] = {"path": relative, "confidence": confidence}
+        relevant, matched_relevance = anchor_requirement_relevance(anchor, requirement_lower)
+        row["requirement_relevance_terms"] = matched_relevance
+        if policy.get("require_requirement_relevance", True) and not relevant:
+            add_blocker(
+                blockers,
+                "source_location",
+                "confirmed modify anchor is not supported by requirement text",
+                path=relative,
+                matched_symbols=anchor.get("matched_symbols", []),
+                matched_contract_terms=anchor.get("matched_contract_terms", []),
+            )
         if configured_repo:
+            configured_resolved = configured_repo.resolve()
+            if anchor_repo_root:
+                anchor_root = Path(anchor_repo_root).expanduser()
+                try:
+                    anchor_resolved = anchor_root.resolve()
+                except OSError:
+                    anchor_resolved = anchor_root
+                if anchor_resolved != configured_resolved:
+                    row["repo_mismatch"] = {"anchor_repo_root": str(anchor_resolved), "configured_repo": str(configured_resolved), "anchor_repo": anchor_repo}
+                    add_blocker(
+                        blockers,
+                        "source_location",
+                        "confirmed modify anchor belongs to a different repository",
+                        path=relative,
+                        anchor_repo=anchor_repo,
+                        anchor_repo_root=str(anchor_resolved),
+                        configured_repo=str(configured_resolved),
+                    )
+                    checked.append(row)
+                    continue
             source = configured_repo / relative
             row["exists"] = source.is_file()
             if not source.is_file():
@@ -291,8 +423,8 @@ def applicability_areas(spec: dict[str, Any]) -> set[str]:
     return result
 
 
-def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[str, int]) -> dict[str, Any]:
-    blockers, sizes = artifact_budget_checkpoint(artifact_dir, budgets)
+def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[str, int], strict_budgets: bool = True) -> dict[str, Any]:
+    blockers, sizes = artifact_budget_checkpoint(artifact_dir, budgets, strict=strict_budgets)
     technical = read_json(artifact_dir / "technical_design.json")
     architecture = read_json(artifact_dir / "architecture_design.json")
     plan = read_json(artifact_dir / "delivery_plan.json")
@@ -301,6 +433,16 @@ def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[
     if not bundle_path.exists():
         bundle_path = artifact_dir / "evidence_bundle.json"
     bundle = read_json(bundle_path)
+    for artifact_name, data in [
+        ("spec.json", spec),
+        ("technical_design.json", technical),
+        ("architecture_design.json", architecture),
+        ("delivery_plan.json", plan),
+        ("test_design.json", read_json(artifact_dir / "test_design.json")),
+    ]:
+        leaked = template_leak_paths(data)
+        if leaked:
+            add_blocker(blockers, "semantic_quality", "template heading text leaked into semantic artifact fields", artifact=artifact_name, fields=leaked[:20], count=len(leaked))
     scope_model = spec.get("scope_model") if isinstance(spec.get("scope_model"), dict) else {}
     scoped_modify = {normalize_path(str(item)) for item in scope_model.get("modify", []) if str(item).strip()}
     scoped_references = {normalize_path(str(item)) for item in scope_model.get("reference_only", []) if str(item).strip()}
@@ -347,14 +489,21 @@ def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[
     process_flow = technical.get("process_flow")
     if policy.get("require_process_flow", True) and not process_flow:
         add_blocker(blockers, "design_completeness", "technical design is missing process_flow")
+    if process_flow and policy.get("require_process_flow_diagram", True) and not is_mermaid_diagram(technical.get("process_flow_diagram"), "flowchart"):
+        add_blocker(blockers, "design_completeness", "technical design is missing process_flow_diagram")
     impacts = applicability_areas(spec)
     sequence_impacts = {str(item).lower() for item in policy.get("sequence_impacts", ["api", "cross_repo", "integration", "business_flow"])}
     sequence = technical.get("system_interaction_sequence")
+    requirement_text = requirement_context(artifact_dir)
     if impacts & sequence_impacts:
         if not isinstance(sequence, dict) or sequence.get("applicable") is not True or not sequence.get("participants") or not sequence.get("sequence"):
             add_blocker(blockers, "design_completeness", "applicable cross-component change requires a populated system interaction sequence", impacts=sorted(impacts & sequence_impacts))
+        if isinstance(sequence, dict) and sequence.get("applicable") is True and policy.get("require_system_sequence_diagram", True) and not is_mermaid_diagram(technical.get("system_sequence_diagram"), "sequenceDiagram"):
+            add_blocker(blockers, "design_completeness", "technical design is missing system_sequence_diagram")
         if not architecture.get("integration_sequence"):
             add_blocker(blockers, "design_completeness", "architecture design is missing integration_sequence")
+        elif policy.get("require_integration_sequence_diagram", True) and not is_mermaid_diagram(architecture.get("integration_sequence_diagram"), "sequenceDiagram"):
+            add_blocker(blockers, "design_completeness", "architecture design is missing integration_sequence_diagram")
     if isinstance(sequence, dict) and sequence.get("applicable") is True:
         participants = {str(item) for item in sequence.get("participants", []) if str(item).strip()}
         for index, edge in enumerate(sequence.get("sequence", [])):
@@ -366,6 +515,12 @@ def design_checkpoint(artifact_dir: Path, policy: dict[str, Any], budgets: dict[
                 add_blocker(blockers, "design_semantics", "sequence entry is incomplete", index=index, missing=missing)
             if edge.get("from") not in participants or edge.get("to") not in participants:
                 add_blocker(blockers, "design_semantics", "sequence edge references an undeclared participant", index=index)
+        if any(term in requirement_text for term in ["callback", "回调", "审批"]):
+            if not any(str(edge.get("mode") or "").lower() == "callback" for edge in sequence.get("sequence", []) if isinstance(edge, dict)):
+                add_blocker(blockers, "design_semantics", "callback-driven requirement requires a callback step in system_interaction_sequence")
+        process_flow_steps = sum(len(item.get("steps") or []) for item in process_flow if isinstance(item, dict))
+        if process_flow_steps < 2 and any(term in requirement_text for term in ["workflow", "flow", "流程", "审批", "回调", "state", "status"]):
+            add_blocker(blockers, "design_completeness", "stateful or workflow requirement requires a multi-step business process flow", steps=process_flow_steps)
     state_impacts = {str(item).lower() for item in policy.get("state_impacts", ["state", "status", "workflow", "business_flow"])}
     if impacts & state_impacts and not (technical.get("state_machine") or spec.get("state_machine")):
         add_blocker(blockers, "design_completeness", "stateful change requires a state machine", impacts=sorted(impacts & state_impacts))
@@ -539,6 +694,7 @@ def validate(
 ) -> dict[str, Any]:
     policy = policy or {}
     configured_budgets = nested_policy(policy, "artifact_budgets")
+    explicit_budgets = budgets is not None or policy.get("artifact_budget_strict") is True
     effective_budgets = budgets or ({str(key): int(value) for key, value in configured_budgets.items()} if configured_budgets else DEFAULT_BUDGETS)
     selected = list(CHECKPOINTS) if checkpoint == "all" else [checkpoint]
     results: list[dict[str, Any]] = []
@@ -549,7 +705,7 @@ def validate(
         if name == "source_location":
             results.append(source_location_checkpoint(artifact_dir, repo, nested_policy(policy, name)))
         elif name == "design":
-            results.append(design_checkpoint(artifact_dir, nested_policy(policy, name), effective_budgets))
+            results.append(design_checkpoint(artifact_dir, nested_policy(policy, name), effective_budgets, strict_budgets=explicit_budgets))
         elif name == "post_implementation":
             results.append(post_implementation_checkpoint(artifact_dir))
         elif name == "pre_push":

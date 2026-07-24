@@ -82,7 +82,7 @@ def complete_design() -> tuple[dict, dict]:
         "module_decomposition": [{"module": "src/checkout/CheckoutSummary.tsx", "responsibility": "render discount rows", "input": "pricing response", "output": "summary UI", "dependencies": ["pricing API"], "cohesion_reason": "presentation only", "coupling_control": "no pricing calculation in UI"}],
         "logical_data_flow": [{"source": "pricing API", "transform": "format discount rows", "destination": "checkout summary", "owner": "pricing-service", "data_security": "no sensitive personal data"}],
         "target_behavior": [{"requirement_id": "REQ-1", "behavior": "buyer sees discount breakdown"}],
-        "api_contracts": [{"contract": "discounts[] field unchanged", "compatibility": "additive rendering only", "old_consumer_impact": "none"}],
+        "api_contracts": [{"contract": "GET /api/pricing (src/checkout/usePricing.ts)", "endpoint": "/api/pricing", "controller_file": "src/checkout/usePricing.ts", "source_evidence": "api_surface.routes", "confirmed_contract": True, "compatibility": "additive rendering only", "old_consumer_impact": "none"}],
         "interface_examples": [{"name": "pricing response", "request": "GET /api/pricing", "response": "{\"discounts\":[]}", "error_response": "{\"error\":\"pricing unavailable\"}"}],
         "compatibility_strategy": [{"old_consumer": "checkout page", "old_data": "orders without discounts", "rollback": "hide rows", "behavior": "empty discounts render nothing"}],
         "compatibility_matrix": [{"consumer": "checkout page", "old_behavior": "subtotal only", "new_behavior": "discount rows when present", "compatibility": "additive", "rollback_behavior": "hide rows"}],
@@ -159,7 +159,7 @@ def complete_design() -> tuple[dict, dict]:
         "cross_repo_dependency_graph": [{"from": "pricing-service", "to": "web-app", "contract": "discounts[]", "change": "confirm only"}],
         "data_flow": [{"source": "pricing-service", "target": "web-app", "rule": "display only"}],
         "data_ownership": [{"business_object": "discount", "owner_repo": "pricing-service", "write_authority": "pricing-service", "consistency_rule": "web read only"}],
-        "integration_sequence": [{"step": 1, "actor": "web-app", "target": "pricing-service", "action": "load pricing", "failure_handling": "show existing error"}],
+        "integration_sequence": [{"step": 1, "from": "web-app", "to": "pricing-service", "actor": "web-app", "target": "pricing-service", "owner_repo": "web-app", "entrypoint": "src/checkout/CheckoutSummary.tsx", "contract": "GET /api/pricing", "data": "pricing response discounts[]", "action": "load pricing", "failure_handling": "show existing error"}],
         "integration_sequence_diagram": "```mermaid\nsequenceDiagram\n    autonumber\n    participant web-app\n    participant pricing-service\n    web-app->>pricing-service: load pricing\n```",
         "failure_isolation": [{"failure": "discounts omitted", "isolation": "render subtotal only", "user_impact": "checkout continues"}],
         "security_and_permission": [{"control": "cart ownership enforced by API", "impact": "no new permission"}],
@@ -249,8 +249,21 @@ def test_complete_design_passes() -> None:
     assert result["decision"] == "pass"
     assert result["score"] >= 85
     assert result["readiness_gate"]["implementation_allowed"]
+    assert result["diagram_checks"]["process_flow_diagram"]["present"] is True
+    assert "source_location_checks" in result
     valid, issues = design_arch_review.validate(result)
     assert valid, issues
+
+
+def test_pass_review_requires_auditable_check_sections() -> None:
+    technical, architecture = complete_design()
+    result = design_arch_review.review(technical, architecture)
+    result.pop("diagram_checks")
+
+    valid, issues = design_arch_review.validate(result)
+
+    assert not valid
+    assert any("diagram_checks" in issue for issue in issues)
 
 
 def test_missing_design_diagrams_block_review() -> None:
@@ -266,6 +279,114 @@ def test_missing_design_diagrams_block_review() -> None:
     assert "process flow diagram is missing" in messages
     assert "system sequence diagram is missing" in messages
     assert "integration sequence diagram is missing" in messages
+
+
+def test_source_literal_drift_blocks_design_review() -> None:
+    technical, architecture = complete_design()
+    technical["source_literals"] = [{"literal": "EXPIRING", "source": "source.requirement", "required_binding": True}]
+    technical["business_rule_mapping"][0]["technical_enforcement"] = "render EXPIRING_30D status"
+    technical["target_behavior"][0]["behavior"] = "buyer sees EXPIRING_30D renewal marker"
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "needs_revision"
+    assert "source literals appear rewritten without an explicit mapping" in json_dumps(result)
+
+
+def test_source_literal_mapping_notes_prevent_false_drift() -> None:
+    technical, architecture = complete_design()
+    technical["source_literals"] = [{"literal": "PENDING", "source": "source.requirement", "required_binding": True}]
+    technical["business_rule_mapping"][0]["technical_enforcement"] = "approval state PENDING must remain separate from settlement status"
+    technical["target_behavior"][0]["behavior"] = "approval PENDING is not SETTLEMENT_STATUS_PENDING_RECEIPT"
+    mapping = {
+        "source_literal": "PENDING",
+        "design_variants": ["SETTLEMENT_STATUS_PENDING_RECEIPT"],
+        "mapping_rule": "PENDING is the approval state; SETTLEMENT_STATUS_PENDING_RECEIPT is a different settlement-order state and must not be mixed.",
+    }
+    technical["source_literal_mapping_notes"] = [mapping]
+    architecture["source_literal_mapping_notes"] = [mapping]
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "pass"
+    assert "source literals appear rewritten without an explicit mapping" not in json_dumps(result)
+
+
+def test_external_architecture_framing_satisfies_complex_design_gate() -> None:
+    technical, architecture = complete_design()
+    external_framing = technical.pop("architecture_framing")
+    technical.pop("architecture_framing_ref", None)
+    architecture.pop("architecture_framing", None)
+    architecture.pop("architecture_framing_ref", None)
+
+    result = design_arch_review.review(technical, architecture, architecture_framing_artifact=external_framing)
+
+    assert result["decision"] == "pass"
+    assert "complex design lacks pre-technical architecture framing" not in json_dumps(result)
+    assert "architecture_framing.json" in result["input_digests"]
+
+
+def test_api_contract_without_source_binding_needs_revision() -> None:
+    technical, architecture = complete_design()
+    technical["api_contracts"] = [{"contract": "/list", "compatibility": "unknown", "old_consumer_impact": "unknown"}]
+
+    result = design_arch_review.review(technical, architecture)
+
+    messages = json_dumps(result)
+    assert result["decision"] == "needs_revision"
+    assert "API contract lacks source binding evidence" in messages
+    assert "generic list/page route" in messages
+
+
+def test_requirement_provided_forbidden_constraints_block_implementation_surface() -> None:
+    technical, architecture = complete_design()
+    technical["constraint_model"] = {
+        "schema": "codex-generic-constraint-model-v1",
+        "forbidden_modules": ["src/legacy/LegacyCheckout.tsx"],
+        "forbidden_contracts": ["/legacy/pricing"],
+        "forbidden_behaviors": ["legacy calculation"],
+        "out_of_scope_patterns": ["payment capture"],
+    }
+    technical["module_decomposition"].append({
+        **technical["module_decomposition"][0],
+        "module": "src/legacy/LegacyCheckout.tsx",
+        "responsibility": "legacy calculation",
+    })
+
+    result = design_arch_review.review(technical, architecture)
+
+    messages = json_dumps(result)
+    assert result["decision"] == "block"
+    assert "forbidden or out-of-scope constraints" in messages
+    assert "src/legacy/LegacyCheckout.tsx" in messages
+
+
+def test_integration_sequence_rewritten_from_acceptance_needs_revision() -> None:
+    technical, architecture = complete_design()
+    architecture["integration_sequence"] = [{
+        "step": 1,
+        "actor": "web-app",
+        "target": "pricing-service",
+        "action": "business slice discount display",
+        "failure_handling": "show error",
+    }]
+    architecture["integration_sequence_diagram"] = "```mermaid\nsequenceDiagram\n    web-app->>pricing-service: business slice discount display\n```"
+    technical["requirement_breakdown"] = [{
+        "id": "BRK-1",
+        "summary": "business slice discount display",
+        "behavior_change": "show discount",
+        "impact_areas": ["ui"],
+        "field_impact": "discounts[]",
+        "api_impact": "existing pricing API",
+        "permission_impact": "preserve permission",
+    }]
+
+    result = design_arch_review.review(technical, architecture)
+
+    messages = json_dumps(result)
+    assert result["decision"] == "needs_revision"
+    assert "integration sequence step lacks required fields" in messages
+    assert "acceptance criteria rewritten" in messages
 
 
 def test_specialty_blocker_is_aggregated_and_blocks_implementation() -> None:
@@ -324,6 +445,79 @@ def test_generic_design_phrasing_needs_revision() -> None:
     result = design_arch_review.review(technical, architecture)
     assert result["decision"] == "needs_revision"
     assert "generic template phrasing" in json_dumps(result)
+
+
+def test_cross_domain_leaked_terms_block_review() -> None:
+    technical, architecture = complete_design()
+    technical["rollback_strategy"] = "清理播放器资源后回滚审批能力"
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "cross-domain leaked terms" in json_dumps(result)
+
+
+def test_persistence_required_terms_cannot_be_marked_not_applicable() -> None:
+    technical, architecture = complete_design()
+    technical["business_rule_mapping"][0]["technical_enforcement"] = "审批状态 PENDING、失败原因、回调结果和重试次数必须可查询"
+    technical["impact_applicability"] = [
+        {"area": "data", "status": "excluded", "reason": "incorrect fixture"},
+        {"area": "api", "status": "required", "reason": "approval callback"},
+    ]
+    technical["data_design"] = []
+    technical["data_model_design"] = {"applicable": False, "not_applicable_reason": "no persistence"}
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "design claims no persistence impact" in json_dumps(result)
+
+
+def test_external_provider_api_cannot_be_local_api_contract() -> None:
+    technical, architecture = complete_design()
+    technical["api_contracts"] = [{
+        "contract": "POST /open-apis/approval/v4/instances",
+        "endpoint": "/open-apis/approval/v4/instances",
+        "controller_file": "FeishuApprovalClient.java",
+        "source_evidence": "requirement.external_provider",
+        "confirmed_contract": True,
+        "compatibility": "provider contract",
+        "old_consumer_impact": "none",
+    }]
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "external provider API is used as a local system API contract" in json_dumps(result)
+
+
+def test_requirement_declared_frontend_repo_cannot_be_dropped() -> None:
+    technical, architecture = complete_design()
+    repo_map = {
+        "multi_repo_required": True,
+        "repos": [
+            {"name": "sigreal-operate-platform", "relation": "owner"},
+            {"name": "operate-platform-fe", "relation": "downstream"},
+        ],
+    }
+    technical["repo_impact_map"] = repo_map
+    technical["requirements_understanding_gate"] = {
+        "design_allowed": True,
+        "implementation_allowed": True,
+        "business_intent": "接入飞书审批能力",
+        "business_flow": ["后端创建审批实例", "前端展示审批状态和重试入口"],
+        "entrypoints": ["审批入口"],
+        "repo_impact_map": repo_map,
+    }
+    architecture["repo_responsibilities"] = [
+        {"repo": "sigreal-operate-platform", "role": "modify", "responsibility": "backend approval capability"}
+    ]
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "repo responsibilities do not cover all requirement-declared repositories" in json_dumps(result)
+    assert "operate-platform-fe" in json_dumps(result)
 
 
 def test_template_problem_analysis_needs_revision() -> None:
@@ -517,6 +711,92 @@ def test_new_service_design_requires_bootstrap_operations_and_ownership() -> Non
     assert "new service creation reason is too shallow" in messages
 
 
+def test_local_project_binding_blocks_missing_project_skill_or_branch() -> None:
+    technical, architecture = complete_design()
+    binding = {
+        "project": "web-app",
+        "repo_root": "/workspace/web-app",
+        "git": {"status": "ready", "branch": "", "head": "abc123"},
+        "project_skill_dir": "/workspace/.codex/skills/company/web-app",
+        "project_skill_required": True,
+        "project_skill_loaded": False,
+    }
+    technical["local_project_binding"] = binding
+    technical.setdefault("project_context", {})["local_project_binding"] = binding
+    architecture["local_project_binding"] = binding
+
+    result = design_arch_review.review(technical, architecture)
+    messages = json_dumps(result)
+
+    assert result["decision"] == "block"
+    assert "design did not load the local project skill overlay" in messages
+    assert "design lacks current Git branch or HEAD binding" in messages
+
+
+def test_local_project_binding_blocks_stale_architecture_binding() -> None:
+    technical, architecture = complete_design()
+    technical["local_project_binding"] = {
+        "project": "web-app",
+        "repo_root": "/workspace/web-app",
+        "git": {"status": "ready", "branch": "feature/current", "head": "abc123"},
+        "project_skill_dir": "/workspace/.codex/skills/company/web-app",
+        "project_skill_required": True,
+        "project_skill_loaded": True,
+    }
+    architecture["local_project_binding"] = {
+        **technical["local_project_binding"],
+        "git": {"status": "ready", "branch": "feature/old", "head": "def456"},
+    }
+
+    result = design_arch_review.review(technical, architecture)
+
+    assert result["decision"] == "block"
+    assert "technical and architecture design use different local project bindings" in json_dumps(result)
+
+
+def test_repository_design_without_binding_or_repo_path_cannot_pass() -> None:
+    technical, architecture = complete_design()
+    technical["project_context"] = {"repo_root": "/workspace/web-app"}
+    technical.pop("local_project_binding", None)
+    architecture.pop("local_project_binding", None)
+    architecture["repo_responsibilities"][0]["repo_path"] = ""
+    architecture["architecture_risks"] = [{"risk": "owner repo not yet routed", "mitigation": "fill repo_path"}]
+    architecture["architecture_decision_confidence"] = {
+        "level": "medium",
+        "confidence_reducers": [{"source": "repo_path", "message": "owner repo path is not routed"}],
+    }
+
+    result = design_arch_review.review(technical, architecture)
+    messages = json_dumps(result)
+
+    assert result["decision"] == "block"
+    assert "repository-backed design lacks local project binding" in messages
+    assert "modify repo lacks concrete repo_path" in messages
+    assert "architecture says owner repo path is not routed" in messages
+
+
+def test_specialty_not_applicable_and_evidence_pending_do_not_block_design() -> None:
+    technical, architecture = complete_design()
+
+    result = design_arch_review.review(
+        technical,
+        architecture,
+        specialty_artifacts={
+            "cross_repo_readiness.json": {"schema": "codex-cross-repo-readiness-v1", "decision": "pass", "applicable": False, "blockers": []},
+            "configuration_readiness.json": {"schema": "codex-configuration-readiness-v1", "decision": "ready", "applicable": False, "blockers": []},
+            "data_security_review.json": {"schema": "codex-data-security-review-v1", "decision": "ready", "review_status": "needs_review", "blockers": []},
+            "performance_review.json": {"schema": "codex-performance-review-v1", "decision": "ready", "evidence_status": "needs_evidence", "blockers": []},
+        },
+    )
+
+    messages = json_dumps(result)
+    assert result["decision"] == "pass"
+    assert result["readiness_gate"]["implementation_allowed"] is True
+    assert "specialty design gate cross_repo_readiness.json is not approved" not in messages
+    assert "specialty design gate data_security_review.json is not approved" not in messages
+    assert result["blockers"] == []
+
+
 def json_dumps(value: dict) -> str:
     import json
 
@@ -532,12 +812,19 @@ def run_all() -> None:
     test_generic_design_phrasing_needs_revision()
     test_template_problem_analysis_needs_revision()
     test_template_option_decision_needs_revision()
+    test_source_literal_drift_blocks_design_review()
+    test_source_literal_mapping_notes_prevent_false_drift()
+    test_external_architecture_framing_satisfies_complex_design_gate()
     test_selected_option_must_match_highest_score()
     test_low_confidence_generic_entrypoint_needs_revision()
     test_complex_breakdown_flattened_to_one_module_needs_revision()
     test_complex_breakdown_with_confident_entrypoint_passes()
     test_new_service_signal_requires_new_service_design()
     test_new_service_design_requires_bootstrap_operations_and_ownership()
+    test_local_project_binding_blocks_missing_project_skill_or_branch()
+    test_local_project_binding_blocks_stale_architecture_binding()
+    test_repository_design_without_binding_or_repo_path_cannot_pass()
+    test_specialty_not_applicable_and_evidence_pending_do_not_block_design()
 
 
 if __name__ == "__main__":

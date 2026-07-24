@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -21,6 +20,42 @@ def load_contract_module() -> Any:
 
 
 CONTRACT = load_contract_module()
+
+
+def load_consistency_module() -> Any:
+    path = Path(__file__).with_name("delivery_consistency.py")
+    spec = importlib.util.spec_from_file_location("delivery_final_consistency", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+CONSISTENCY = load_consistency_module()
+
+
+def load_harness_module() -> Any:
+    path = ROOT / "skills/core/auto-runner/scripts/harness_validation.py"
+    spec = importlib.util.spec_from_file_location("delivery_harness_validation", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+HARNESS = load_harness_module()
+
+
+def load_summary_contract_module() -> Any:
+    path = Path(__file__).with_name("summary_contract.py")
+    spec = importlib.util.spec_from_file_location("delivery_summary_contract", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+SUMMARY_CONTRACT = load_summary_contract_module()
 FALLBACK_ORDER = [
     ("spec", "spec.json"),
     ("technical_design", "technical_design.json"),
@@ -56,8 +91,144 @@ def load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def artifact_path(artifact_dir: Path, relative: str) -> Path:
+    if relative.startswith("runtime/") and artifact_dir.name == "artifacts":
+        sibling = artifact_dir.parent / relative
+        if sibling.exists():
+            return sibling
+    path = artifact_dir / relative
+    if path.exists():
+        return path
+    return path
+
+
 def stage_is_pass(stage: dict[str, Any], data: dict[str, Any]) -> bool:
     return not CONTRACT.validate_artifact_contract(stage, data)
+
+
+def infer_docs_root_from_artifact_dir(artifact_dir: Path, doc_id: str = "") -> Path | None:
+    if artifact_dir.name != "artifacts":
+        return None
+    delivery_root = artifact_dir.parent
+    if doc_id and delivery_root.name != doc_id:
+        return None
+    deliveries = delivery_root.parent
+    if deliveries.name != "deliveries":
+        return None
+    return deliveries.parent
+
+
+def source_location_readiness(artifact_dir: Path) -> dict[str, Any]:
+    auto_summary = load_json(artifact_dir / "auto_run_summary.json")
+    stored = auto_summary.get("source_location_readiness") if isinstance(auto_summary.get("source_location_readiness"), dict) else {}
+    if stored:
+        result = dict(stored)
+        result.setdefault("artifact_dir", str(artifact_dir))
+        return result
+    evidence = load_json(artifact_dir / "project_understanding/source_location_evidence.json")
+    if not evidence:
+        evidence = load_json(artifact_dir / "source_location_evidence.json")
+    harness = load_json(artifact_dir / "harness/source_location.json")
+    confirmed = [
+        str(item.get("path"))
+        for item in (evidence.get("confirmed_anchors") or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    rejected = [
+        str(item.get("path"))
+        for item in (evidence.get("rejected_candidates") or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    blockers: list[dict[str, Any]] = []
+    if evidence:
+        if evidence.get("decision") != "pass":
+            blockers.append({"source": "source_location_evidence", "message": "requirement-specific source location evidence did not pass"})
+        if not confirmed:
+            blockers.append({"source": "source_location_evidence", "message": "no confirmed source anchors"})
+    if harness and harness.get("decision") != "pass":
+        blockers.extend(item for item in harness.get("blockers", []) if isinstance(item, dict))
+    if not evidence and not harness:
+        return {
+            "decision": "not_applicable",
+            "applicable": False,
+            "artifact_dir": str(artifact_dir),
+            "confirmed_anchor_count": 0,
+            "rejected_candidate_count": 0,
+            "blockers": [],
+        }
+    return {
+        "decision": "pass" if not blockers else "block",
+        "applicable": True,
+        "artifact_dir": str(artifact_dir),
+        "source_location_decision": str(evidence.get("decision") or ""),
+        "harness_decision": str(harness.get("decision") or ""),
+        "confirmed_anchor_count": len(confirmed),
+        "confirmed_anchors": confirmed[:8],
+        "rejected_candidate_count": len(rejected),
+        "rejected_candidates": rejected[:8],
+        "blockers": blockers,
+    }
+
+
+def infer_repo_for_pre_push(artifact_dir: Path) -> Path | None:
+    post_change = load_json(artifact_dir / "post_change_implementation_report.json")
+    git_evidence = load_json(artifact_dir / "git_worktree_evidence.json")
+    summary = load_json(artifact_dir / "git_plan_baseline_summary.json")
+    candidates = [
+        post_change.get("repo"),
+        git_evidence.get("resolved_repo_path"),
+        git_evidence.get("repo_path"),
+        git_evidence.get("repo"),
+    ]
+    results = summary.get("results") if isinstance(summary.get("results"), list) else []
+    for item in results:
+        if isinstance(item, dict):
+            candidates.extend([item.get("resolved_repo_path"), item.get("repo_path"), item.get("repo")])
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if not value:
+            continue
+        path = Path(value).expanduser()
+        if (path / ".git").exists():
+            return path
+    return None
+
+
+def pre_push_readiness(artifact_dir: Path) -> dict[str, Any]:
+    relevant = [
+        artifact_dir / "implementation_completion_gate.json",
+        artifact_dir / "post_change_implementation_report.json",
+        artifact_dir / "post_implementation_traceability_matrix.json",
+        artifact_dir / "code_review_gate.json",
+        artifact_dir / "test_evidence_gate.json",
+        artifact_dir / "harness/post_implementation.json",
+    ]
+    if not any(path.exists() for path in relevant):
+        return {
+            "decision": "not_applicable",
+            "applicable": False,
+            "artifact_dir": str(artifact_dir),
+            "repo": "",
+            "blockers": [],
+        }
+    repo = infer_repo_for_pre_push(artifact_dir)
+    status = HARNESS.pre_push_checkpoint(artifact_dir, repo)
+    status["applicable"] = True
+    status["artifact_dir"] = str(artifact_dir)
+    status["repo"] = str(repo) if repo else ""
+    return status
+
+
+def extend_unique_blockers(target: list[dict[str, Any]], new_items: list[dict[str, Any]]) -> None:
+    seen = {(str(item.get("source") or ""), str(item.get("message") or "")) for item in target if isinstance(item, dict)}
+    for item in new_items:
+        if not isinstance(item, dict):
+            continue
+        key = (str(item.get("source") or ""), str(item.get("message") or ""))
+        if key in seen:
+            continue
+        target.append(item)
+        seen.add(key)
 
 
 def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
@@ -65,13 +236,27 @@ def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
     status = auto_summary.get("docs_readiness") if isinstance(auto_summary.get("docs_readiness"), dict) else {}
     doc_id = str(auto_summary.get("doc_id") or load_json(artifact_dir / "delivery_plan.json").get("doc_id") or "")
     docs_root_value = str(status.get("docs_root") or "")
+    if docs_root_value in {"<docs-root>", "<workspace>", "<user-home>", ""}:
+        inferred = infer_docs_root_from_artifact_dir(artifact_dir, doc_id)
+        if inferred is not None:
+            docs_root_value = str(inferred)
     blockers: list[dict[str, str]] = []
     if not docs_root_value:
         blockers.append({"source": "docs_root", "message": "delivery docs repository root is required before implementation"})
     manifest = ""
     if docs_root_value:
         docs_root = Path(docs_root_value)
-        manifest = str(status.get("manifest") or docs_root / "indexes" / f"{doc_id}.manifest.json")
+        canonical_artifact_dir = (docs_root / "deliveries" / doc_id / "artifacts").resolve() if doc_id else None
+        if canonical_artifact_dir is not None and artifact_dir.resolve() != canonical_artifact_dir and "_staging" in artifact_dir.parts:
+            blockers.append({
+                "source": "docs_source",
+                "message": "artifact_dir under _staging cannot be used as the docs readiness source; use the reviewed delivery artifacts or the canonical docs delivery artifacts directory",
+            })
+        manifest_value = str(status.get("manifest") or "")
+        if not manifest_value or "<" in manifest_value:
+            manifest = str(docs_root / "indexes" / f"{doc_id}.manifest.json")
+        else:
+            manifest = manifest_value
         if not docs_root.exists():
             blockers.append({"source": "docs_root", "message": "delivery docs repository root does not exist"})
         if doc_id and not Path(manifest).exists():
@@ -82,6 +267,7 @@ def docs_readiness(artifact_dir: Path) -> dict[str, Any]:
         "decision": "pass" if not blockers else "block",
         "doc_id": doc_id,
         "docs_root": docs_root_value,
+        "artifact_dir": str(artifact_dir),
         "manifest": manifest,
         "blockers": blockers,
     }
@@ -188,7 +374,7 @@ def missing_profile_artifacts(profile: dict[str, Any], artifact_dir: Path) -> li
     items = profile.get("expected_artifacts", [])
     if not isinstance(items, list):
         items = [items]
-    return [str(item) for item in items if not (artifact_dir / str(item)).exists()]
+    return [str(item) for item in items if not artifact_path(artifact_dir, str(item)).exists()]
 
 
 def nested_value(data: dict[str, Any], path: str) -> Any:
@@ -217,7 +403,7 @@ def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[d
         if not artifact_name:
             blockers.append({"source": "workflow_profile", "message": "required gate artifact is missing artifact path"})
             continue
-        path = artifact_dir / artifact_name
+        path = artifact_path(artifact_dir, artifact_name)
         data = load_json(path)
         if not data:
             blockers.append({"source": f"profile_gate.{artifact_name}", "message": "required gate artifact is missing or invalid"})
@@ -237,7 +423,7 @@ def profile_gate_blockers(profile: dict[str, Any], artifact_dir: Path) -> list[d
         digest_source = str(gate.get("digest_source") or "")
         digest_path = str(gate.get("digest_path") or "")
         if digest_source and digest_path:
-            source_data = load_json(artifact_dir / digest_source)
+            source_data = load_json(artifact_path(artifact_dir, digest_source))
             actual_digest = nested_value(data, digest_path)
             expected_digest = canonical_artifact_digest(source_data) if source_data else ""
             if not expected_digest or actual_digest != expected_digest:
@@ -279,6 +465,31 @@ def classify_next_action(can_implement: bool, can_release: bool, blockers: list[
     return "generate_artifact"
 
 
+def post_change_command_hint(push_status: dict[str, Any], artifact_dir: Path) -> str:
+    repo = str(push_status.get("repo") or "").strip()
+    command = f"python3 scripts/codex_eng.py post-change --artifact-dir {artifact_dir}"
+    if repo:
+        command += f" --repo {repo}"
+    return command
+
+
+def should_prioritize_push_readiness(push_status: dict[str, Any], next_stage: str) -> bool:
+    if push_status.get("applicable") is not True or push_status.get("decision") != "block":
+        return False
+    return next_stage in {
+        "implementation",
+        "post_change",
+        "review",
+        "test",
+        "environment",
+        "uat",
+        "release_change",
+        "release",
+        "post_release",
+        "done",
+    }
+
+
 def primary_next_action(
     next_action_type: str,
     next_stage: str,
@@ -286,9 +497,23 @@ def primary_next_action(
     next_command: str,
     blockers: list[dict[str, Any]],
     actions: list[dict[str, Any]],
+    push_status: dict[str, Any] | None = None,
+    artifact_dir: Path | None = None,
 ) -> dict[str, Any]:
+    push_status = push_status or {}
     if next_action_type in {"ready_to_implement", "ready_to_release"}:
         return {"action_type": next_action_type, "stage": next_stage, "summary": next_action_type.replace("_", " "), "command": ""}
+    if artifact_dir is not None and should_prioritize_push_readiness(push_status, next_stage):
+        push_blockers = push_status.get("blockers") if isinstance(push_status.get("blockers"), list) else []
+        if push_blockers:
+            first_push = next((item for item in push_blockers if isinstance(item, dict)), {})
+            return {
+                "action_type": "fix_blocker",
+                "stage": next_stage,
+                "artifact": "post_change_implementation_report.json",
+                "summary": f"pre_push: {first_push.get('source', 'unknown')}: {first_push.get('message', '')}",
+                "command": post_change_command_hint(push_status, artifact_dir),
+            }
     if actions:
         first = next((item for item in actions if item.get("artifact") == next_artifact), actions[0])
         return {
@@ -320,7 +545,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     if profile.get("profile_stage_mode") == "release_only":
         stages = [stage for stage in stages if stage.get("release_required")]
     order = [(str(stage["name"]), str(stage["artifact"])) for stage in stages]
-    artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_dir / filename) for name, filename in order}
+    artifacts: dict[str, dict[str, Any]] = {name: load_json(artifact_path(artifact_dir, filename)) for name, filename in order}
     state = load_json(artifact_dir / "delivery_state.json")
     profile_missing = missing_profile_artifacts(profile, artifact_dir)
     completed = [str(stage["name"]) for stage in stages if stage_is_pass(stage, artifacts[str(stage["name"])])]
@@ -351,7 +576,7 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         recorded = data.get("input_digests") if isinstance(data.get("input_digests"), dict) else {}
         stale_inputs = []
         for artifact_name in input_artifacts:
-            source_path = artifact_dir / artifact_name
+            source_path = artifact_path(artifact_dir, artifact_name)
             recorded_digest = recorded.get(artifact_name) or recorded.get(source_path.name)
             if source_path.exists() and recorded_digest != CONTRACT.path_digest(source_path):
                 stale_inputs.append(artifact_name)
@@ -380,15 +605,29 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         blockers.append({"source": "delivery_state", "message": "delivery state has blockers", "count": len(state.get("blockers", []))})
     release_only = profile.get("profile_stage_mode") == "release_only"
     docs_status = {"decision": "not_applicable", "blockers": []} if release_only else docs_readiness(artifact_dir)
+    source_location_status = source_location_readiness(artifact_dir)
+    push_status = pre_push_readiness(artifact_dir)
     if not release_only and docs_status.get("decision") != "pass":
-        blockers.extend(docs_status.get("blockers", []))
+        extend_unique_blockers(blockers, docs_status.get("blockers", []))
     docs_quality = artifacts.get("docs_quality", {})
     if docs_quality and str(docs_quality.get("decision") or "") not in {"pass", "ready"}:
         blockers.append({"source": "docs_quality", "message": "human documentation quality decision is not pass/ready"})
     git_status = {"decision": "not_applicable", "blockers": []} if release_only else git_edit_readiness(artifact_dir, artifacts.get("git", {}))
     if not release_only and git_status.get("decision") != "ready":
-        blockers.extend(git_status.get("blockers", []))
+        extend_unique_blockers(blockers, git_status.get("blockers", []))
+    if push_status.get("applicable") and push_status.get("decision") != "pass":
+        extend_unique_blockers(blockers, push_status.get("blockers", []))
     blockers.extend(profile_gate_blockers(profile, artifact_dir))
+    consistency = CONSISTENCY.validate(artifact_dir)
+    if consistency.get("decision") != "pass":
+        extend_unique_blockers(blockers, consistency.get("blockers", []))
+    stored_status_raw = load_json(artifact_dir / "delivery_status.json")
+    stored_status = stored_status_raw if isinstance(stored_status_raw, dict) else {}
+    if stored_status:
+        if stored_status.get("can_implement") is True and blockers:
+            blockers.append({"source": "delivery_status", "message": "stored delivery_status claims can_implement=true while current inspection has blockers"})
+        if stored_status.get("can_release") is True and blockers:
+            blockers.append({"source": "delivery_status", "message": "stored delivery_status claims can_release=true while current inspection has blockers"})
     next_required_actions = profile_next_actions(profile, artifact_dir)
 
     next_stage = "done"
@@ -411,7 +650,17 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
     artifact_by_stage = {name: filename for name, filename in order}
     next_artifact = artifact_by_stage.get(next_stage, "")
     next_action_type = classify_next_action(can_implement, can_release, blockers, next_stage)
-    primary_action = primary_next_action(next_action_type, next_stage, next_artifact, next_command, blockers, next_required_actions)
+    primary_action = primary_next_action(
+        next_action_type,
+        next_stage,
+        next_artifact,
+        next_command,
+        blockers,
+        next_required_actions,
+        push_status,
+        artifact_dir,
+    )
+    summary = SUMMARY_CONTRACT.summary_fields(blockers, next_stage, next_action_type, next_command, primary_action)
     return {
         "schema": "codex-delivery-runner-status-v1",
         "artifact_dir": str(artifact_dir),
@@ -421,17 +670,18 @@ def inspect(artifact_dir: Path, profile_name: str | None = None) -> dict[str, An
         "blockers": blockers,
         "workflow_profile": profile,
         "detected_impacts": sorted(impacts),
+        "source_location_readiness": source_location_status,
+        "pre_push_readiness": push_status,
         "docs_readiness": docs_status,
         "git_edit_readiness": git_status,
+        "final_consistency": consistency,
         "profile_missing_artifacts": profile_missing,
         "stage_registry": "config/workflow-stages.example.yaml",
         "next_profile_command": profile.get("next_safe_command", ""),
         "next_required_actions": next_required_actions,
         "next_release_actions": next_required_actions if profile.get("name") == "release_readiness" else [],
         "next_stage": next_stage,
-        "next_action_type": next_action_type,
-        "primary_next_action": primary_action,
-        "next_command": next_command,
+        **summary,
         "can_implement": can_implement,
         "can_release": can_release,
         "implementation_missing": implementation_missing,

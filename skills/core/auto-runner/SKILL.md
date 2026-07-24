@@ -38,8 +38,10 @@ user requirement
 - Run project understanding only when both `--repo` and `--project` are provided.
 - For repository-backed runs, generate requirement-specific source-location evidence after project understanding and before spec/design.
 - When `--project` resolves an installed company project skill, consume relevant reference excerpts into Evidence Bundle with file digests and provenance; do not copy full private references.
+- For repository-backed runs, record `local_project_binding` in Evidence Bundle with repo root, Git branch/head, expected project skill path, and whether the local project skill overlay was loaded; design review must block missing or inconsistent bindings.
 - Propagate the canonical scope model through design, planning, edit readiness, post-change checks, and acceptance evidence.
 - Stop after spec and requirement questions when requirement understanding or source-location confirmation blocks design. Do not emit pass-looking design, test, or plan artifacts.
+- Do not stop for optional clarification/advisory questions when `spec.design_allowed=true` and `open_questions.json.decision=pass`; carry those advisories into design context instead of forcing another Spec round.
 - When requirement clarification blocks progress, return `python3 scripts/codex_eng.py clarify --artifact-dir <out>` as the next command. Do not prompt inside captured `auto --format human` execution.
 - On a same-directory rerun, merge non-empty `clarification_answers.md` with `requirement.normalized.txt` into `requirement.clarified.txt`; use that file for source-location evidence and Spec so answers change downstream evidence instead of merely closing questions.
 - Treat impact applicability as `required`, `conditional`, or `excluded`; do not promote generic runtime data, API references, or read-only repositories into specialist profiles without change evidence.
@@ -47,6 +49,7 @@ user requirement
 - Return non-zero when the top-level decision is blocked (`2`) or the runner fails (`3`).
 - Run the source-location Harness after repository evidence and before Spec so stale indexes, missing files, weak anchors, and source-digest drift stop guessed code locations.
 - Run the design Harness after plan review and before docs/Git readiness. Enforce artifact budgets, confirmed modify targets, business process flow, applicable system sequence, architecture integration sequence, and state-machine coverage.
+- Treat default design artifact budgets as a soft governance signal for mild `technical_design.json` overage; require splitting verbose evidence into supplemental artifacts, but do not block the design checkpoint unless policy supplies explicit strict budgets or the artifact exceeds the hard overage threshold.
 - Use the post-implementation Harness to bind actual changed files to delivery-plan scope.
 - Use the pre-push Harness to require accepted post-change, traceability, test, review, project-skill-index, and current-commit evidence.
 - Load defaults from `config/harness-policy.example.yaml`; keep organization/provider policy in a private overlay.

@@ -29,6 +29,7 @@ technical_design + architecture_design
 - Every repository must have one role: `modify`, `read_only`, `confirm_only`, or `out_of_scope`.
 - Only `modify` repositories may be passed to `git-worktree-governor prepare-plan`.
 - Every `modify` repository must include `repo_path` before execution in a real workspace.
+- For registered projects, prefer the local checkout resolved from `${CODEX_HOME:-~/.codex}/skills/company/projects.yaml`; project-understanding `_staging` paths are evidence sources, not editable repository paths.
 - Every `modify` repository should include `tasks`, `allowed_files`, `read_first`, `test_commands`, and `acceptance_evidence`.
 - Every modify task should include files to read/edit, implementation notes, evidence to collect, rollback check, dependencies, blocking conditions, and exit criteria.
 - `allowed_files` and `files_to_edit` should be real file paths from code index, module topology, or explicit human confirmation; do not broaden edit scope with unrelated read-first files.
@@ -37,10 +38,11 @@ technical_design + architecture_design
 - File scope should be narrow enough for `edit-readiness-governor` and `workspace-write-guard`.
 - Include cross-repo order, validation order, release order, rollback order, and open gates.
 - Dependency edges and contract freeze points must reference repositories declared in `repo_tasks`.
+- If technical or architecture design carries a requirement-declared repo map, every declared repo must appear in `repo_tasks`. A missing repo is an unresolved `open_gates` item, not a reason to silently emit a single-repo ready plan.
 - Multiple `modify` repositories must require a cross-repo graph, gated parallel group, or serial group before execution.
 - Do not start implementation while `open_gates` has unresolved items.
 - Do not start Git preparation or edits when `source_design_gate` says requirement understanding is blocked.
-- Treat missing `repo_path`, weak file scope, unresolved dependencies, or unresolved open gates as blockers for implementation readiness.
+- Treat missing `repo_path`, `_staging` modify paths without a resolvable registered checkout, weak file scope, unresolved dependencies, or unresolved open gates as blockers for implementation readiness.
 - Treat incomplete test, rollback, validation, or release evidence planning as warnings until the delivery-plan reviewer upgrades them to blockers.
 
 ## Commands

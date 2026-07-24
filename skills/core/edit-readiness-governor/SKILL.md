@@ -30,6 +30,7 @@ spec/design/plan
 - Delivery docs root and doc manifest are required before editing; the docs root must be a Git repository.
 - Git evidence must come from `git-worktree-governor` and be `decision=ready`.
 - Git evidence must prove the base branch was fetched and updated with `pull --ff-only`.
+- Repo path, Git evidence repo path, and delivery plan modify repo paths must not point to `_staging`; editing must happen in the registered project checkout.
 - Current branch must match the Git evidence branch and must not be `master` or `main`.
 - If a delivery state is provided, it must validate for `implementation`.
 - Standard, large, and migration lanes require design-first evidence before editing.

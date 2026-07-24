@@ -1,8 +1,6 @@
-from pathlib import Path
-
 import importlib.util
 import sys
-
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "core" / "delivery-state-governor" / "scripts" / "delivery_state.py"
 spec = importlib.util.spec_from_file_location("delivery_state", SCRIPT)
@@ -54,6 +52,21 @@ def test_block_and_unblock(tmp_path: Path) -> None:
     unblocked = delivery_state.inspect_state(state_path)
     assert unblocked["status"] == "ready"
     assert unblocked["blockers"] == []
+
+
+def test_blocked_state_cannot_advance_and_clear_blockers(tmp_path: Path) -> None:
+    delivery_state.init_state("REQ-BLOCKED", "small_change", tmp_path)
+    state_path = tmp_path / "delivery_state.json"
+    delivery_state.block_state(state_path, "open question", "answer question")
+
+    advanced = delivery_state.advance_state(state_path, "light_design", "light_design", "design.json")
+    validation = delivery_state.validate_state(state_path, "implementation")
+
+    assert advanced["status"] == "blocked"
+    assert "open question" in advanced["blockers"]
+    assert "light_design" not in advanced["passed_gates"]
+    assert validation["decision"] == "blocked"
+    assert "open question" in validation["blockers"]
 
 
 def test_repo_states_are_recorded_and_block_validation(tmp_path: Path) -> None:
@@ -129,6 +142,7 @@ def run_all() -> None:
         test_bugfix_requires_reproduction_before_implementation,
         test_standard_requirement_reaches_release_ready,
         test_block_and_unblock,
+        test_blocked_state_cannot_advance_and_clear_blockers,
         test_repo_states_are_recorded_and_block_validation,
         test_repo_states_require_declared_git_and_edit_permit_evidence,
         test_release_requires_completed_integration_gates,

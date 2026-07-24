@@ -167,6 +167,14 @@ def inspect_state(path: Path) -> dict[str, Any]:
 
 def advance_state(path: Path, stage: str, gate: str, evidence: str | None) -> dict[str, Any]:
     state = load_state(path)
+    if state.get("status") == "blocked" or state.get("blockers"):
+        state.setdefault("history", []).append(event("advance_rejected", stage=stage, gate=gate, reason="state is blocked"))
+        state["status"] = "blocked"
+        state.setdefault("blockers", []).append("state is blocked; unblock before advancing")
+        state["blockers"] = list(dict.fromkeys(str(item) for item in state.get("blockers", [])))
+        state["next_action"] = state.get("next_action") or "resolve blocker and rerun the blocked gate"
+        write_json(path, state)
+        return state
     required = state.get("required_gates", [])
     if gate not in required:
         state.setdefault("history", []).append(event("warning", message=f"advanced non-required gate: {gate}"))

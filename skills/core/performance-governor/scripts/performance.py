@@ -41,10 +41,11 @@ def design_review(*docs: dict[str, Any]) -> dict[str, Any]:
     if any(term in text for term in ["mq", "queue", "topic", "kafka"]):
         evidence_plan.append({"area": "mq", "evidence_types": ["throughput", "consumer_lag"], "required": True})
         risk = "high"
-    decision = "needs_evidence" if evidence_plan else "pass"
+    decision = "ready" if evidence_plan else "pass"
     return {
         "schema": SCHEMA,
         "decision": decision,
+        "evidence_status": "needs_evidence" if evidence_plan else "no_performance_signal",
         "risk_level": risk,
         "evidence_plan": evidence_plan,
         "blockers": [],
@@ -64,7 +65,7 @@ def main() -> int:
     result = design_review(load_json(Path(args.spec)), load_json(Path(args.technical_design)), load_json(Path(args.architecture_design)))
     write_json(Path(args.out), result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["decision"] == "pass" else 1
+    return 0 if result["decision"] in {"pass", "ready"} else 1
 
 
 if __name__ == "__main__":

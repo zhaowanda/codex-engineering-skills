@@ -210,9 +210,8 @@ def render(doc_id: str, spec: dict[str, Any], registry: dict[str, dict[str, Any]
     freeze_points = contract_freeze_points(nodes, edges)
     gates = integration_gates(nodes, edges)
     groups = topo_groups(nodes, edges)
+    not_applicable = len(repos) < 2
     blockers: list[dict[str, Any]] = []
-    if len(repos) < 2:
-        blockers.append({"source": "repositories", "message": "cross-repo plan requires at least two involved repositories"})
     if registry:
         for repo in repos:
             if repo not in registry:
@@ -239,18 +238,22 @@ def render(doc_id: str, spec: dict[str, Any], registry: dict[str, dict[str, Any]
             }
             for node in nodes
         ],
+        "applicable": not not_applicable,
+        "not_applicable_reason": "single repository requirement; cross-repository execution graph is not required" if not_applicable else "",
         "blockers": blockers,
         "decision": "blocked" if blockers else "ready",
         "generated_at": now(),
     }
     readiness_blockers = list(blockers)
     for node in nodes:
-        if node["role"] == "modify" and not tasks.get(node["repo"]):
+        if not not_applicable and node["role"] == "modify" and not tasks.get(node["repo"]):
             readiness_blockers.append({"source": node["repo"], "message": "modify repository needs a repo delivery task before edit permit"})
     readiness = {
         "schema": READINESS_SCHEMA,
         "doc_id": doc_id,
-        "decision": "blocked" if readiness_blockers else "ready",
+        "applicable": not not_applicable,
+        "decision": "blocked" if readiness_blockers else ("ready" if not not_applicable else "pass"),
+        "not_applicable_reason": "single repository requirement; cross-repository readiness gate is skipped" if not_applicable else "",
         "required_before_parallel_execution": ["canonical spec", "cross repo graph", "repo delivery tasks", "contract freeze points", "per-repo edit permits"],
         "repo_states": graph["repo_tasks"],
         "blockers": readiness_blockers,
@@ -259,7 +262,9 @@ def render(doc_id: str, spec: dict[str, Any], registry: dict[str, dict[str, Any]
     release = {
         "schema": RELEASE_SCHEMA,
         "doc_id": doc_id,
-        "decision": "blocked" if blockers else "ready",
+        "applicable": not not_applicable,
+        "decision": "blocked" if blockers else ("ready" if not not_applicable else "pass"),
+        "not_applicable_reason": "single repository requirement; no cross-repository release order is required" if not_applicable else "",
         "release_order": release_order,
         "rollback_order": list(reversed(release_order)),
         "integration_test_matrix": [
@@ -300,7 +305,8 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
         blockers.append({"source": "schema", "message": f"schema must be {GRAPH_SCHEMA}"})
     repos = graph.get("repositories") if isinstance(graph.get("repositories"), list) else []
     repo_names = {str(item.get("repo")) for item in repos if isinstance(item, dict) and item.get("repo")}
-    if len(repo_names) < 2:
+    applicable = graph.get("applicable") is not False
+    if applicable and len(repo_names) < 2:
         blockers.append({"source": "repositories", "message": "at least two repositories are required"})
     for edge in as_list(graph.get("dependency_edges")):
         if not isinstance(edge, dict):

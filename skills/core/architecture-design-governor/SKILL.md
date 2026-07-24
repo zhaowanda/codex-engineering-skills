@@ -39,6 +39,7 @@ python3 scripts/architecture_design.py \
 - Include at least two architecture options.
 - Explain each architecture option before selecting one; do not place the architecture decision ahead of option detail and comparison.
 - Prefer real repo entrypoints, module paths, routes, and dependency direction from project-understanding artifacts.
+- Preserve `local_project_binding` from technical design and Evidence Bundle. Architecture design must not mix artifacts captured from different repo roots, branches, commits, or project skill overlays.
 - Preserve source-location evidence from technical design and keep modify modules within confirmed anchors.
 - Keep reference-only and rejected candidates out of ownership, deployment, and rollback scope.
 - Fallback architecture phrases such as `existing producer` or `target owner` must remain visible as uncertainty and should not pass expert review.

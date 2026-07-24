@@ -14,8 +14,8 @@ from typing import Any
 def load_workflow_contract() -> Any:
     path = Path(__file__).resolve().parents[2] / "delivery-runner/scripts/workflow_contract.py"
     spec = importlib.util.spec_from_file_location("write_guard_workflow_contract", path)
-    module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -71,6 +71,10 @@ def normalize(rel: str) -> str:
     return rel.strip().replace("\\", "/").lstrip("./")
 
 
+def is_staging_path(path: str | Path) -> bool:
+    return any(part == "_staging" or part.endswith("_staging") for part in Path(path).parts)
+
+
 def changed_files(repo: Path) -> list[str]:
     files: list[str] = []
     for args in (["diff", "--name-only"], ["diff", "--cached", "--name-only"]):
@@ -117,6 +121,10 @@ def verify_permit(repo: Path, permit: dict[str, Any], doc_id: str = "") -> tuple
     if permit.get("decision") != "ready":
         blockers.append("permit decision is not ready")
     permit_repo = str(permit.get("repo") or "")
+    if is_staging_path(repo):
+        blockers.append("repo path points to _staging; writes require the registered project checkout")
+    if permit_repo and is_staging_path(permit_repo):
+        blockers.append("permit repo points to _staging; recreate edit permit for the registered project checkout")
     if permit_repo and str(repo.resolve()) != permit_repo:
         blockers.append("repo does not match permit")
     if doc_id and permit.get("doc_id") and doc_id != permit.get("doc_id"):

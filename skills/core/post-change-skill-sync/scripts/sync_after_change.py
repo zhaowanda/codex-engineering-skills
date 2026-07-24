@@ -264,6 +264,18 @@ def project_skill_index_requirements(artifact_dir: Path, candidates: list[dict[s
                 {"source": "project_skill_index_sync", "message": item.get("message", "invalid waiver")}
                 for item in waiver_validation.get("blockers", [])
             )
+    elif not evidence:
+        evidence = {
+            "schema": "codex-project-skill-index-sync-v1",
+            "doc_id": doc_id,
+            "decision": "not_required",
+            "required": False,
+            "reason": "No reusable project skill/index update candidates were detected from the changed files.",
+            "updated_index_paths": [],
+            "blockers": [],
+        }
+        write_json(evidence_path, evidence)
+        evidence_decision = "not_required"
 
     return {
         "required": required,
@@ -322,6 +334,61 @@ def docs_binding(artifact_dir: Path, docs_root: Path | None, doc_id: str, requir
     }, blockers if require_docs else []
 
 
+def push_readiness_projection(
+    repo: Path,
+    artifact_dir: Path,
+    project_skill_index: dict[str, Any],
+    docs: dict[str, Any],
+    docs_blockers: list[dict[str, str]],
+) -> dict[str, Any]:
+    blockers: list[dict[str, str]] = []
+    required_artifacts = [
+        "post_implementation_traceability_matrix.json",
+        "test_evidence_gate.json",
+        "code_review_gate.json",
+        "harness/post_implementation.json",
+    ]
+    missing_artifacts = [
+        name for name in required_artifacts
+        if not (artifact_dir / name).exists()
+    ]
+    if project_skill_index.get("required") and project_skill_index.get("status") not in {"satisfied", "waived"}:
+        blockers.append({
+            "source": "project_skill_index_sync",
+            "message": "project skill index synchronization is not satisfied",
+        })
+    if docs.get("required") or docs.get("status") in {"blocked", "incomplete"}:
+        for item in docs_blockers:
+            blockers.append({
+                "source": "docs_sync",
+                "message": item.get("message", "delivery docs validation failed"),
+            })
+    if missing_artifacts:
+        blockers.append({
+            "source": "pre_push_evidence",
+            "message": "pre-push evidence is incomplete",
+        })
+    worktree_clean = True
+    if (repo / ".git").exists():
+        code, out, _ = run(["git", "status", "--short"], repo)
+        worktree_clean = code == 0 and not out.strip()
+        if not worktree_clean:
+            blockers.append({
+                "source": "git_binding",
+                "message": "repository has uncommitted changes; test/review evidence cannot be stably bound to the pushed commit yet",
+            })
+    return {
+        "decision": "block" if blockers else "pass",
+        "artifact_dir": str(artifact_dir),
+        "repo": str(repo),
+        "worktree_clean": worktree_clean,
+        "docs_status": str(docs.get("status") or ""),
+        "project_skill_index_status": str(project_skill_index.get("status") or ""),
+        "missing_artifacts": missing_artifacts,
+        "blockers": blockers,
+    }
+
+
 def markdown(report: dict[str, Any]) -> str:
     lines = [
         "# Post Change Implementation Report",
@@ -364,6 +431,22 @@ def markdown(report: dict[str, Any]) -> str:
         waiver = as_dict(index_requirements.get("waiver"))
         if waiver.get("reason"):
             lines.append(f"- Waiver `{waiver.get('waiver_id', '')}`: {waiver['reason']}")
+    push_projection = as_dict(report.get("push_readiness_projection"))
+    if push_projection:
+        lines.extend([
+            "",
+            "## Push Readiness Projection",
+            "",
+            f"- Decision: `{push_projection.get('decision')}`",
+            f"- Worktree clean: `{push_projection.get('worktree_clean')}`",
+            f"- Docs status: `{push_projection.get('docs_status')}`",
+            f"- Project skill index status: `{push_projection.get('project_skill_index_status')}`",
+        ])
+        for item in as_list(push_projection.get("missing_artifacts")):
+            lines.append(f"- Missing artifact: `{item}`")
+        for item in as_list(push_projection.get("blockers")):
+            if isinstance(item, dict):
+                lines.append(f"- Push blocker `{item.get('source', '')}`: {item.get('message', '')}")
     if report.get("diff_stat"):
         lines.extend(["", "## Diff Stat", "", "```text", report["diff_stat"], "```"])
     if report["blockers"]:
@@ -388,6 +471,7 @@ def generate(repo: Path, artifact_dir: Path, doc_id: str = "", docs_root: Path |
     blockers.extend(project_skill_index_blockers)
     docs, docs_blockers = docs_binding(artifact_dir, docs_root, doc_id, require_docs)
     blockers.extend(docs_blockers)
+    push_projection = push_readiness_projection(repo, artifact_dir, project_skill_index, docs, docs_blockers)
     report = {
         "schema": SCHEMA,
         "decision": "block" if blockers else "warn" if warnings else "pass",
@@ -404,6 +488,7 @@ def generate(repo: Path, artifact_dir: Path, doc_id: str = "", docs_root: Path |
         "project_skill_sync_candidates": project_skill_candidates,
         "project_skill_index_requirements": project_skill_index,
         "docs_binding": docs,
+        "push_readiness_projection": push_projection,
         "blockers": blockers,
         "warnings": warnings,
     }
@@ -418,7 +503,7 @@ def validate(data: dict[str, Any]) -> dict[str, Any]:
         blockers.append({"source": "schema", "message": f"schema must be {SCHEMA}"})
     if data.get("decision") not in {"pass", "warn", "block"}:
         blockers.append({"source": "decision", "message": "decision must be pass/warn/block"})
-    for key in ["changed_files", "file_summary", "validation_needs", "baseline_update_candidates", "project_skill_sync_candidates", "project_skill_index_requirements", "docs_binding", "blockers", "warnings"]:
+    for key in ["changed_files", "file_summary", "validation_needs", "baseline_update_candidates", "project_skill_sync_candidates", "project_skill_index_requirements", "docs_binding", "push_readiness_projection", "blockers", "warnings"]:
         if key not in data:
             blockers.append({"source": key, "message": f"{key} is required"})
     if data.get("decision") == "pass" and data.get("blockers"):
@@ -426,6 +511,9 @@ def validate(data: dict[str, Any]) -> dict[str, Any]:
     index_requirements = as_dict(data.get("project_skill_index_requirements"))
     if index_requirements.get("required") and index_requirements.get("status") not in {"satisfied", "waived"}:
         blockers.append({"source": "project_skill_index_requirements", "message": "required project skill index sync must be satisfied or waived"})
+    push_projection = as_dict(data.get("push_readiness_projection"))
+    if not push_projection:
+        blockers.append({"source": "push_readiness_projection", "message": "push_readiness_projection is required"})
     return {"schema": "codex-post-change-implementation-report-validation-v1", "decision": "block" if blockers else "pass", "blockers": blockers}
 
 

@@ -76,6 +76,54 @@ def test_spec_consumes_requirement_ir_without_heading_only_acceptance() -> None:
         assert spec["acceptance_criteria"][0]["criteria"] == "Seek；send one control request；rebuild the player after success"
 
 
+def test_chinese_clarification_sections_feed_spec_state_and_acceptance() -> None:
+    text = """# Clarification Answers
+
+## 业务目标
+
+- 先审批后建单，避免未审批先出账。
+
+## 业务流程
+
+1. 定时任务扫描 30 天内即将到期且满足续费条件的物联网卡。
+2. 系统按批次创建飞书审批实例。
+3. 飞书审批通过后回调本系统，系统创建 IoT 结算单。
+4. 飞书审批拒绝后只更新审批状态，不创建结算单。
+
+## 术语定义
+
+- “自动”：指飞书审批通过回调到达后，由系统立即调用现有 IoT 建单逻辑。
+
+## 业务边界
+
+- 审批通过前不创建结算单。
+- 审批拒绝后不创建结算单。
+
+## 状态迁移规则
+
+- `PENDING_APPROVAL -> APPROVED`：飞书回调审批通过。
+- `PENDING_APPROVAL -> REJECTED`：飞书回调审批拒绝。
+- `APPROVED -> ORDER_CREATED`：审批通过后建单成功。
+- `REJECTED` 为终态，不允许再创建结算单。
+
+## 幂等与补偿
+
+- 审批批次幂等键：`providerCode + rootTenantId + batchDate`。
+- 同一审批实例 ID 只允许回调成功处理一次；重复回调必须返回成功但不重复建单。
+- 若建单失败，记录失败原因并允许页面重试。
+
+## 重试策略
+
+- 页面重试只面向建单失败批次。
+"""
+    ir = ingest_requirement.parse_markdown_ir(text, "REQ-ZH-CLARIFIED", Path("requirement.clarified.txt"))
+    spec = spec_governor.normalize("REQ-ZH-CLARIFIED", "审批后建单", text, requirement_ir=ir)
+    assert "“自动”：指飞书审批通过回调到达后" in ir["executable_text"]
+    assert spec["state_machine"]["ready"] is True
+    assert {item["type"] for item in spec["negative_acceptance_criteria"]} == {"negative"}
+    assert not [item for item in spec["ambiguities"] if item["required"] and "自动" in item["message"]]
+
+
 def test_requirement_ingestor_blocks_pdf_without_text() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -290,6 +338,9 @@ def test_question_governor_answers_required_questions_one_at_a_time_and_persists
     assert "Q-OPTIONAL" not in markdown
     parsed_lines = spec_governor.split_lines(markdown)
     assert spec_governor.extract_open_questions(parsed_lines) == []
+    clarified = spec_governor.normalize("REQ-CLARIFIED", "Playback", markdown)
+    assert clarified["business_intent"]["confidence"] == "high"
+    assert any(item["criteria"] == "Playback resumes after seeking" for item in clarified["acceptance_criteria"])
 
 
 def test_spec_parses_generic_clarification_as_confirmed_requirement() -> None:
@@ -388,10 +439,12 @@ def test_spec_requires_explicit_business_purpose_not_inferred_goal() -> None:
     AC: 给定运营点击导出按钮，系统生成包含订单号和状态的 Excel 文件。
     """
     spec = spec_governor.normalize("REQ-NO-GOAL", "订单导出", text)
-    assert spec["design_allowed"] is False
-    assert spec["requirements_understanding"]["level"] == "clarification_required"
+    assert spec["design_allowed"] is True
+    assert spec["requirements_understanding"]["decision"] == "pass"
+    assert spec["requirements_understanding"]["understanding_confidence"] == "medium"
     categories = {item["category"] for item in spec["ambiguities"]}
     assert "business_goal" in categories
+    assert not any(item["category"] == "business_goal" and item.get("required") is True for item in spec["ambiguities"])
 
 
 def test_spec_blocks_ambiguous_auto_processing_and_unclear_defect() -> None:
@@ -496,6 +549,66 @@ def test_spec_blocks_async_stateful_requirement_without_state_controls() -> None
     assert "state_machine" in categories
 
 
+def test_spec_accepts_markdown_key_blocks_and_negated_mq_for_feishu_approval() -> None:
+    text = """
+    业务目的: 飞书审批通过后再创建物联网卡续费结算单。
+    流程: 系统按批次发起飞书审批实例；飞书将审批结果回调给后端；审批通过后创建结算单；审批拒绝后不建单。
+    入口: 物联网卡即将到期批次进入审批链路。
+    downstream_effect: 页面展示审批状态、失败原因和重试入口；审批通过后在本地生成结算单；审批拒绝后仅保留审批结果不建单。
+    mq_upstream_downstream: 无 MQ 上游；无 MQ 下游；无 topic；无 producer；无 consumer。
+
+    状态:
+    - `APPROVAL_CREATE_PENDING -> PENDING_APPROVAL`
+    - `PENDING_APPROVAL -> APPROVED`
+    - `PENDING_APPROVAL -> REJECTED`
+    - `APPROVED -> ORDER_CREATED`
+
+    invalid_transition_rules:
+    - `REJECTED` 不能转为 `ORDER_CREATED`
+    - 同一审批实例重复回调不能重复建单
+
+    compensation_rule:
+    - 审批创建失败时允许页面重试发起审批
+    - 回调处理失败时允许页面重试处理回调结果
+
+    AC: 审批通过后只创建一次对应批次结算单。
+    AC: 审批拒绝后不创建结算单。
+    """
+
+    spec = spec_governor.normalize("REQ-FEISHU-APPROVAL", "飞书审批能力接入", text)
+
+    assert spec["design_allowed"] is True
+    assert spec["state_machine"]["ready"] is True
+    assert spec["dependency_chain"]["ready"] is True
+    assert "mq_upstream_downstream" not in spec["dependency_chain"]["missing"]
+    assert any("重复回调" in item or "重复建单" in item for item in spec["state_machine"]["idempotency_key"])
+    assert not any(item.get("summary") in {"状态", "规则", "验收标准"} for item in spec["requirements"])
+    assert not any(item.get("rule") in {"状态:", "规则", "验收标准"} for item in spec["business_rules"])
+
+
+def test_spec_infers_invalid_transition_guards_from_negative_constraints() -> None:
+    text = """
+    业务目的: 审批通过后创建结算单，避免重复建单。
+    流程: 系统发起审批；审批通过后创建结算单；审批拒绝后不创建结算单；同一审批实例重复回调不能重复建单。
+    入口: 审批结果回调。
+    状态:
+    - PENDING_APPROVAL -> APPROVED
+    - PENDING_APPROVAL -> REJECTED
+    - APPROVED -> ORDER_CREATED
+    compensation_rule:
+    - 回调处理失败时允许页面重试处理回调结果
+    AC: 审批通过后只创建一次对应批次结算单。
+    AC: 审批拒绝后不创建结算单。
+    """
+
+    spec = spec_governor.normalize("REQ-INFER-INVALID", "审批结算单创建", text)
+
+    assert spec["design_allowed"] is True
+    assert spec["state_machine"]["required"] is True
+    assert "invalid_transition_rules" not in spec["state_machine"]["missing"]
+    assert spec["state_machine"]["invalid_transitions"]
+
+
 def test_spec_uses_project_understanding_evidence_for_current_state() -> None:
     text = """
     业务目的: 减少续费状态不一致导致的人工排查。
@@ -543,12 +656,93 @@ def test_question_governor_generates_categorized_clarification_for_ambiguous_spe
     assert all(item.get("risk_if_unanswered") for item in result["questions"] if item.get("required"))
 
 
+def test_question_governor_filters_placeholder_and_localizes_chinese_questions() -> None:
+    spec = {
+        "doc_id": "REQ-IOT",
+        "title": "物联网卡到期监控",
+        "summary": "物联网卡到期监控、续费结算单、飞书通知",
+        "open_questions": [{"question": "待确认问题", "category": "general"}],
+        "ambiguities": [
+            {"category": "business_flow", "message": "流程不完整", "source": "business_flow", "required": True},
+            {"category": "dependency_chain", "message": "上下游不完整", "source": "dependency_chain", "required": True},
+        ],
+        "requirements_understanding": {},
+    }
+
+    result = question_governor.generate(spec)
+    questions = [item["question"] for item in result["questions"]]
+
+    assert "待确认问题" not in questions
+    assert questions
+    assert all(any("\u4e00" <= char <= "\u9fff" for char in question) for question in questions)
+    validation = question_governor.validate_questions(result, spec)
+    assert validation["decision"] == "block"
+    assert not any(item["message"] == "Chinese requirement generated an English template question" for item in validation["blockers"])
+
+
+def test_question_governor_adds_quality_score_and_blocks_low_quality_required_question() -> None:
+    spec = {"doc_id": "REQ-Q", "title": "物联网卡续费", "requirement_summary": "物联网卡到期续费"}
+    result = question_governor.generate({
+        **spec,
+        "impact_surface": [{"area": "data"}],
+        "impact_applicability": [{"area": "data", "status": "required"}],
+    })
+
+    assert result["questions"]
+    assert all(isinstance(item.get("quality"), dict) for item in result["questions"])
+    assert all("score" in item["quality"] for item in result["questions"])
+
+    low_quality = {
+        "schema": "codex-open-questions-v1",
+        "spec_digest": question_governor.canonical_spec_digest(spec),
+        "questions": [{
+            "id": "Q-BAD",
+            "question": "待确认？",
+            "owner": "product",
+            "required": True,
+            "status": "closed",
+            "answer": "ok",
+            "source": "test",
+            "category": "general",
+            "risk_if_unanswered": "wrong design",
+            "quality": {"score": 20, "actionable": False, "domain_specific": False, "not_template": False, "non_duplicate": True, "answerable_by_owner": True, "has_source": True},
+        }],
+    }
+    validation = question_governor.validate_questions(low_quality, spec)
+
+    assert validation["decision"] == "block"
+    assert any("quality" in item["message"] for item in validation["blockers"])
+
+
 def test_question_governor_asks_from_weak_understanding_dimensions() -> None:
     spec = spec_governor.normalize("REQ-WEAK-SCORE", "订单导出", "Goal: reduce support work.\nReq: Admin exports orders.\nAC: exported file works.")
     result = question_governor.generate(spec)
     assert result["decision"] == "block"
     assert any(item.get("source", "").startswith("requirements_understanding.") for item in result["questions"])
     assert all(item.get("risk_if_unanswered") for item in result["questions"] if item.get("required"))
+
+
+def test_question_governor_keeps_ready_spec_advisories_non_blocking() -> None:
+    spec = {
+        "doc_id": "REQ-READY-WEAK",
+        "decision": "ready_for_design",
+        "design_allowed": True,
+        "requirements_understanding": {
+            "decision": "pass",
+            "design_allowed": True,
+            "scorecard": {"weak_dimensions": ["evidence_score", "dependency_score"]},
+        },
+        "impact_surface": [{"area": "api"}, {"area": "data"}],
+        "impact_applicability": [{"area": "api", "status": "required"}, {"area": "data", "status": "required"}],
+        "acceptance_criteria": [{"id": "AC-1", "criteria": "API returns approved rows", "source_evidence": "input"}],
+        "scope": {"out_of_scope": ["schema migration"]},
+    }
+
+    result = question_governor.generate(spec)
+
+    assert result["questions"]
+    assert result["decision"] == "pass"
+    assert not any(item.get("required") for item in result["questions"])
 
 
 def test_delivery_case_capture_summarizes_artifacts() -> None:
@@ -634,6 +828,7 @@ def run_all() -> None:
     test_spec_uses_project_understanding_evidence_for_current_state()
     test_question_governor_generates_categorized_clarification_for_ambiguous_spec()
     test_question_governor_asks_from_weak_understanding_dimensions()
+    test_question_governor_keeps_ready_spec_advisories_non_blocking()
     test_delivery_case_capture_summarizes_artifacts()
     test_delivery_case_capture_can_emit_anonymized_replay_skeleton()
     test_real_project_replay_requires_privacy_review_and_ground_truth()

@@ -49,6 +49,23 @@ GENERIC_ENTRYPOINT_NAMES = {
     "docker-compose.yml",
 }
 GENERIC_ENTRYPOINT_PARTS = {"assets", "icons", "plugins", "config", "node_modules"}
+DOMAIN_LEAK_TERMS = (
+    "播放器资源",
+    "播放器生命周期",
+    "player resources",
+    "player lifecycle",
+)
+PERSISTENCE_REQUIRED_TERMS = (
+    "审批记录", "审批状态", "审批结果", "实例号", "失败原因", "回调", "建单", "结算单",
+    "批次", "落库", "记录表", "状态机",
+    "approval record", "approval status", "failure reason", "callback", "retry count", "settlement",
+    "idempotency key", "state machine",
+)
+EXTERNAL_PROVIDER_API_PATTERNS = (
+    "/open-apis/",
+    "external_access_token",
+    "provider_access_token",
+)
 REVIEW_AREAS = [
     "requirement_coverage",
     "standalone_readability_review",
@@ -150,12 +167,304 @@ def has_signal(blob: str, terms: tuple[str, ...]) -> bool:
     return any(term in blob for term in terms)
 
 
+def has_any_signal(blob: str, terms: tuple[str, ...]) -> bool:
+    lower = blob.lower()
+    return any(term.lower() in lower or term in blob for term in terms)
+
+
+def is_external_provider_contract(value: str) -> bool:
+    lower = value.lower()
+    return any(pattern in lower for pattern in EXTERNAL_PROVIDER_API_PATTERNS)
+
+
+def strip_non_trigger_explanation(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_non_trigger_explanation(item)
+            for key, item in value.items()
+            if key not in {"not_applicable_reason"}
+        }
+    if isinstance(value, list):
+        return [strip_non_trigger_explanation(item) for item in value]
+    return value
+
+
 def finding(area: str, severity: str, message: str, evidence: Any, suggestion: str) -> dict[str, Any]:
     return {"area": area, "severity": severity, "message": message, "evidence": evidence, "suggestion": suggestion}
 
 
 def normalized_text(value: Any) -> str:
     return re.sub(r"\s+", " ", meaningful_text(value)).strip().lower()
+
+
+def token_set(value: Any) -> set[str]:
+    return {item for item in re.findall(r"[a-z0-9\u4e00-\u9fff]+", normalized_text(value)) if len(item) >= 2}
+
+
+def similarity_ratio(left: Any, right: Any) -> float:
+    left_tokens = token_set(left)
+    right_tokens = token_set(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / max(len(left_tokens), len(right_tokens))
+
+
+def literal_value(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("literal") or item.get("value") or item.get("term") or "")
+    return str(item or "")
+
+
+def literal_mapping_notes(*sources: dict[str, Any]) -> list[dict[str, Any]]:
+    notes: list[dict[str, Any]] = []
+    for source in sources:
+        for key in ("source_literal_mapping_notes", "literal_mappings", "literal_mapping_notes", "status_literal_mappings"):
+            for item in as_list(source.get(key)):
+                if isinstance(item, dict):
+                    notes.append(item)
+    return notes
+
+
+def mapping_covers_variant(literal: str, variant: str, mappings: list[dict[str, Any]]) -> bool:
+    literal_upper = literal.upper()
+    variant_upper = variant.upper()
+    for item in mappings:
+        source_literal = str(item.get("source_literal") or item.get("literal") or item.get("from") or "").upper()
+        variants = [str(value).upper() for value in as_list(item.get("design_variants") or item.get("variants") or item.get("to"))]
+        mapping_rule = str(item.get("mapping_rule") or item.get("rule") or item.get("reason") or item.get("not_same_reason") or "")
+        rule_upper = mapping_rule.upper()
+        if source_literal != literal_upper:
+            continue
+        variant_covered = variant_upper in variants or variant_upper in rule_upper
+        literal_covered = literal_upper in rule_upper or source_literal == literal_upper
+        explicit_boundary = any(term in mapping_rule for term in ("不是同一", "不允许混用", "禁止混用", "不同状态", "different", "not the same", "do not mix", "separate"))
+        if variant_covered and literal_covered and (mapping_rule.strip() or explicit_boundary):
+            return True
+    return False
+
+
+def critical_source_literals(technical: dict[str, Any]) -> list[str]:
+    literals = [literal_value(item).strip() for item in as_list(technical.get("source_literals"))]
+    if not literals:
+        source_blob = text_of({
+            "requirement_trace": technical.get("requirement_trace"),
+            "business_rule_mapping": technical.get("business_rule_mapping"),
+            "acceptance_mapping": technical.get("acceptance_mapping"),
+            "target_behavior": technical.get("target_behavior"),
+        })
+        literals.extend(re.findall(r"/[A-Za-z0-9_./{}:-]+", source_blob))
+        literals.extend(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", source_blob))
+    result: list[str] = []
+    for literal in literals:
+        clean = literal.strip(".,;:，。；：)）]】\"'")
+        if len(clean) >= 3 and clean.lower() not in {"api", "req", "rule"} and clean not in result:
+            result.append(clean)
+    return result[:80]
+
+
+def review_acceptance_literal_guard(technical: dict[str, Any], architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    literals = critical_source_literals(technical)
+    if not literals:
+        return
+    design_blob = text_of({"technical": technical, "architecture": architecture})
+    raw_design_blob = json.dumps({"technical": technical, "architecture": architecture}, ensure_ascii=False)
+    raw_mappings_blob = json.dumps({
+        "requirement_breakdown": technical.get("requirement_breakdown"),
+        "business_rule_mapping": technical.get("business_rule_mapping"),
+        "acceptance_mapping": technical.get("acceptance_mapping"),
+        "api_contracts": technical.get("api_contracts"),
+    }, ensure_ascii=False)
+    explicit_mappings = literal_mapping_notes(technical, architecture)
+    mapped_upper_literals = set(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", raw_mappings_blob.upper()))
+    missing = []
+    drifted = []
+    for literal in literals:
+        low = literal.lower()
+        if low not in design_blob:
+            missing.append(literal)
+            continue
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", literal):
+            related = [match for match in re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", raw_design_blob) if literal in match and match != literal]
+            unmapped_related = [
+                match for match in sorted(set(related))
+                if not mapping_covers_variant(literal, match, explicit_mappings)
+            ]
+            if unmapped_related and literal not in mapped_upper_literals:
+                drifted.append({"source_literal": literal, "design_variants": unmapped_related[:5]})
+    if missing:
+        findings.append(finding(
+            "requirement_coverage",
+            "high",
+            "source requirement literals are not bound in design",
+            missing[:20],
+            "Carry exact enum/status/API/field/time-window literals from source into rule, contract, data, acceptance, or explicit no-impact mappings.",
+        ))
+    if drifted:
+        findings.append(finding(
+            "requirement_coverage",
+            "high",
+            "source literals appear rewritten without an explicit mapping",
+            drifted[:20],
+            "Do not rewrite source enum/status literals such as EXPIRING into derived labels unless the mapping is explicitly justified.",
+        ))
+
+
+def collect_constraint_patterns(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, list[str]]:
+    result = {
+        "forbidden_reuse_paths": [],
+        "forbidden_modules": [],
+        "forbidden_contracts": [],
+        "forbidden_behaviors": [],
+        "out_of_scope_patterns": [],
+    }
+    for source in [technical, architecture]:
+        model = source.get("constraint_model") if isinstance(source.get("constraint_model"), dict) else {}
+        for key in result:
+            values = [*as_list(source.get(key)), *as_list(model.get(key))]
+            for value in values:
+                if isinstance(value, dict):
+                    candidate = value.get("pattern") or value.get("value") or value.get("path") or value.get("contract") or value.get("behavior") or value.get("summary") or value.get("name")
+                else:
+                    candidate = value
+                text = str(candidate or "").strip()
+                if text and text not in result[key]:
+                    result[key].append(text)
+    return result
+
+
+def implementation_surface_for_constraint_review(technical: dict[str, Any], architecture: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "module_decomposition": technical.get("module_decomposition"),
+        "api_contracts": technical.get("api_contracts"),
+        "logical_data_flow": technical.get("logical_data_flow"),
+        "system_interaction_sequence": technical.get("system_interaction_sequence"),
+        "selected_solution": technical.get("selected_solution"),
+        "solution_options": technical.get("solution_options"),
+        "data_design": technical.get("data_design"),
+        "ui_ue_design": technical.get("ui_ue_design"),
+        "module_topology": architecture.get("module_topology"),
+        "repo_responsibilities": architecture.get("repo_responsibilities"),
+        "cross_repo_contracts": architecture.get("cross_repo_contracts"),
+        "integration_sequence": architecture.get("integration_sequence"),
+        "data_flow": architecture.get("data_flow"),
+        "deployment_topology": architecture.get("deployment_topology"),
+        "rollback_strategy": architecture.get("rollback_strategy"),
+        "selected_architecture": architecture.get("selected_architecture"),
+        "architecture_options": architecture.get("architecture_options"),
+    }
+
+
+def review_generic_constraints(technical: dict[str, Any], architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    patterns_by_key = collect_constraint_patterns(technical, architecture)
+    surface_blob = text_of(implementation_surface_for_constraint_review(technical, architecture))
+    violations: list[dict[str, str]] = []
+    for key, patterns in patterns_by_key.items():
+        for pattern in patterns:
+            normalized = normalized_text(pattern)
+            if len(normalized) < 3:
+                continue
+            if normalized in surface_blob:
+                violations.append({"constraint_type": key, "pattern": pattern})
+    if violations:
+        findings.append(finding(
+            "requirement_coverage",
+            "blocker",
+            "implementation-facing design violates requirement-provided forbidden or out-of-scope constraints",
+            violations[:30],
+            "Remove forbidden/out-of-scope modules, paths, contracts, or behaviors from implementation-facing sections, or update the requirement constraint model with explicit approval.",
+        ))
+
+
+def expected_repositories_from_design(technical: dict[str, Any], architecture: dict[str, Any]) -> set[str]:
+    expected: set[str] = set()
+    for source in [technical, architecture]:
+        repo_map_raw = source.get("repo_impact_map")
+        repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+        if not repo_map:
+            gate_raw = source.get("requirements_understanding_gate")
+            gate = gate_raw if isinstance(gate_raw, dict) else {}
+            repo_map_raw = gate.get("repo_impact_map")
+            repo_map = repo_map_raw if isinstance(repo_map_raw, dict) else {}
+        for item in as_list(repo_map.get("repos") if isinstance(repo_map, dict) else []):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                if name:
+                    expected.add(name)
+        scope_raw = source.get("design_scope")
+        scope = scope_raw if isinstance(scope_raw, dict) else {}
+        for item in as_list(scope.get("declared_roles")):
+            if isinstance(item, dict):
+                repo = str(item.get("repo") or item.get("repository") or "").strip()
+                path = str(item.get("path") or "")
+                if repo:
+                    expected.add(repo)
+                elif path.startswith("src/") or path.endswith((".vue", ".tsx", ".jsx")):
+                    continue
+    design_text = text_of({"technical": technical, "architecture": architecture})
+    for repo in re.findall(r"\b[A-Za-z0-9_-]+(?:-platform-fe|-fe|-[Ff]rontend)\b", design_text):
+        expected.add(repo)
+    return expected
+
+
+def review_semantic_hygiene(
+    technical: dict[str, Any],
+    architecture: dict[str, Any],
+    api_contracts: list[Any],
+    data_model_design: dict[str, Any],
+    repo_responsibilities: list[Any],
+    data_excluded: bool,
+    findings: list[dict[str, Any]],
+) -> None:
+    design_text = json.dumps(strip_non_trigger_explanation({"technical": technical, "architecture": architecture}), ensure_ascii=False)
+    leaks = sorted({term for term in DOMAIN_LEAK_TERMS if term.lower() in design_text.lower()})
+    if leaks:
+        findings.append(finding(
+            "technical_design_quality",
+            "blocker",
+            "design contains cross-domain leaked terms",
+            leaks,
+            "Remove stale terms from other requirements and regenerate the affected design/docs artifacts before review.",
+        ))
+
+    persistence_required = has_any_signal(design_text, PERSISTENCE_REQUIRED_TERMS)
+    if persistence_required and (data_excluded or data_model_design.get("applicable") is False):
+        findings.append(finding(
+            "data_model_review",
+            "blocker",
+            "design claims no persistence impact while requirement needs records, states, callbacks, retries, or idempotency",
+            {"data_excluded": data_excluded, "data_model_design": data_model_design},
+            "Generate data-model design with entities, fields, indexes, migration/no-migration evidence, read/write rules, and rollback strategy before review.",
+        ))
+
+    provider_contracts = [
+        item for item in api_contracts
+        if isinstance(item, dict)
+        and is_external_provider_contract(str(item.get("endpoint") or item.get("contract") or ""))
+    ]
+    if provider_contracts:
+        findings.append(finding(
+            "api_contract_review",
+            "blocker",
+            "external provider API is used as a local system API contract",
+            provider_contracts[:10],
+            "Classify provider APIs under external_provider_contracts and bind local controllers/routes separately for implementation and testing.",
+        ))
+
+    expected_repos = expected_repositories_from_design(technical, architecture)
+    planned_repos = {
+        str(item.get("repo") or "").strip()
+        for item in repo_responsibilities
+        if isinstance(item, dict) and str(item.get("repo") or "").strip()
+    }
+    missing_repos = sorted(repo for repo in expected_repos if repo not in planned_repos)
+    if missing_repos:
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "repo responsibilities do not cover all requirement-declared repositories",
+            {"expected": sorted(expected_repos), "planned": sorted(planned_repos), "missing": missing_repos},
+            "Regenerate architecture and delivery planning so every declared owner/consumer/frontend/backend repository is represented with modify/read_only/confirm_only/out_of_scope role.",
+        ))
 
 
 def artifact_digest(data: dict[str, Any]) -> str:
@@ -187,20 +496,42 @@ def review_specialty_artifacts(specialty_artifacts: dict[str, dict[str, Any]], f
         "test_design.json": "testability_review",
     }
     summary: list[dict[str, Any]] = []
-    blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "needs_review", "needs_evidence", "no_go"}
+    blocking_decisions = {"block", "blocked", "fail", "failed", "needs_revision", "no_go"}
+    accepted_decisions = {"", "pass", "ready", "not_applicable", "skipped"}
+    evidence_pending_decisions = {"needs_review", "needs_evidence", "ready_with_advisory", "conditional"}
     for name, artifact in specialty_artifacts.items():
         if not artifact:
             continue
         decision = str(artifact.get("decision") or artifact.get("status") or "")
         blockers = as_list(artifact.get("blockers")) + as_list(artifact.get("active_blockers"))
-        summary.append({"artifact": name, "decision": decision, "blocker_count": len(blockers)})
-        if decision in blocking_decisions or blockers:
+        applicable = artifact.get("applicable")
+        not_applicable = applicable is False or decision == "not_applicable"
+        summary.append({"artifact": name, "decision": decision, "applicable": applicable, "blocker_count": len(blockers)})
+        if not_applicable:
+            continue
+        if blockers or decision in blocking_decisions:
             findings.append(finding(
                 area_by_name.get(name, "technical_design_quality"),
                 "blocker",
                 f"specialty design gate {name} is not approved",
                 {"decision": decision, "blockers": blockers},
                 "Resolve the specialty design findings and regenerate dependent technical, architecture, test, and delivery artifacts.",
+            ))
+        elif decision in evidence_pending_decisions:
+            findings.append(finding(
+                area_by_name.get(name, "technical_design_quality"),
+                "low",
+                f"specialty design gate {name} needs follow-up evidence",
+                {"decision": decision, "blockers": blockers},
+                "Carry the specialty evidence requirement into implementation, test, or release evidence without blocking design approval by itself.",
+            ))
+        elif decision not in accepted_decisions:
+            findings.append(finding(
+                area_by_name.get(name, "technical_design_quality"),
+                "medium",
+                f"specialty design gate {name} has unrecognized non-blocking decision",
+                {"decision": decision, "blockers": blockers},
+                "Normalize the specialty gate decision to pass, ready, not_applicable, needs_evidence, needs_review, or block.",
             ))
     return summary
 
@@ -268,6 +599,76 @@ def review_requirements_understanding_gate(technical: dict[str, Any], architectu
             "requirement understanding gate does not allow implementation",
             gate,
             "Resolve requirement blockers or explicitly record approved business assumptions before implementation planning.",
+        ))
+
+
+def review_local_project_binding(technical: dict[str, Any], architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    technical_binding = technical.get("local_project_binding")
+    if not isinstance(technical_binding, dict):
+        technical_binding = (technical.get("project_context") or {}).get("local_project_binding") if isinstance(technical.get("project_context"), dict) else {}
+    architecture_binding = architecture.get("local_project_binding") if isinstance(architecture.get("local_project_binding"), dict) else {}
+    binding = technical_binding if isinstance(technical_binding, dict) and technical_binding else architecture_binding
+    if not binding:
+        project_context = technical.get("project_context") if isinstance(technical.get("project_context"), dict) else {}
+        source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+        repo_evidence_present = bool(project_context.get("repo_root") or source_locations.get("repo_root"))
+        if repo_evidence_present:
+            findings.append(finding(
+                "architecture_boundary_review",
+                "blocker",
+                "repository-backed design lacks local project binding",
+                {"project_context": project_context, "source_location_repo_root": source_locations.get("repo_root")},
+                "Regenerate source-location evidence and design so local_project_binding records repo root, Git branch/head, and project skill overlay loading.",
+            ))
+        return
+
+    if binding.get("project_skill_required") and not binding.get("project_skill_loaded"):
+        findings.append(finding(
+            "architecture_boundary_review",
+            "blocker",
+            "design did not load the local project skill overlay",
+            binding,
+            "Load the installed company project skill and regenerate source-location evidence before technical or architecture design.",
+        ))
+    git = binding.get("git") if isinstance(binding.get("git"), dict) else {}
+    if binding.get("repo_root") and git.get("status") != "ready":
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "design is not bound to a Git worktree",
+            binding,
+            "Run repository-backed intake from the real local repo and capture Git branch/head before design.",
+        ))
+    if binding.get("repo_root") and not (git.get("branch") and git.get("head")):
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "design lacks current Git branch or HEAD binding",
+            binding,
+            "Regenerate project understanding/source-location evidence so design records the current branch and commit.",
+        ))
+    if technical_binding and architecture_binding and technical_binding != architecture_binding:
+        findings.append(finding(
+            "architecture_boundary_review",
+            "blocker",
+            "technical and architecture design use different local project bindings",
+            {"technical": technical_binding, "architecture": architecture_binding},
+            "Regenerate architecture design from the current technical design and project evidence instead of mixing stale artifacts.",
+        ))
+
+
+def review_architecture_routing_evidence(architecture: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    confidence = architecture.get("architecture_decision_confidence") if isinstance(architecture.get("architecture_decision_confidence"), dict) else {}
+    reducers = as_list(confidence.get("confidence_reducers"))
+    risks = as_list(architecture.get("architecture_risks"))
+    routing_blob = text_of({"confidence_reducers": reducers, "architecture_risks": risks})
+    if "owner repo not yet routed" in routing_blob or "owner repo path is not routed" in routing_blob:
+        findings.append(finding(
+            "repo_responsibility_review",
+            "blocker",
+            "architecture says owner repo path is not routed",
+            {"architecture_decision_confidence": confidence, "architecture_risks": risks},
+            "Do not pass design review until the owner repo path is concrete and matches delivery plan/git evidence.",
         ))
 
 
@@ -362,11 +763,47 @@ def review_integration_sequence_diagram(integration_sequence: list[Any], diagram
         if not isinstance(step, dict):
             findings.append(finding("cross_repo_contract_review", "high", "integration sequence step must be an object", {"index": idx, "value": step}, "Represent architecture integration steps as structured objects."))
             continue
-        missing = missing_required(step, ["step", "actor", "action", "failure_handling"])
+        missing = missing_required(step, ["step", "action", "failure_handling"])
+        if not (step.get("from") or step.get("actor")):
+            missing.append("from")
+        if not (step.get("to") or step.get("target")):
+            missing.append("to")
+        if not (step.get("entrypoint") or step.get("contract")):
+            missing.append("entrypoint_or_contract")
+        if not step.get("data"):
+            missing.append("data")
+        if not step.get("owner_repo"):
+            missing.append("owner_repo")
         if missing:
-            findings.append(finding("cross_repo_contract_review", "high", "integration sequence step lacks required fields", {"index": idx, "missing": missing}, "Complete actor/action/failure_handling for every integration step."))
+            findings.append(finding("cross_repo_contract_review", "high", "integration sequence step lacks required fields", {"index": idx, "missing": missing}, "Add from/to, owner_repo, entrypoint or contract, data, action, and failure_handling."))
         if normalized_text(step.get("action")) not in normalized_diagram:
             findings.append(finding("cross_repo_contract_review", "high", "integration sequence diagram misses a reviewed action", {"index": idx, "action": step.get("action")}, "Keep the Mermaid integration diagram aligned with structured integration actions."))
+
+
+def review_integration_sequence_rewrite(
+    integration_sequence: list[Any],
+    acceptance_mapping: list[Any],
+    requirement_breakdown: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+) -> None:
+    source_texts = [
+        str(item.get("summary") or item.get("criteria") or item.get("design_refs") or "")
+        for item in [*acceptance_mapping, *requirement_breakdown]
+        if isinstance(item, dict)
+    ]
+    for idx, step in enumerate(integration_sequence):
+        if not isinstance(step, dict):
+            continue
+        action = str(step.get("action") or "")
+        weak_shape = not (step.get("entrypoint") and step.get("contract") and step.get("data") and step.get("owner_repo"))
+        if weak_shape and any(similarity_ratio(action, source) >= 0.82 for source in source_texts):
+            findings.append(finding(
+                "cross_repo_contract_review",
+                "high",
+                "integration sequence looks like acceptance criteria rewritten as a sequence step",
+                {"index": idx, "action": action},
+                "Replace AC/BRK prose with an execution step that names from/to, owner repo, entrypoint/contract, data exchanged, and failure handling.",
+            ))
 
 
 def review_module_decomposition(modules: list[Any], findings: list[dict[str, Any]]) -> None:
@@ -597,6 +1034,7 @@ def review(
     architecture: dict[str, Any],
     ui_ue_artifact: dict[str, Any] | None = None,
     specialty_artifacts: dict[str, dict[str, Any]] | None = None,
+    architecture_framing_artifact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     specialty_artifacts = specialty_artifacts or {}
@@ -638,7 +1076,15 @@ def review(
     interface_examples = as_list(technical.get("interface_examples"))
     compatibility_matrix = as_list(technical.get("compatibility_matrix"))
     project_context = technical.get("project_context") if isinstance(technical.get("project_context"), dict) else {}
-    architecture_framing = technical.get("architecture_framing") if isinstance(technical.get("architecture_framing"), dict) else {}
+    architecture_framing = (
+        architecture_framing_artifact
+        if isinstance(architecture_framing_artifact, dict) and architecture_framing_artifact
+        else technical.get("architecture_framing")
+        if isinstance(technical.get("architecture_framing"), dict)
+        else architecture.get("architecture_framing")
+        if isinstance(architecture.get("architecture_framing"), dict)
+        else {}
+    )
     applicability = {
         str(item.get("area", "")).lower(): str(item.get("status", "")).lower()
         for item in as_list(technical.get("impact_applicability"))
@@ -683,6 +1129,8 @@ def review(
     framing_signal = system_signal or data_signal or mq_signal or new_service_signal(technical, architecture)
 
     review_requirements_understanding_gate(technical, architecture, findings)
+    review_local_project_binding(technical, architecture, findings)
+    review_architecture_routing_evidence(architecture, findings)
     if framing_signal:
         if not architecture_framing and not technical.get("architecture_framing_ref") and not architecture.get("architecture_framing_ref"):
             findings.append(finding("architecture_boundary_review", "high", "complex design lacks pre-technical architecture framing", "architecture_framing.json missing", "Generate architecture_framing.json before detailed technical design for API/data/MQ/cross-system/new-service requirements."))
@@ -738,6 +1186,9 @@ def review(
     confidence_level = str(entrypoint_confidence.get("level") or arch_entrypoint_confidence.get("level") or "").lower()
     selected_entrypoint = str(entrypoint_confidence.get("selected_entrypoint") or arch_entrypoint_confidence.get("selected_entrypoint") or "")
     source_locations = technical.get("source_location_evidence") if isinstance(technical.get("source_location_evidence"), dict) else architecture.get("source_location_evidence") if isinstance(architecture.get("source_location_evidence"), dict) else {}
+    technical_binding = technical.get("local_project_binding") if isinstance(technical.get("local_project_binding"), dict) else {}
+    architecture_binding = architecture.get("local_project_binding") if isinstance(architecture.get("local_project_binding"), dict) else {}
+    repository_backed_design = bool(project_context.get("repo_root") or source_locations.get("repo_root") or technical_binding or architecture_binding)
     if source_locations:
         confirmed_paths = {
             str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
@@ -779,10 +1230,21 @@ def review(
         findings.append(finding("technical_design_quality", "medium", "design still contains placeholders", "placeholder detected", "Replace placeholders with concrete decisions."))
     if has_generic_phrase(technical) or has_generic_phrase(architecture):
         findings.append(finding("technical_design_quality", "high", "design contains generic template phrasing", "generic phrase detected", "Replace template phrases with real project files, contracts, owners, and behavior."))
+    review_semantic_hygiene(
+        technical,
+        architecture,
+        api_contracts,
+        data_model_design,
+        repo_responsibilities,
+        data_excluded,
+        findings,
+    )
     if not business_rules:
         findings.append(finding("technical_design_quality", "high", "business rules are not mapped to technical enforcement", "business_rule_mapping empty", "Map each business rule to API/service/query/frontend/export enforcement."))
     elif any(isinstance(item, dict) and not (item.get("technical_enforcement") and item.get("source_of_truth")) for item in business_rules):
         findings.append(finding("technical_design_quality", "high", "business rule mapping lacks enforcement or source of truth", business_rules, "Each rule needs technical_enforcement and source_of_truth."))
+    review_acceptance_literal_guard(technical, architecture, findings)
+    review_generic_constraints(technical, architecture, findings)
 
     review_process_flow(process_flow, findings)
     review_process_flow_diagram(process_flow, process_flow_diagram, findings)
@@ -791,7 +1253,7 @@ def review(
         findings.append(finding("technical_design_quality", "high", "business process flow is too shallow for the mapped acceptance scope", {"process_steps": process_step_count, "acceptance_mappings": len(as_list(technical.get("acceptance_mapping")))}, "Model the ordered trigger, business actions, downstream effects, success state, and failure branches before implementation."))
     review_module_decomposition(modules, findings)
     for idx, item in enumerate(modules):
-        if isinstance(item, dict) and item.get("module") and not looks_like_path(str(item.get("module"))):
+        if isinstance(item, dict) and item.get("module") and not looks_like_path(str(item.get("module"))) and item.get("planned_new_module") is not True:
             findings.append(finding("cohesion_coupling_review", "medium", "module reference is not file-level", {"index": idx, "module": item.get("module")}, "Prefer concrete file/module paths from code index for implementation-facing design."))
 
     if not logical_data_flow:
@@ -809,6 +1271,25 @@ def review(
             missing = missing_required(item, ["compatibility", "old_consumer_impact"])
             if missing:
                 findings.append(finding("api_contract_review", "high", "API contract lacks compatibility fields", {"index": idx, "missing": missing}, "Add compatibility and old_consumer_impact."))
+            contract_text = str(item.get("contract") or item.get("endpoint") or "")
+            if contract_text and is_external_provider_contract(contract_text):
+                continue
+            if contract_text and "no api impact confirmed" not in contract_text.lower() and not (item.get("source_evidence") or item.get("controller_file") or item.get("frontend_proxy_path")):
+                findings.append(finding("api_contract_review", "high", "API contract lacks source binding evidence", {"index": idx, "contract": contract_text}, "Bind every concrete API contract to api_surface/source_location evidence, controller file, or frontend proxy path."))
+            if contract_text and contract_text.strip() in {"/list", "/paging", "/page"} and not item.get("source_evidence"):
+                findings.append(finding("api_contract_review", "high", "API contract appears guessed from a generic list/page route", {"index": idx, "contract": contract_text}, "Replace guessed generic endpoints with confirmed routes from source evidence."))
+    confirmed_contracts = {
+        str(contract).split(" (", 1)[0].strip()
+        for contract in as_list(source_locations.get("confirmed_contracts") if isinstance(source_locations, dict) else [])
+        if str(contract).strip()
+    }
+    if confirmed_contracts:
+        for idx, item in enumerate(api_contracts):
+            if not isinstance(item, dict):
+                continue
+            endpoint = str(item.get("endpoint") or item.get("contract") or "").split(" (", 1)[0].strip()
+            if endpoint.startswith("/") and not is_external_provider_contract(endpoint) and endpoint not in confirmed_contracts:
+                findings.append(finding("api_contract_review", "high", "API contract is not in confirmed source contracts", {"index": idx, "endpoint": endpoint, "confirmed_contracts": sorted(confirmed_contracts)}, "Use only confirmed_contracts from source location evidence or regenerate source evidence."))
     if api_contracts and not interface_examples and not api_excluded:
         findings.append(finding("api_contract_review", "medium", "API/interface examples are missing", "interface_examples empty", "Add request/response/error examples or an explicit no-example reason."))
     if "api" in text_of(technical) and not api_contracts:
@@ -979,6 +1460,8 @@ def review(
     for idx, item in enumerate(repo_responsibilities):
         if isinstance(item, dict) and item.get("role") == "modify" and not (item.get("responsibility") or item.get("owner_task")):
             findings.append(finding("repo_responsibility_review", "blocker", "modify repo lacks responsibility", {"index": idx, "repo": item.get("repo")}, "Add concrete owner responsibility."))
+        if repository_backed_design and isinstance(item, dict) and item.get("role") == "modify" and not str(item.get("repo_path") or "").strip():
+            findings.append(finding("repo_responsibility_review", "blocker", "modify repo lacks concrete repo_path", {"index": idx, "repo": item.get("repo")}, "Bind every modify repo to the actual local repository path before delivery planning or implementation."))
 
     if not cross_contracts:
         findings.append(finding("cross_repo_contract_review", "high", "cross-repo contracts are missing or not explicitly waived", "cross_repo_contracts empty", "Declare contracts or explicitly state no cross-repo contract."))
@@ -1004,6 +1487,7 @@ def review(
         findings.append(finding("cross_repo_contract_review", "high", "integration sequence is missing", "integration_sequence empty", "Describe actor/action/contract/failure handling in execution order."))
     else:
         review_integration_sequence_diagram(integration_sequence, integration_sequence_diagram, findings)
+        review_integration_sequence_rewrite(integration_sequence, acceptance_mapping, requirement_breakdown, findings)
     if not failure_isolation:
         findings.append(finding("architecture_depth_review", "medium", "failure isolation design is missing", "failure_isolation empty", "Describe dependency failures, isolation behavior, and user impact."))
     if not rollback:
@@ -1038,14 +1522,44 @@ def review(
         decision = "pass"
 
     grouped = {area: [item for item in findings if item["area"] == area] for area in REVIEW_AREAS}
+    diagram_checks = {
+        "process_flow_diagram": {
+            "required": bool(process_flow),
+            "present": bool(str(process_flow_diagram or "").strip()),
+        },
+        "system_sequence_diagram": {
+            "required": bool(isinstance(system_interaction_sequence, dict) and system_interaction_sequence.get("applicable") is True),
+            "present": bool(str(system_sequence_diagram or "").strip()),
+        },
+        "integration_sequence_diagram": {
+            "required": bool(integration_sequence),
+            "present": bool(str(integration_sequence_diagram or "").strip()),
+        },
+    }
+    source_location_checks = {
+        "provided": bool(source_locations),
+        "decision": source_locations.get("decision", "") if isinstance(source_locations, dict) else "",
+        "confirmed_modify_count": len([
+            item for item in as_list(source_locations.get("confirmed_anchors") if isinstance(source_locations, dict) else [])
+            if isinstance(item, dict) and item.get("role", "modify_candidate") != "reference_only"
+        ]),
+        "selected_entrypoint": selected_entrypoint,
+        "selected_entrypoint_confirmed": bool(selected_entrypoint and source_locations and selected_entrypoint in {
+            str(item.get("path")) for item in as_list(source_locations.get("confirmed_anchors"))
+            if isinstance(item, dict) and item.get("path") and item.get("role", "modify_candidate") != "reference_only"
+        }),
+    }
     return {
         "schema": "codex-design-architecture-review-v1",
         "input_digests": {
             "technical_design.json": artifact_digest(technical),
             "architecture_design.json": artifact_digest(architecture),
+            **({"architecture_framing.json": artifact_digest(architecture_framing)} if architecture_framing else {}),
             **{name: artifact_digest(data) for name, data in specialty_artifacts.items() if data},
         },
         "specialty_review_summary": specialty_summary,
+        "diagram_checks": diagram_checks,
+        "source_location_checks": source_location_checks,
         "score": score_card["score"],
         "level": score_card["level"],
         "severity_counts": score_card["severity_counts"],
@@ -1067,7 +1581,7 @@ def review(
 
 
 def validate(data: dict[str, Any]) -> tuple[bool, list[str]]:
-    required = ["schema", "score", "level", "severity_counts", "readiness_gate", "open_questions", "solution_tradeoff_review", "blockers", "decision", *REVIEW_AREAS]
+    required = ["schema", "score", "level", "severity_counts", "readiness_gate", "open_questions", "solution_tradeoff_review", "blockers", "decision", "diagram_checks", "source_location_checks", *REVIEW_AREAS]
     issues = [f"missing {key}" for key in required if key not in data]
     if data.get("schema") != "codex-design-architecture-review-v1":
         issues.append("schema must be codex-design-architecture-review-v1")
@@ -1075,6 +1589,11 @@ def validate(data: dict[str, Any]) -> tuple[bool, list[str]]:
         issues.append("decision must be pass/needs_revision/block")
     if data.get("decision") == "pass" and data.get("blockers"):
         issues.append("pass is not allowed with blockers")
+    if data.get("decision") == "pass":
+        if not isinstance(data.get("diagram_checks"), dict) or not data["diagram_checks"]:
+            issues.append("pass requires non-empty diagram_checks")
+        if not isinstance(data.get("source_location_checks"), dict):
+            issues.append("pass requires source_location_checks")
     if not isinstance(data.get("score"), int) or not (0 <= data.get("score", -1) <= 100):
         issues.append("score must be integer 0-100")
     if data.get("level") not in {"expert_ready", "reviewable", "needs_revision", "block"}:
@@ -1100,6 +1619,7 @@ def main() -> int:
     p_review = sub.add_parser("review")
     p_review.add_argument("--technical-design", required=True)
     p_review.add_argument("--architecture-design", required=True)
+    p_review.add_argument("--architecture-framing")
     p_review.add_argument("--ui-ue-design")
     p_review.add_argument("--ui-ue-review")
     p_review.add_argument("--api-contract-design")
@@ -1132,6 +1652,7 @@ def main() -> int:
             read_json(args.architecture_design),
             read_json(args.ui_ue_design) if args.ui_ue_design else None,
             {name: read_json(path) for name, path in specialty_paths.items() if path},
+            read_json(args.architecture_framing) if args.architecture_framing else None,
         )
         if args.out:
             Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

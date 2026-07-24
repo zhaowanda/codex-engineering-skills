@@ -75,6 +75,11 @@ AMBIGUOUS_TERMS = {
     "related": "ambiguous_scope",
     "default": "ambiguous_rule",
 }
+AMBIGUOUS_TERM_IGNORE_CONTEXTS = {
+    "处理": ("暂不处理", "不处理", "无需处理"),
+    "同步": ("同步到", "同步后的", "当前同步到", "已同步到", "同步标准"),
+    "默认": ("默认展示", "默认说明", "默认口径"),
+}
 WEAK_ACCEPTANCE_TERMS = {
     "功能正常",
     "页面展示正确",
@@ -87,6 +92,7 @@ WEAK_ACCEPTANCE_TERMS = {
     "works",
     "as expected",
 }
+TEMPLATE_LEAK_TERMS = {"需求标题", "requirement title"}
 EMPTY_ENUM_PATTERNS = [
     re.compile(r"(至少包括|include at least)[:：]\s*$", re.I),
 ]
@@ -130,7 +136,7 @@ def is_section_heading(line: str) -> bool:
     if re.match(r"^#{1,6}\s+", stripped):
         return True
     compact = stripped.strip("# \t")
-    return bool(re.match(r"^(范围|可执行需求|需求|验收标准|非范围|非目标|业务规则|背景|说明|acceptance criteria|acceptance|requirements?|scope|out of scope|business rules?)$", compact, re.I))
+    return bool(re.match(r"^(范围|可执行需求|需求|验收标准|非范围|非目标|业务规则|背景|说明|业务目标|当前痛点|预期业务结果|业务流程|业务边界|明确入口|明确改动目标|状态机|状态迁移规则|幂等与补偿|重试策略|约定|acceptance criteria|acceptance|requirements?|scope|out of scope|business rules?)$", compact, re.I))
 
 
 def section_title(line: str) -> str:
@@ -232,7 +238,7 @@ def extract_acceptance(lines: list[str], raw_text: str = "", requirement_ir: dic
                 "source_evidence": "input",
             })
     structured = ir_acceptance_items(requirement_ir)
-    section_items = [item[0] for item in structured] if structured else collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance"))
+    section_items = [item[0] for item in structured] if structured else collect_section_items(raw_text, ("验收标准", "acceptance criteria", "acceptance", "预期业务结果", "业务边界"))
     evidence_by_criteria = {item[0]: item[1] for item in structured}
     for criteria in section_items:
         if criteria and criteria not in {str(item.get("criteria")) for item in result}:
@@ -272,7 +278,7 @@ def extract_requirements(lines: list[str], raw_text: str = "", requirement_ir: d
             result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(summary), "source_evidence": evidence_by_summary.get(summary, "input section: requirements")})
     if not result:
         for idx, line in enumerate(lines, start=1):
-            if skip_pattern.match(line) or "?" in line or "？" in line:
+            if is_section_heading(line) or skip_pattern.match(line) or "?" in line or "？" in line:
                 continue
             result.append({"id": f"REQ-{len(result) + 1}", "summary": normalize_requirement_text(line), "source_evidence": f"input line {idx}"})
             if len(result) >= 3:
@@ -283,6 +289,8 @@ def extract_requirements(lines: list[str], raw_text: str = "", requirement_ir: d
 def extract_rules(lines: list[str]) -> list[dict[str, str]]:
     rules: list[dict[str, str]] = []
     for line in lines:
+        if is_section_heading(line):
+            continue
         lower = line.lower()
         if any(term in lower for term in ["must", "should", "rule", "when", "if ", "only", "can", "allow", "不能", "必须", "规则", "如果", "当", "允许", "可以"]):
             rules.append({"id": f"BR-{len(rules) + 1}", "rule": line, "source_evidence": "input"})
@@ -336,16 +344,24 @@ def extract_operations(text: str) -> list[dict[str, Any]]:
 def extract_state_transitions(lines: list[str]) -> list[dict[str, str]]:
     transitions: list[dict[str, str]] = []
     patterns = [
-        re.compile(r"from\s+(.+?)\s+to\s+(.+)", re.I),
-        re.compile(r"状态\s*从\s*(.+?)\s*(?:到|变为)\s*(.+)"),
-        re.compile(r"state\s*[:：]\s*(.+?)\s*->\s*(.+)", re.I),
-        re.compile(r"状态\s*[:：]\s*(.+?)\s*->\s*(.+)"),
+        re.compile(r"^`?([^`|]+?)`?\s*(?:->|→)\s*`?([^`|]+?)`?$"),
+        re.compile(r"^`?([^`|]+?)`?\s*(?:from|状态从)\s*`?([^`|]+?)`?\s*(?:to|到|变为)\s*`?([^`|]+?)`?$", re.I),
     ]
     for line in lines:
+        if not line or line in {"状态规则", "状态转移表", "状态流转", "状态说明"}:
+            continue
+        if "|" in line:
+            parts = [part.strip(" `。；;") for part in line.split("|")]
+            if len(parts) >= 3 and parts[0] and parts[2] and not parts[0].startswith("状态"):
+                transitions.append({"from": parts[0], "to": parts[2], "source_evidence": line})
+                continue
         for pattern in patterns:
             match = pattern.search(line)
             if match:
-                transitions.append({"from": match.group(1).strip(), "to": match.group(2).strip(), "source_evidence": line})
+                if pattern.groups == 3:
+                    transitions.append({"from": match.group(2).strip(" `。；;"), "to": match.group(3).strip(" `。；;"), "source_evidence": line})
+                else:
+                    transitions.append({"from": match.group(1).strip(" `。；;"), "to": match.group(2).strip(" `。；;"), "source_evidence": line})
                 break
     return transitions
 
@@ -470,7 +486,7 @@ def expert_readiness_gaps(
 
 def is_negative(text: str) -> bool:
     lower = text.lower()
-    return any(token in lower for token in ["cannot", "must not", "should not", "deny", "forbid", "unauthorized", "non-admin", "不能", "不得", "禁止", "无权限", "非管理员"])
+    return any(token in lower for token in ["cannot", "must not", "should not", "deny", "forbid", "unauthorized", "non-admin", "不能", "不得", "禁止", "无权限", "非管理员", "不创建", "不重复", "不允许"])
 
 
 def evidence_for_text(text: str) -> list[str]:
@@ -536,8 +552,10 @@ def extract_user_scenarios(lines: list[str], actors: list[str]) -> list[dict[str
     return scenarios
 
 
-def extract_business_objectives(lines: list[str]) -> list[dict[str, str]]:
+def extract_business_objectives(lines: list[str], raw_text: str = "") -> list[dict[str, str]]:
     objectives = extract_prefixed(lines, ("objective", "goal", "业务目标", "目标"))
+    if not objectives and raw_text:
+        objectives = collect_section_items(raw_text, ("业务目标", "预期业务结果"))
     if objectives:
         return [{"id": f"BO-{idx + 1}", "objective": item, "source_evidence": "input"} for idx, item in enumerate(objectives)]
     return []
@@ -611,7 +629,9 @@ def business_goal_quality(intent: dict[str, Any], success_metrics: list[dict[str
     }
     score = sum(weight for key, weight in weights.items() if checks[key])
     missing = [key for key, passed in checks.items() if not passed]
-    blocking_missing = [key for key in missing if key not in {"measurable_metric"}]
+    blocking_missing = [key for key in missing if key not in {"measurable_metric", "explicit_goal"}]
+    if not checks["explicit_goal"] and not (checks["target_user"] and checks["testable_outcome"] and checks["flow_bound"]):
+        blocking_missing.append("explicit_goal")
     return {
         "score": score,
         "threshold": 80,
@@ -805,6 +825,7 @@ def structured_flow_step(flow_text: str, actor: str, entrypoint: str, step: int)
 def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[str, Any]], project_items: list[dict[str, Any]] | None = None) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     lower = text.lower()
+    mq_negated = bool(re.search(r"(无|不引入|不新增|not\s+use|no)\s*(mq|topic|queue|消息)", lower, flags=re.I))
 
     def add(kind: str, trigger: str, evidence: str, confidence: str = "medium") -> None:
         key = (kind, trigger)
@@ -823,7 +844,7 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
         add("frontend_operation", "user triggers UI operation", "inferred from UI terms")
     if any(term in lower or term in text for term in ["api", "接口", "endpoint", "route"]):
         add("backend_api", "caller invokes API endpoint", "inferred from API terms")
-    if any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "订阅消息", "message consumer"]):
+    if not mq_negated and any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "订阅消息", "message consumer"]):
         add("mq_consumer", "consumer receives message", "inferred from MQ terms")
     if any(term in lower or term in text for term in ["定时", "cron", "scheduled", "scheduler", "job"]):
         add("scheduled_job", "scheduled task fires", "inferred from schedule terms")
@@ -848,17 +869,21 @@ def extract_entrypoints(text: str, lines: list[str], impact_surface: list[dict[s
     return entries
 
 
-def extract_business_flow(lines: list[str], actors: list[str], entrypoints: list[dict[str, str]], acceptance: list[dict[str, Any]], summary: str) -> list[dict[str, Any]]:
+def extract_business_flow(lines: list[str], actors: list[str], entrypoints: list[dict[str, str]], acceptance: list[dict[str, Any]], summary: str, raw_text: str = "") -> list[dict[str, Any]]:
     flow_items = extract_prefixed(lines, ("business flow", "flow", "流程", "业务流程", "scenario", "场景"))
+    if not flow_items and raw_text:
+        flow_items = collect_section_items(raw_text, ("业务流程",))
     if flow_items:
         result = []
         for idx, item in enumerate(flow_items):
             actor = actors[0] if actors else "actor to confirm"
-            entrypoint = entrypoints[0].get("trigger", item) if entrypoints else item
+            entrypoint = entrypoints[0].get("trigger", "") if entrypoints else ""
+            if not entrypoint:
+                entrypoint = f"business flow step {idx + 1}"
             result.append({
                 "step": idx + 1,
                 "actor": actor,
-                "trigger": item,
+                "trigger": entrypoint,
                 "system_behavior": item,
                 "expected_outcome": item,
                 "structured_step": structured_flow_step(item, actor, entrypoint, idx + 1),
@@ -1019,10 +1044,29 @@ def business_closure_model(
 def state_machine_model(lines: list[str], text: str, transitions: list[dict[str, str]], project_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     lower = text.lower()
     retry_policy = extract_prefixed(lines, ("retry", "retry policy", "重试", "重试策略"))
-    idempotency = extract_prefixed(lines, ("idempotency", "idempotency key", "幂等", "幂等键"))
-    compensation = extract_prefixed(lines, ("compensation", "compensation rule", "补偿", "补偿规则"))
+    idempotency = extract_prefixed(lines, ("idempotency", "idempotency key", "idempotency_key", "幂等", "幂等键"))
+    compensation = extract_prefixed(lines, ("compensation", "compensation rule", "compensation_rule", "补偿", "补偿规则"))
     timeout = extract_prefixed(lines, ("timeout", "超时", "超时规则"))
-    invalid_transitions = extract_prefixed(lines, ("invalid transition", "非法流转", "禁止流转"))
+    invalid_transitions = extract_prefixed(lines, ("invalid transition", "invalid transitions", "invalid_transition_rules", "非法流转", "禁止流转"))
+    if not retry_policy:
+        retry_policy = collect_section_items(text, ("重试策略",))
+    if not idempotency:
+        idempotency = [item for item in collect_section_items(text, ("幂等与补偿",)) if "幂等" in item or "重复" in item]
+    if not idempotency:
+        idempotency = [line.strip(" -") for line in lines if any(term in line for term in ["幂等", "重复", "同一审批实例重复回调", "不能重复建单"])]
+    if not compensation:
+        compensation = collect_section_items(text, ("幂等与补偿",))
+    if not invalid_transitions:
+        invalid_transitions = [line.strip(" -") for line in lines if any(term in line for term in ["不允许", "禁止"]) and any(token in line for token in ["状态", "终态", "建单"])]
+    if not invalid_transitions:
+        invalid_transitions = [
+            line.strip(" -")
+            for line in lines
+            if (
+                any(term in line.lower() or term in line for term in ["cannot", "must not", "should not", "forbid", "不能", "不得", "禁止", "不允许", "不创建", "只创建一次", "不能重复"])
+                and any(token in line.lower() or token in line for token in ["state", "status", "transition", "callback", "create", "order", "审批", "状态", "流转", "回调", "建单", "重复"])
+            )
+        ]
     mq_context = any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"])
     requires_state_model = bool(transitions or retry_policy or idempotency or compensation or timeout or invalid_transitions) or mq_context or any(term in lower or term in text for term in [
         "状态流转", "状态从", "状态变更", "状态更新", "异步", "幂等", "补偿", "超时", "idempot", "compensation", "timeout",
@@ -1083,7 +1127,7 @@ def state_machine_model(lines: list[str], text: str, transitions: list[dict[str,
 
 
 def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[str, str]], repo_impact: dict[str, Any], project_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    dependencies = extract_prefixed(lines, ("dependency", "depends on", "upstream", "downstream", "caller", "consumer", "producer", "依赖", "上游", "下游", "调用方", "消费方", "生产方"))
+    dependencies = extract_prefixed(lines, ("dependency", "depends on", "upstream", "downstream", "mq_upstream_downstream", "caller", "consumer", "producer", "依赖", "上游", "下游", "调用方", "消费方", "生产方"))
     chain: list[dict[str, Any]] = []
     for item in dependencies:
         parts = [part.strip() for part in re.split(r"\s*(?:->|→)\s*", item) if part.strip()]
@@ -1093,7 +1137,10 @@ def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[s
         else:
             chain.append({"order": len(chain) + 1, "dependency": item, "source_evidence": "input"})
     lower = text.lower()
-    requires_chain = bool(chain) or bool(repo_impact.get("multi_repo_required")) or any(term in lower or term in text for term in ["调用", "上下游", "mq", "consumer", "topic", "api", "接口", "多系统"])
+    mq_negated = bool(re.search(r"(无|不引入|不新增|not\s+use|no)\s*(mq|topic|queue|消息)", lower, flags=re.I))
+    requires_chain = bool(chain) or bool(repo_impact.get("multi_repo_required")) or any(
+        term in lower or term in text for term in ["上下游", "consumer", "producer", "topic", "queue", "消息", "依赖"]
+    ) or (not mq_negated and "mq" in lower)
     if not chain:
         for entry in entrypoints:
             if isinstance(entry, dict) and entry.get("confidence") == "high":
@@ -1104,7 +1151,7 @@ def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[s
     missing = []
     if requires_chain and len(chain) < 2 and bool(repo_impact.get("multi_repo_required")):
         missing.append("multi_repo_dependency_order")
-    if requires_chain and any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"]) and not any("mq" in item["dependency"].lower() or "topic" in item["dependency"].lower() or "消息" in item["dependency"] for item in chain):
+    if requires_chain and not mq_negated and any(term in lower or term in text for term in ["mq", "topic", "queue", "消息", "消费消息", "message consumer"]) and not any("mq" in item["dependency"].lower() or "topic" in item["dependency"].lower() or "消息" in item["dependency"] for item in chain):
         missing.append("mq_upstream_downstream")
     return {"required": requires_chain, "chain": chain, "missing": missing, "ready": not missing}
 
@@ -1140,10 +1187,11 @@ def runtime_dependency_graph(dependency_chain: dict[str, Any], closure: dict[str
         for item in project_items:
             if item.get("kind") in {"api_route", "mq_consumer", "mq_topic", "dependency", "repo"}:
                 add_node(str(item.get("name") or ""), str(item.get("kind") or ""), str(item.get("source_evidence") or "project_evidence"))
+    required = bool(as_list(dependency_chain.get("chain")))
     return {
         "nodes": nodes,
         "edges": edges,
-        "ready": bool(nodes) and all(edge.get("degree") and edge.get("source_evidence") for edge in edges),
+        "ready": (not required) or (bool(nodes) and all(edge.get("degree") and edge.get("source_evidence") for edge in edges)),
     }
 
 
@@ -1222,14 +1270,37 @@ def detect_ambiguities(
         })
 
     for term, category in AMBIGUOUS_TERMS.items():
-        present = bool(re.search(rf"\b{re.escape(term)}\b", text, re.I)) if term.isascii() else term in text
+        present = False
+        for line in split_lines(text):
+            if term.isascii():
+                if not re.search(rf"\b{re.escape(term)}\b", line, re.I):
+                    continue
+            elif term not in line:
+                continue
+            if any(context in line for context in AMBIGUOUS_TERM_IGNORE_CONTEXTS.get(term, ())):
+                continue
+            present = True
+            break
         if present:
             required = not ambiguous_term_context_resolved(term, category, acceptance, intent, business_flow, entrypoints)
+            if term == "自动" and any(marker in text for marker in ["“自动”：指", "\"自动\":", "自动”指", "自动：指"]):
+                required = False
             add("ambiguous_term", category, f"Requirement uses ambiguous term '{term}' and needs concrete business meaning.", required)
     if not str(intent.get("intent") or "").strip():
         add("business_intent", "business_goal", "Business intent is missing; cannot tell what outcome the requirement optimizes.")
     elif intent.get("confidence") != "high":
-        add("business_intent", "business_goal", "Business intent is inferred; the real purpose, current pain point, and expected business outcome must be confirmed.")
+        inferred_goal_is_blocking = not (
+            any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict))
+            and bool(business_flow)
+            and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict))
+            and any(isinstance(item, dict) and not weak_acceptance_reason(str(item.get("criteria") or "")) for item in acceptance)
+        )
+        add(
+            "business_intent",
+            "business_goal",
+            "Business intent is inferred; the real purpose, current pain point, and expected business outcome should be confirmed.",
+            inferred_goal_is_blocking,
+        )
     if not business_flow:
         add("business_flow", "business_flow", "Business flow is missing; actor, trigger, system behavior, and outcome are unclear.")
     for issue in flow_quality_issues(business_flow):
@@ -1237,7 +1308,13 @@ def detect_ambiguities(
     if not entrypoints:
         add("entrypoints", "actor_entrypoint", "Entry point is missing; trigger could be frontend, API, MQ consumer, scheduled job, or manual task.")
     elif not any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict)):
-        add("entrypoints", "actor_entrypoint", "Entry point is inferred; concrete frontend action, API, scheduled task, MQ consumer, manual task, or external callback must be confirmed.")
+        has_usable_business_flow = bool(business_flow) and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict))
+        has_executable_acceptance = any(
+            isinstance(item, dict) and not weak_acceptance_reason(str(item.get("criteria") or ""))
+            for item in acceptance
+        )
+        if not (has_usable_business_flow and has_executable_acceptance):
+            add("entrypoints", "actor_entrypoint", "Entry point is inferred; concrete frontend action, API, scheduled task, MQ consumer, manual task, or external callback must be confirmed.")
     for item in acceptance:
         if not isinstance(item, dict):
             continue
@@ -1409,12 +1486,27 @@ def classify_data(text: str) -> dict[str, Any]:
 
 def extract_prefixed(lines: list[str], prefixes: tuple[str, ...]) -> list[str]:
     ordered = sorted(prefixes, key=len, reverse=True)
-    pattern = re.compile(rf"^({'|'.join(re.escape(item) for item in ordered)})(?:[:：\s-]+)(.+)$", re.I)
+    prefix_pattern = "|".join(re.escape(item) for item in ordered)
+    pattern = re.compile(rf"^({prefix_pattern})(?:[:：\s-]+)(.*)$", re.I)
+    any_prefix = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]*[:：]\s*$|^[\u4e00-\u9fffA-Za-z0-9_ -]{2,30}[:：]\s*$")
     result: list[str] = []
+    active_block = False
     for line in lines:
         match = pattern.match(line)
         if match:
-            result.append(match.group(2).strip())
+            value = match.group(2).strip()
+            if value:
+                result.append(value)
+                active_block = False
+            else:
+                active_block = True
+            continue
+        if active_block:
+            if pattern.match(line) or is_section_heading(line) or any_prefix.match(line):
+                active_block = False
+                continue
+            if line:
+                result.append(line.strip())
     return result
 
 
@@ -1450,7 +1542,7 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     operations = extract_operations(text)
     state_transitions = extract_state_transitions(lines)
     personas = extract_personas(sorted(set(actors)))
-    objectives = extract_business_objectives(lines)
+    objectives = extract_business_objectives(lines, text)
     if not objectives:
         objectives = [
             {"id": f"BO-{idx + 1}", "objective": value, "source_evidence": evidence}
@@ -1464,7 +1556,14 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     if explicit_intents:
         intent = {"intent": explicit_intents[0]["intent"], "source_evidence": "input", "confidence": "high", "inference": "explicit_business_intent"}
     entrypoints = extract_entrypoints(text, lines, impact_surface, project_items)
-    business_flow = extract_business_flow(lines, sorted(set(actors)), entrypoints, acceptance, summary)
+    business_flow = extract_business_flow(lines, sorted(set(actors)), entrypoints, acceptance, summary, text)
+    if business_flow and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict)):
+        if not any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict)):
+            for item in entrypoints:
+                if item.get("type") == "business_operation" and item.get("confidence") != "high":
+                    item["confidence"] = "high"
+                    item["source_evidence"] = "derived from confirmed business flow"
+                    break
     current_business_state = extract_current_business_state(text, lines, entrypoints, impact_surface, project_items)
     closure_model = business_closure_model(entrypoints, business_flow, impact_surface, current_state_evidence, project_items)
     state_model = state_machine_model(lines, text, state_transitions, project_items)
@@ -1579,6 +1678,17 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
     }
 
 
+def walk_spec_values(value: Any, path: str = "") -> list[tuple[str, Any]]:
+    rows = [(path, value)]
+    if isinstance(value, dict):
+        for key, child in value.items():
+            rows.extend(walk_spec_values(child, f"{path}.{key}" if path else str(key)))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            rows.extend(walk_spec_values(child, f"{path}[{index}]"))
+    return rows
+
+
 def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -1593,6 +1703,17 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
         blockers.append({"source": "requirements", "message": "at least one requirement is required"})
     if not as_list(spec.get("acceptance_criteria")):
         blockers.append({"source": "acceptance_criteria", "message": "acceptance criteria are required"})
+    for key in ["requirement_summary", "business_problem", "expected_business_outcome"]:
+        value = str(spec.get(key) or "").strip()
+        if value and any(term.lower() in value.lower() for term in TEMPLATE_LEAK_TERMS):
+            blockers.append({"source": key, "message": "template heading text is not a valid requirement summary or business fact", "value": value})
+    semantic_leaks: list[str] = []
+    for path, value in walk_spec_values(spec):
+        if isinstance(value, str) and any(term.lower() in value.lower() for term in TEMPLATE_LEAK_TERMS):
+            if not path.endswith(("source_text", "raw_text", "text", "source_lines")):
+                semantic_leaks.append(path)
+    if semantic_leaks:
+        blockers.append({"source": "semantic_quality", "message": "template heading text leaked into semantic fields", "fields": semantic_leaks[:20], "count": len(semantic_leaks)})
     scope = spec.get("scope") if isinstance(spec.get("scope"), dict) else {}
     if not as_list(scope.get("in_scope")):
         blockers.append({"source": "scope.in_scope", "message": "in_scope is required"})
@@ -1718,8 +1839,8 @@ def evidence_match(value: str, requirement_text: str) -> dict[str, Any]:
         hits = sorted(token for token in tokens if token in lower_value)
         return {"score": min(100, 60 + 5 * len(hits)), "match_reason": f"matched requirement tokens: {', '.join(hits[:5])}"}
     domain_equivalents = {
-        "续费": ("renew", "renewal", "recalculate", "requote"),
-        "续期": ("renew", "renewal"),
+        "生命周期": ("lifecycle", "renew", "renewal", "expired"),
+        "重新计算": ("recalculate", "requote"),
         "订单": ("order", "orders"),
         "支付": ("payment", "pay"),
         "状态": ("status", "state"),
