@@ -75,6 +75,11 @@ AMBIGUOUS_TERMS = {
     "related": "ambiguous_scope",
     "default": "ambiguous_rule",
 }
+AMBIGUOUS_TERM_IGNORE_CONTEXTS = {
+    "处理": ("暂不处理", "不处理", "无需处理"),
+    "同步": ("同步到", "同步后的", "当前同步到", "已同步到", "同步标准"),
+    "默认": ("默认展示", "默认说明", "默认口径"),
+}
 WEAK_ACCEPTANCE_TERMS = {
     "功能正常",
     "页面展示正确",
@@ -339,17 +344,24 @@ def extract_operations(text: str) -> list[dict[str, Any]]:
 def extract_state_transitions(lines: list[str]) -> list[dict[str, str]]:
     transitions: list[dict[str, str]] = []
     patterns = [
-        re.compile(r"from\s+(.+?)\s+to\s+(.+)", re.I),
-        re.compile(r"状态\s*从\s*(.+?)\s*(?:到|变为)\s*(.+)"),
-        re.compile(r"state\s*[:：]\s*(.+?)\s*->\s*(.+)", re.I),
-        re.compile(r"状态\s*[:：]\s*(.+?)\s*->\s*(.+)"),
-        re.compile(r"`?([A-Z][A-Z0-9_]+)`?\s*->\s*`?([A-Z][A-Z0-9_]+)`?"),
+        re.compile(r"^`?([^`|]+?)`?\s*(?:->|→)\s*`?([^`|]+?)`?$"),
+        re.compile(r"^`?([^`|]+?)`?\s*(?:from|状态从)\s*`?([^`|]+?)`?\s*(?:to|到|变为)\s*`?([^`|]+?)`?$", re.I),
     ]
     for line in lines:
+        if not line or line in {"状态规则", "状态转移表", "状态流转", "状态说明"}:
+            continue
+        if "|" in line:
+            parts = [part.strip(" `。；;") for part in line.split("|")]
+            if len(parts) >= 3 and parts[0] and parts[2] and not parts[0].startswith("状态"):
+                transitions.append({"from": parts[0], "to": parts[2], "source_evidence": line})
+                continue
         for pattern in patterns:
             match = pattern.search(line)
             if match:
-                transitions.append({"from": match.group(1).strip(), "to": match.group(2).strip(), "source_evidence": line})
+                if pattern.groups == 3:
+                    transitions.append({"from": match.group(2).strip(" `。；;"), "to": match.group(3).strip(" `。；;"), "source_evidence": line})
+                else:
+                    transitions.append({"from": match.group(1).strip(" `。；;"), "to": match.group(2).strip(" `。；;"), "source_evidence": line})
                 break
     return transitions
 
@@ -1126,7 +1138,9 @@ def dependency_chain_model(lines: list[str], text: str, entrypoints: list[dict[s
             chain.append({"order": len(chain) + 1, "dependency": item, "source_evidence": "input"})
     lower = text.lower()
     mq_negated = bool(re.search(r"(无|不引入|不新增|not\s+use|no)\s*(mq|topic|queue|消息)", lower, flags=re.I))
-    requires_chain = bool(chain) or bool(repo_impact.get("multi_repo_required")) or any(term in lower or term in text for term in ["调用", "上下游", "consumer", "api", "接口", "多系统"]) or (not mq_negated and any(term in lower for term in ["mq", "topic", "queue"]))
+    requires_chain = bool(chain) or bool(repo_impact.get("multi_repo_required")) or any(
+        term in lower or term in text for term in ["上下游", "consumer", "producer", "topic", "queue", "消息", "依赖"]
+    ) or (not mq_negated and "mq" in lower)
     if not chain:
         for entry in entrypoints:
             if isinstance(entry, dict) and entry.get("confidence") == "high":
@@ -1173,10 +1187,11 @@ def runtime_dependency_graph(dependency_chain: dict[str, Any], closure: dict[str
         for item in project_items:
             if item.get("kind") in {"api_route", "mq_consumer", "mq_topic", "dependency", "repo"}:
                 add_node(str(item.get("name") or ""), str(item.get("kind") or ""), str(item.get("source_evidence") or "project_evidence"))
+    required = bool(as_list(dependency_chain.get("chain")))
     return {
         "nodes": nodes,
         "edges": edges,
-        "ready": bool(nodes) and all(edge.get("degree") and edge.get("source_evidence") for edge in edges),
+        "ready": (not required) or (bool(nodes) and all(edge.get("degree") and edge.get("source_evidence") for edge in edges)),
     }
 
 
@@ -1255,7 +1270,17 @@ def detect_ambiguities(
         })
 
     for term, category in AMBIGUOUS_TERMS.items():
-        present = bool(re.search(rf"\b{re.escape(term)}\b", text, re.I)) if term.isascii() else term in text
+        present = False
+        for line in split_lines(text):
+            if term.isascii():
+                if not re.search(rf"\b{re.escape(term)}\b", line, re.I):
+                    continue
+            elif term not in line:
+                continue
+            if any(context in line for context in AMBIGUOUS_TERM_IGNORE_CONTEXTS.get(term, ())):
+                continue
+            present = True
+            break
         if present:
             required = not ambiguous_term_context_resolved(term, category, acceptance, intent, business_flow, entrypoints)
             if term == "自动" and any(marker in text for marker in ["“自动”：指", "\"自动\":", "自动”指", "自动：指"]):
@@ -1283,7 +1308,13 @@ def detect_ambiguities(
     if not entrypoints:
         add("entrypoints", "actor_entrypoint", "Entry point is missing; trigger could be frontend, API, MQ consumer, scheduled job, or manual task.")
     elif not any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict)):
-        add("entrypoints", "actor_entrypoint", "Entry point is inferred; concrete frontend action, API, scheduled task, MQ consumer, manual task, or external callback must be confirmed.")
+        has_usable_business_flow = bool(business_flow) and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict))
+        has_executable_acceptance = any(
+            isinstance(item, dict) and not weak_acceptance_reason(str(item.get("criteria") or ""))
+            for item in acceptance
+        )
+        if not (has_usable_business_flow and has_executable_acceptance):
+            add("entrypoints", "actor_entrypoint", "Entry point is inferred; concrete frontend action, API, scheduled task, MQ consumer, manual task, or external callback must be confirmed.")
     for item in acceptance:
         if not isinstance(item, dict):
             continue
@@ -1526,6 +1557,13 @@ def normalize(doc_id: str, title: str, text: str, project_evidence: dict[str, An
         intent = {"intent": explicit_intents[0]["intent"], "source_evidence": "input", "confidence": "high", "inference": "explicit_business_intent"}
     entrypoints = extract_entrypoints(text, lines, impact_surface, project_items)
     business_flow = extract_business_flow(lines, sorted(set(actors)), entrypoints, acceptance, summary, text)
+    if business_flow and all(item.get("confidence") == "high" for item in business_flow if isinstance(item, dict)):
+        if not any(item.get("confidence") == "high" for item in entrypoints if isinstance(item, dict)):
+            for item in entrypoints:
+                if item.get("type") == "business_operation" and item.get("confidence") != "high":
+                    item["confidence"] = "high"
+                    item["source_evidence"] = "derived from confirmed business flow"
+                    break
     current_business_state = extract_current_business_state(text, lines, entrypoints, impact_surface, project_items)
     closure_model = business_closure_model(entrypoints, business_flow, impact_surface, current_state_evidence, project_items)
     state_model = state_machine_model(lines, text, state_transitions, project_items)

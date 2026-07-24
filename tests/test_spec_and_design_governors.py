@@ -403,6 +403,64 @@ def test_spec_extracts_state_transitions() -> None:
     assert "completed" in spec["state_transitions"][0]["to"]
 
 
+def test_spec_extracts_chinese_state_transitions_without_meta_false_positives() -> None:
+    text = """
+    业务目标：双摄设备升级包维护与批量下发。
+    业务流程：运营按设备型号选择升级包后批量下发。
+    说明：当前同步到 1 条验收标准。
+    评审备注：暂不处理旧版本兼容分支。
+    状态流转：
+    - 待下发 -> 命令已下发
+    - 命令已下发 -> 升级中
+    - 升级中 -> 成功
+    invalid_transition_rules:
+    - 成功不能重新下发升级命令
+    compensation_rule:
+    - 设备离线时保留等待原因，恢复在线后继续下发。
+    AC: 待下发、升级中、等待条件、成功状态可被清晰识别。
+    """
+    spec = spec_governor.normalize("REQ-STATE-ZH", "Dual camera upgrade", text)
+    assert spec["state_transitions"]
+    assert spec["state_machine"]["ready"] is True
+    assert spec["requirements_understanding"]["decision"] == "pass"
+    assert not [item for item in spec["ambiguities"] if item.get("required")]
+
+
+def test_dual_camera_upgrade_requirement_is_not_blocked_by_generic_meta_terms() -> None:
+    text = """
+    业务目的：减少人工逐台下发和人工核对版本，避免 AT603 与 AT603D 升级包错发，并让批量升级结果可追踪、可通知。
+    流程：运营人员先选择设备型号，再选择该型号下的一个历史版本软件包，然后选择设备并下发升级。
+    入口：批量升级入口。
+    需求：
+    - 双摄设备存在两种型号：AT603、AT603D。
+    - 两种设备型号对应的软件升级包不一致，升级包维护和升级下发时必须按设备型号区分。
+    - 升级任务持续到设备升级成功为止；不满足前置条件的设备进入等待状态，满足前置条件后恢复升级下发。
+    - 升级成功判断标准：查询 deviceAttribute 命令返回结果中的 VERSION，VERSION 必须等于指定升级文件中的版本号。
+    状态迁移规则：
+    - 待下发 -> 命令已下发
+    - 命令已下发 -> 升级中
+    - 升级中 -> 成功
+    - 升级中 -> 等待条件
+    - 等待条件 -> 命令已下发
+    补偿规则：
+    - 设备离线时保留等待原因，恢复在线后继续下发。
+    - 运营人员可以人工终止无法继续推进的设备升级任务。
+    无效流转：
+    - 成功状态不能重新下发升级命令。
+    - 失败状态不能直接变为成功。
+    - 等待条件状态不能直接跳转为成功。
+    - 升级中状态不能直接跳转为等待条件以外的其他状态。
+    AC: 待下发、升级中、等待条件、成功状态可被清晰识别。
+    """
+    spec = spec_governor.normalize("REQ-DUAL-CAMERA", "双摄设备升级软件包维护与批量下发模块", text)
+    assert spec["decision"] == "ready_for_design"
+    assert spec["design_allowed"] is True
+    assert spec["requirements_understanding"]["decision"] == "pass"
+    assert spec["state_machine"]["ready"] is True
+    assert spec["dependency_chain"]["ready"] is True
+    assert not [item for item in spec["ambiguities"] if item.get("required")]
+
+
 def test_technical_and_architecture_design_render_core_sections() -> None:
     spec = spec_governor.normalize(
         "REQ-3",
