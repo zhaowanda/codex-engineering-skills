@@ -91,6 +91,10 @@ def default_out(doc_id: str) -> Path:
     return Path("/tmp/codex-auto") / doc_id
 
 
+def canonical_docs_artifact_dir(docs_root: Path, doc_id: str) -> Path:
+    return (docs_root / "deliveries" / doc_id / "artifacts").resolve()
+
+
 def sanitize_unmatched_local_path(value: str) -> str:
     if value.startswith(("/private/var/", "/var/folders/", "/tmp/")):
         return "<tmp>"
@@ -1824,9 +1828,12 @@ def run(
     effective_doc_language = infer_doc_language(input_text, doc_language)
     doc_id = doc_id or default_doc_id(input_path)
     title = title or default_title(input_path)
-    out = (out or default_out(doc_id)).resolve()
-    out.mkdir(parents=True, exist_ok=True)
     effective_docs_root = docs_root.resolve() if docs_root else default_docs_root()
+    if docs_root:
+        out = canonical_docs_artifact_dir(docs_root.resolve(), doc_id)
+    else:
+        out = (out or default_out(doc_id)).resolve()
+    out.mkdir(parents=True, exist_ok=True)
     docs_status = docs_readiness(effective_docs_root, doc_id, out)
     resolved_repo, resolved_project, project_binding = resolve_project_binding(input_text, repo, project)
     if resolved_repo:
@@ -2409,6 +2416,21 @@ def run(
     )
 
     finalize_runtime_lineage(out)
+    effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
+    docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
+    if docs_sync.get("decision") == "pass":
+        docs_status = docs_readiness(effective_docs_root, doc_id, out)
+    docs_quality = run_docs_quality(effective_docs_root, docs_sync, out)
+    if (out / "docs_quality.json").exists():
+        WORKFLOW_CONTRACT.bind_lineage(
+            out / "docs_quality.json",
+            "docs_quality",
+            workflow_stage_inputs(out / "docs_quality.json"),
+            command=["docs_quality", str(effective_docs_root or "")],
+            workspace=ROOT,
+        )
+        generated.append("docs_quality.json")
+
     design_blockers = design_phase_blockers(out, steps)
     if design_blockers:
         strictness = workflow_strictness(spec_data, selected_profile, profile_selection_reason.get("profile_selection_confidence", ""))
@@ -2442,8 +2464,8 @@ def run(
             "required_gates": required_gate_artifact_names(selected_profile),
             "source_location_readiness": location_status,
             "docs_readiness": docs_status,
-            "docs_sync": not_applicable_gate("codex-docs-governor-sync-v1", "design-stage blockers prevent docs sync in this run", "docs_sync"),
-            "docs_quality": not_applicable_gate("codex-docs-quality-aggregate-v1", "docs quality review is skipped until design-stage blockers are resolved", "docs_quality"),
+            "docs_sync": docs_sync,
+            "docs_quality": docs_quality,
             "doc_language": effective_doc_language,
             "readiness_blockers": [],
             "missing_profile_artifacts": [],
@@ -2472,21 +2494,6 @@ def run(
         }
         write_json(out / "auto_run_summary.json", summary)
         return summary
-
-    effective_doc_language = infer_artifact_doc_language(out, doc_language, effective_doc_language)
-    docs_sync = sync_docs_artifacts(effective_docs_root, doc_id, title, out, effective_doc_language)
-    if docs_sync.get("decision") == "pass":
-        docs_status = docs_readiness(effective_docs_root, doc_id, out)
-    docs_quality = run_docs_quality(effective_docs_root, docs_sync, out)
-    if (out / "docs_quality.json").exists():
-        WORKFLOW_CONTRACT.bind_lineage(
-            out / "docs_quality.json",
-            "docs_quality",
-            workflow_stage_inputs(out / "docs_quality.json"),
-            command=["docs_quality", str(effective_docs_root or "")],
-            workspace=ROOT,
-        )
-        generated.append("docs_quality.json")
 
     delivery_status = out / "delivery_status.json"
     inspect_command = [
