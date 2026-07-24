@@ -117,6 +117,26 @@ def test_auto_runner_resolves_related_backend_project_from_registry() -> None:
     assert binding["resolution_mode"] == "registry_related_repo"
     assert binding["project_skill_loaded"] is True
     assert binding["project_registry_path"].endswith("projects.yaml")
+    assert binding["candidates"]
+    assert binding["candidates"][0]["project"] == "sigreal-operate-platform"
+
+
+def test_auto_runner_does_not_route_frontend_to_ubi_when_direct_backend_dep_exists() -> None:
+    text = """
+    业务目的：减少人工逐台下发和人工核对版本，避免 AT603 与 AT603D 升级包错发，并让批量升级结果可追踪、可通知。
+    流程：运营人员先选择设备型号，再选择该型号下的一个历史版本软件包，然后选择设备并下发升级。
+    入口：批量升级入口。
+    需求：
+    - 双摄设备存在两种型号：AT603、AT603D。
+    - 两种设备型号对应的软件升级包不一致，升级包维护和升级下发时必须按设备型号区分。
+    - 升级任务持续到设备升级成功为止；不满足前置条件的设备进入等待状态，满足前置条件后恢复升级下发。
+    - 升级成功判断标准：查询 deviceAttribute 命令返回结果中的 VERSION，VERSION 必须等于指定升级文件中的版本号。
+    """
+    frontend_repo = Path("/Users/zhaowanli/hl-workspace/operate-platform-fe")
+    _, project, binding = auto_runner.resolve_project_binding(text, repo=frontend_repo, project="operate-platform-fe")
+    assert project == "sigreal-operate-platform"
+    assert binding["resolution_mode"] == "registry_related_repo"
+    assert binding["candidates"][0]["project"] == "sigreal-operate-platform"
 
 
 def test_harness_validation_blocks_reference_only_edit_target() -> None:

@@ -560,34 +560,42 @@ def resolve_project_binding(
     if project:
         current = registry.get(project, {})
         current_type = str(current.get("type") or "")
-        backend_bias = sum(1 for term in ["历史", "重试", "回调", "通知", "结算", "软件包", "升级包", "VERSION", "deviceattribute", "task", "retry", "callback", "database", "history", "status"] if term.lower() in input_text.lower())
-        frontend_bias = sum(1 for term in ["页面", "按钮", "表单", "菜单", "route", "button", "page", "dialog", "browser"] if term.lower() in input_text.lower())
-        if current_type == "frontend" and backend_bias > frontend_bias:
-            for dep in as_list(current.get("dependencies")):
+        if current_type == "frontend":
+            for dep_index, dep in enumerate(as_list(current.get("dependencies"))):
                 dep_name = str(dep)
                 dep_item = registry.get(dep_name, {})
                 if str(dep_item.get("type") or "") != "backend":
                     continue
                 checkout = project_checkout_path(dep_name, dep_item)
-                score = project_signal_score(input_text, dep_item) + project_reference_score(input_text, dep_name)
+                signal_score = project_signal_score(input_text, dep_item)
+                reference_score = project_reference_score(input_text, dep_name)
                 candidates.append({
                     "project": dep_name,
                     "repo_root": str(checkout),
-                    "score": score,
+                    "score": reference_score + signal_score,
+                    "reference_score": reference_score,
+                    "signal_score": signal_score,
+                    "dependency_index": dep_index,
                     "repo_type": str(dep_item.get("type") or ""),
                     "local_path_hint": str((dep_item.get("repo") or {}).get("local_path_hint") or ""),
                     "skill": str(dep_item.get("skill") or dep_name),
                 })
-            candidates.sort(key=lambda item: (item["score"], item["project"]), reverse=True)
+            candidates.sort(
+                key=lambda item: (
+                    -int(item.get("reference_score") or 0),
+                    -int(item.get("signal_score") or 0),
+                    int(item.get("dependency_index") or 0),
+                    item["project"],
+                ),
+            )
             best = candidates[0] if candidates else {}
-            second = int(candidates[1]["score"]) if len(candidates) > 1 else 0
-            if best and int(best.get("score") or 0) >= 12 and int(best.get("score") or 0) >= second:
+            if best and (int(best.get("reference_score") or 0) > 0 or int(best.get("signal_score") or 0) >= 10):
                 candidate_repo = Path(str(best.get("repo_root") or ""))
                 if candidate_repo.exists():
                     selected_project = str(best["project"])
                     selected_repo = candidate_repo
                     resolution_mode = "registry_related_repo"
-                    resolution_reason = f"current project {project} is frontend but requirement signals backend-owned history/state/retry flow"
+                    resolution_reason = f"current project {project} is frontend and the requirement maps to a direct backend dependency"
 
     binding = {
         "repo_root": str(selected_repo) if selected_repo else str(repo or ""),
